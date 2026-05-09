@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Media Sorter</string>
+    <string name="search_hint">Search by name or tag…</string>
+    <string name="no_preview">Format not supported for preview</string>
+    <string name="tag_hint">New tag name…</string>
+    <string name="cache_cleared">Cache cleared</string>
+    <string name="cache_limit">Cache limit (MB)</string>
+    <string name="folder_added">Folder added</string>
+    <string name="folder_removed">Folder removed</string>
+</resources>
