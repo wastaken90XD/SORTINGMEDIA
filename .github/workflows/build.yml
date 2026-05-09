@@ -19,10 +19,10 @@ jobs:
       - name: Accept Android licenses
         run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: Install Gradle 7.5
+      - name: Install Gradle 7.4
         uses: gradle/gradle-build-action@v2
         with:
-          gradle-version: '7.5'
+          gradle-version: '7.4'
           cache-disabled: true
 
       - name: Build release APK
