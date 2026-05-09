@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="72dp"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:padding="6dp"
+    android:background="?android:attr/selectableItemBackground">
+
+    <ImageView
+        android:id="@+id/thumbnail"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:scaleType="centerCrop"
+        android:background="#222233"
+        android:layout_marginEnd="10dp"/>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/fileName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:singleLine="true"
+            android:ellipsize="middle"/>
+
+        <TextView
+            android:id="@+id/fileDetails"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#888888"
+            android:textSize="11sp"
+            android:layout_marginTop="2dp"/>
+
+        <TextView
+            android:id="@+id/fileTags"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#E94560"
+            android:textSize="10sp"
+            android:layout_marginTop="2dp"
+            android:singleLine="true"
+            android:ellipsize="end"/>
+
+    </LinearLayout>
+
+</LinearLayout>
