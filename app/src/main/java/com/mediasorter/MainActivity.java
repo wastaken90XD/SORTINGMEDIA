@@ -107,8 +107,9 @@ public class MainActivity extends Activity
         tagList.setAdapter(tagAdapter);
 
         // Preview panel
-        View previewPanel = findViewById(R.id.previewPanel);
-        previewManager = new PreviewManager(this, previewPanel);
+        FrameLayout previewContainer = findViewById(R.id.previewPanel);
+        View previewPanel = getLayoutInflater().inflate(R.layout.panel_preview, previewContainer, true);
+        previewManager = new PreviewManager(this, previewContainer);
 
         // Search bar
         searchBar = findViewById(R.id.searchBar);
