@@ -271,7 +271,7 @@ public class DashboardActivity extends Activity {
         TextView tv = new TextView(this);
         tv.setText(text);
         tv.setTextColor(0xFFE94560);
-        tv.setTextSize(16sp);
+        tv.setTextSize(16f);
         tv.setTypeface(null, android.graphics.Typeface.BOLD);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
