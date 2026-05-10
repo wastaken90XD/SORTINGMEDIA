@@ -64,7 +64,6 @@ public class ThumbnailLoader {
         switch (file.getType()) {
             case IMAGE:  return generateImage(file.getPath());
             case VIDEO:  return generateVideo(file.getPath());
-            case AUDIO:  return null; // no thumbnail for audio
             default:     return null;
         }
     }
