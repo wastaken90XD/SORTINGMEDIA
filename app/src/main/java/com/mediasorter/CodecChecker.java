@@ -13,7 +13,6 @@ public class CodecChecker {
         switch (type) {
             case IMAGE:  return checkImage(name);
             case VIDEO:  return checkVideo(name);
-            case AUDIO:  return checkAudio(name);
             default:     return Support.NONE;
         }
     }
