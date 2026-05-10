@@ -176,27 +176,30 @@ public class MainActivity extends Activity
     // ── File selection ────────────────────────────────────────────────────────
 
     private void onFileSelected(MediaFile file) {
-        previewManager.load(file);
-        tagAdapter.setCurrentFile(file);
-        tagAdapter.setTags(tagManager.getAllTags());
+        currentIndex = currentFiles.indexOf(file);
+        if (currentIndex < 0) {
+        currentFiles.add(file);
+        currentIndex = currentFiles.size() - 1;
     }
+    previewManager.load(file);
+    tagAdapter.setCurrentFile(file);
+    tagAdapter.setTags(tagManager.getAllTags());
+    quickTagPanel.setCurrentFile(file, tagManager.getAllTags());
+}
+
 
     // ── Tag toggling ──────────────────────────────────────────────────────────
 
-    private void onTagToggled(String tagName, boolean applied) {
-        // Get currently selected file from adapter
-        // Tag toggle applies to currently previewed file
-        List<MediaFile> files = indexer.getIndex();
-        for (MediaFile f : files) {
-            if (f.getPath().equals(mediaAdapter.getSelectedPath())) {
-                if (applied) tagManager.applyTag(f, tagName);
-                else         tagManager.removeTag(f, tagName);
-                tagAdapter.setTags(tagManager.getAllTags());
-                mediaAdapter.updateFile(f);
-                break;
-            }
-        }
-    }
+   private void onTagToggled(String tagName, boolean applied) {
+      if (currentIndex < 0 || currentIndex >= currentFiles.size()) return;
+      MediaFile file = currentFiles.get(currentIndex);
+      if (applied) tagManager.applyTag(file, tagName);
+      else         tagManager.removeTag(file, tagName);
+      tagAdapter.setCurrentFile(file);
+      tagAdapter.setTags(tagManager.getAllTags());
+      mediaAdapter.updateFile(file);
+      updateProgress();
+}
 
     // ── Search ────────────────────────────────────────────────────────────────
 
@@ -286,14 +289,18 @@ public class MainActivity extends Activity
         mainHandler.post(() -> mediaAdapter.addFile(file));
     }
 
-    @Override
-    public void onScanComplete(List<MediaFile> allFiles) {
+     @Override
+     public void onScanComplete(List<MediaFile> allFiles) {
         mainHandler.post(() -> {
             searchManager.setFullList(allFiles);
             applyGrouping();
-        });
-    }
-
+        // Restore selection if possible
+        if (currentIndex >= currentFiles.size()) {
+            currentIndex = currentFiles.isEmpty() ? -1 : 0;
+        }
+    });
+}
+                
     @Override
     public void onFileChanged(MediaFile file) {
         mainHandler.post(() -> mediaAdapter.updateFile(file));
