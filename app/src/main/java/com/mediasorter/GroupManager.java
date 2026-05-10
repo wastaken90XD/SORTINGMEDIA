@@ -69,14 +69,12 @@ public class GroupManager {
     private List<Group> groupByType(List<MediaFile> files) {
         Group images  = new Group("Images",  Group.GroupBy.FILE_TYPE);
         Group videos  = new Group("Videos",  Group.GroupBy.FILE_TYPE);
-        Group audio   = new Group("Audio",   Group.GroupBy.FILE_TYPE);
         Group other   = new Group("Other",   Group.GroupBy.FILE_TYPE);
 
         for (MediaFile f : files) {
             switch (f.getType()) {
                 case IMAGE:  images.addFile(f); break;
                 case VIDEO:  videos.addFile(f); break;
-                case AUDIO:  audio.addFile(f);  break;
                 default:     other.addFile(f);  break;
             }
         }
@@ -84,7 +82,6 @@ public class GroupManager {
         List<Group> result = new ArrayList<>();
         if (images.getCount() > 0) result.add(images);
         if (videos.getCount() > 0) result.add(videos);
-        if (audio.getCount()  > 0) result.add(audio);
         if (other.getCount()  > 0) result.add(other);
         return result;
     }
