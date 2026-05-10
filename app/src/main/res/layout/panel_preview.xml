@@ -19,17 +19,6 @@
         android:layout_height="match_parent"
         android:visibility="gone"/>
 
-    <!-- Audio preview -->
-    <LinearLayout
-        android:id="@+id/audioPreview"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:orientation="vertical"
-        android:gravity="center"
-        android:padding="24dp"
-        android:visibility="gone">
-
         <ImageView
             android:id="@+id/albumArt"
             android:layout_width="120dp"
