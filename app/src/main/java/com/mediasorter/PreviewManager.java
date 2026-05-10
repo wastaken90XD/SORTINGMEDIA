@@ -29,10 +29,8 @@ public class PreviewManager {
     // Views
     private ImageView imagePreview;
     private VideoView videoPreview;
-    private View      audioPreview;
     private View      unsupportedPreview;
     private ImageView albumArt;
-    private SeekBar   audioSeekBar;
     private TextView  btnPlayPause;
     private TextView  detailFileName;
     private TextView  detailMeta;
@@ -44,19 +42,16 @@ public class PreviewManager {
         bindViews(previewRoot);
     }
 
+
     private void bindViews(View root) {
         imagePreview       = root.findViewById(R.id.imagePreview);
         videoPreview       = root.findViewById(R.id.videoPreview);
-        audioPreview       = root.findViewById(R.id.audioPreview);
         unsupportedPreview = root.findViewById(R.id.unsupportedPreview);
-        albumArt           = root.findViewById(R.id.albumArt);
-        audioSeekBar       = root.findViewById(R.id.audioSeekBar);
-        btnPlayPause       = root.findViewById(R.id.btnPlayPause);
         detailFileName     = root.findViewById(R.id.detailFileName);
         detailMeta         = root.findViewById(R.id.detailMeta);
         detailPath         = root.findViewById(R.id.detailPath);
         unsupportedText    = root.findViewById(R.id.unsupportedText);
-    }
+}
 
     // ── Load file ─────────────────────────────────────────────────────────────
 
@@ -75,7 +70,6 @@ public class PreviewManager {
         switch (file.getType()) {
             case IMAGE: loadImage(file); break;
             case VIDEO: loadVideo(file); break;
-            case AUDIO: loadAudio(file); break;
             default:    showUnsupported("Unsupported file type"); break;
         }
     }
@@ -118,76 +112,6 @@ public class PreviewManager {
         videoPreview.requestFocus();
     }
 
-    // ── Audio ─────────────────────────────────────────────────────────────────
-
-    private void loadAudio(MediaFile file) {
-        audioPreview.setVisibility(View.VISIBLE);
-        loadAlbumArt(file);
-
-        try {
-            mediaPlayer = new MediaPlayer();
-            mediaPlayer.setDataSource(file.getPath());
-            mediaPlayer.prepare();
-
-            audioSeekBar.setMax(mediaPlayer.getDuration());
-
-            btnPlayPause.setOnClickListener(v -> togglePlayPause());
-            startSeekBarUpdater();
-
-        } catch (Exception e) {
-            showUnsupported(CodecChecker.getUnsupportedReason(file));
-        }
-    }
-
-    private void loadAlbumArt(MediaFile file) {
-        executor.submit(() -> {
-            MediaMetadataRetriever mmr = new MediaMetadataRetriever();
-            try {
-                mmr.setDataSource(file.getPath());
-                byte[] art = mmr.getEmbeddedPicture();
-                if (art != null) {
-                    Bitmap bmp = BitmapFactory.decodeByteArray(art, 0, art.length);
-                    mainHandler.post(() -> albumArt.setImageBitmap(bmp));
-                }
-            } catch (Exception ignored) {
-            } finally {
-                try { mmr.release(); } catch (Exception ignored) {}
-            }
-        });
-    }
-
-    private void togglePlayPause() {
-        if (mediaPlayer == null) return;
-        if (isPlaying) {
-            mediaPlayer.pause();
-            btnPlayPause.setText("▶");
-        } else {
-            mediaPlayer.start();
-            btnPlayPause.setText("⏸");
-        }
-        isPlaying = !isPlaying;
-    }
-
-    private void startSeekBarUpdater() {
-        mainHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-                    audioSeekBar.setProgress(mediaPlayer.getCurrentPosition());
-                }
-                mainHandler.postDelayed(this, 500);
-            }
-        });
-
-        audioSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
-                if (fromUser && mediaPlayer != null) mediaPlayer.seekTo(progress);
-            }
-            @Override public void onStartTrackingTouch(SeekBar sb) {}
-            @Override public void onStopTrackingTouch(SeekBar sb) {}
-        });
-    }
 
     // ── Details ───────────────────────────────────────────────────────────────
 
@@ -211,7 +135,6 @@ public class PreviewManager {
     private void hideAll() {
         imagePreview.setVisibility(View.GONE);
         videoPreview.setVisibility(View.GONE);
-        audioPreview.setVisibility(View.GONE);
         unsupportedPreview.setVisibility(View.GONE);
     }
 
