@@ -5,7 +5,6 @@
     android:orientation="vertical"
     android:background="#121212">
 
-    <!-- Top toolbar -->
     <LinearLayout
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
@@ -17,14 +16,13 @@
         android:paddingEnd="8dp">
 
         <TextView
-            android:id="@+id/appTitle"
+            android:id="@+id/progressLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Media Sorter"
-            android:textColor="#FFFFFF"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:layout_marginEnd="16dp"/>
+            android:text="0 / 0  (0%)"
+            android:textColor="#AAAAAA"
+            android:textSize="11sp"
+            android:layout_marginEnd="8dp"/>
 
         <EditText
             android:id="@+id/searchBar"
@@ -42,20 +40,28 @@
             android:singleLine="true"/>
 
         <Button
+            android:id="@+id/btnSort"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Sort"
+            android:textSize="11sp"
+            android:layout_marginStart="6dp"/>
+
+        <Button
             android:id="@+id/btnGroupBy"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
             android:text="Group ▾"
-            android:textSize="12sp"
-            android:layout_marginStart="8dp"/>
+            android:textSize="11sp"
+            android:layout_marginStart="6dp"/>
 
         <Button
             android:id="@+id/btnDashboard"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
             android:text="Dashboard"
-            android:textSize="12sp"
-            android:layout_marginStart="8dp"/>
+            android:textSize="11sp"
+            android:layout_marginStart="6dp"/>
 
         <Button
             android:id="@+id/btnSettings"
@@ -63,17 +69,15 @@
             android:layout_height="36dp"
             android:text="⚙"
             android:textSize="14sp"
-            android:layout_marginStart="8dp"/>
+            android:layout_marginStart="6dp"/>
 
     </LinearLayout>
 
-    <!-- Three panel layout -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="horizontal">
 
-        <!-- Left: File browser -->
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/fileBrowser"
             android:layout_width="0dp"
@@ -83,13 +87,11 @@
             android:clipToPadding="false"
             android:padding="4dp"/>
 
-        <!-- Divider -->
         <View
             android:layout_width="1dp"
             android:layout_height="match_parent"
             android:background="#2A2A3E"/>
 
-        <!-- Center: Preview -->
         <FrameLayout
             android:id="@+id/previewPanel"
             android:layout_width="0dp"
@@ -97,13 +99,11 @@
             android:layout_weight="4"
             android:background="#0F0F1A"/>
 
-        <!-- Divider -->
         <View
             android:layout_width="1dp"
             android:layout_height="match_parent"
             android:background="#2A2A3E"/>
 
-        <!-- Right: Tag panel -->
         <LinearLayout
             android:id="@+id/tagPanel"
             android:layout_width="0dp"
@@ -168,6 +168,7 @@
                     android:layout_height="36dp"
                     android:text="+"
                     android:textSize="18sp"
+                    android:backgroundTint="#E94560"
                     android:layout_marginStart="4dp"/>
 
             </LinearLayout>
