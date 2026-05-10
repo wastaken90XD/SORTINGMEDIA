@@ -24,8 +24,11 @@ public class SettingsActivity extends Activity {
 
         cacheManager  = new CacheManager(this);
         folderManager = new FolderManager(this);
-        folderWatcher = new FolderWatcher(path -> {}, path -> {}, path -> {});
-
+        folderWatcher = new FolderWatcher(new FolderWatcher.Listener() {
+            @Override public void onFileAdded(String path) {}
+            @Override public void onFileDeleted(String path) {}
+            @Override public void onFileModified(String path) {}
+            });
         buildSettings();
     }
 
