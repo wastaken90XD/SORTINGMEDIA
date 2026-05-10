@@ -5,7 +5,7 @@ import java.util.List;
 
 public class MediaFile {
 
-    public enum Type { IMAGE, VIDEO, AUDIO, UNSUPPORTED }
+    public enum Type { IMAGE, VIDEO, UNSUPPORTED }
 
     private String path;
     private String name;
@@ -23,13 +23,12 @@ public class MediaFile {
         this.type    = resolveType(name);
     }
 
-    private Type resolveType(String name) {
+     private Type resolveType(String name) {
         String lower = name.toLowerCase();
         if (lower.matches(".*\\.(jpg|jpeg|png|bmp|webp|gif)")) return Type.IMAGE;
         if (lower.matches(".*\\.(mp4|3gp|avi|mkv|mov|webm)"))  return Type.VIDEO;
-        if (lower.matches(".*\\.(mp3|aac|wav|ogg|flac|m4a)"))  return Type.AUDIO;
         return Type.UNSUPPORTED;
-    }
+}
 
     // Getters
     public String       getPath()      { return path; }
