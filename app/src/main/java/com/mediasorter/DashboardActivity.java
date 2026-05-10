@@ -88,16 +88,14 @@ public class DashboardActivity extends Activity {
 
     // ── Pie: file type composition ────────────────────────────────────────────
 
-    private PieChart buildCompositionPie(List<MediaFile> files) {
-        int images = 0, videos = 0, audio = 0, other = 0;
-        for (MediaFile f : files) {
-            switch (f.getType()) {
-                case IMAGE: images++; break;
-                case VIDEO: videos++; break;
-                case AUDIO: audio++;  break;
-                default:    other++;  break;
-            }
-        }
+    int images = 0, videos = 0, other = 0;
+    for (MediaFile f : files) {
+        switch (f.getType()) {
+        case IMAGE: images++; break;
+        case VIDEO: videos++; break;
+        default:    other++;  break;
+    }
+}
 
         List<PieEntry> entries = new ArrayList<>();
         if (images > 0) entries.add(new PieEntry(images, "Images"));
