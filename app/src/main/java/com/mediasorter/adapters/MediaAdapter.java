@@ -58,7 +58,10 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
             }
         }
     }
-
+    
+    public String getSelectedPath() {
+    return selectedPath;
+}
     public void setSelected(String path) {
         String old = selectedPath;
         selectedPath = path;
