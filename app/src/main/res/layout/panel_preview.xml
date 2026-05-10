@@ -19,25 +19,6 @@
         android:layout_height="match_parent"
         android:visibility="gone"/>
 
-        <ImageView
-            android:id="@+id/albumArt"
-            android:layout_width="120dp"
-            android:layout_height="120dp"
-            android:scaleType="centerCrop"
-            android:background="#222233"
-            android:layout_marginBottom="16dp"/>
-    
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="12dp">
-
-
-        </LinearLayout>
-
-    </LinearLayout>
-
     <!-- Unsupported format -->
     <LinearLayout
         android:id="@+id/unsupportedPreview"
