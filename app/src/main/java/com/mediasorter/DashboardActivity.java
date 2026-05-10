@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import com.github.mikephil.charting.charts.BarChart;
 import com.github.mikephil.charting.charts.LineChart;
@@ -23,7 +24,6 @@ import com.mediasorter.models.Tag;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.LinkedHashMap;
 
 public class DashboardActivity extends Activity {
 
@@ -34,11 +34,9 @@ public class DashboardActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         indexer      = new MediaIndexer();
         tagManager   = new TagManager(this);
         cacheManager = new CacheManager(this);
-
         buildDashboard();
     }
 
@@ -51,56 +49,47 @@ public class DashboardActivity extends Activity {
         List<MediaFile> files = indexer.getIndex();
         List<Tag>       tags  = tagManager.getAllTags();
 
-        // Title
         root.addView(makeTitle("Dashboard"));
 
-        // ── Cache status ──────────────────────────────────────────────────────
         root.addView(makeLabel(
             "Cache: " + cacheManager.getFormattedCacheSize()
             + " / " + cacheManager.getLimitMB() + " MB"
             + (cacheManager.isAboveWarning() ? "  ⚠ Near limit" : "")
         ));
 
-        // ── File composition pie chart ────────────────────────────────────────
         root.addView(makeTitle("File Composition"));
         root.addView(buildCompositionPie(files));
 
-        // ── Tag distribution bar chart ────────────────────────────────────────
         root.addView(makeTitle("Tag Distribution"));
         root.addView(buildTagBar(tags));
 
-        // ── Progress ──────────────────────────────────────────────────────────
         root.addView(makeTitle("Tagging Progress"));
         root.addView(buildProgressLine(files));
 
-        // ── Tag co-occurrence ─────────────────────────────────────────────────
         root.addView(makeTitle("Tag Co-occurrence"));
         root.addView(buildCoOccurrenceTable(tags, files));
 
-        // ── File size ranges ──────────────────────────────────────────────────
         root.addView(makeTitle("File Size Ranges"));
         root.addView(buildSizeRangeBar(files));
 
-        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
         setContentView(scroll);
     }
 
-    // ── Pie: file type composition ────────────────────────────────────────────
-
-    int images = 0, videos = 0, other = 0;
-    for (MediaFile f : files) {
-        switch (f.getType()) {
-        case IMAGE: images++; break;
-        case VIDEO: videos++; break;
-        default:    other++;  break;
-    }
-}
+    private PieChart buildCompositionPie(List<MediaFile> files) {
+        int images = 0, videos = 0, other = 0;
+        for (MediaFile f : files) {
+            switch (f.getType()) {
+                case IMAGE: images++; break;
+                case VIDEO: videos++; break;
+                default:    other++;  break;
+            }
+        }
 
         List<PieEntry> entries = new ArrayList<>();
         if (images > 0) entries.add(new PieEntry(images, "Images"));
         if (videos > 0) entries.add(new PieEntry(videos, "Videos"));
-        if (audio  > 0) entries.add(new PieEntry(audio,  "Audio"));
         if (other  > 0) entries.add(new PieEntry(other,  "Other"));
 
         PieDataSet dataSet = new PieDataSet(entries, "");
@@ -120,13 +109,10 @@ public class DashboardActivity extends Activity {
         return chart;
     }
 
-    // ── Bar: tag distribution ─────────────────────────────────────────────────
-
     private BarChart buildTagBar(List<Tag> tags) {
-        List<BarEntry>  entries = new ArrayList<>();
-        List<String>    labels  = new ArrayList<>();
+        List<BarEntry> entries = new ArrayList<>();
+        List<String>   labels  = new ArrayList<>();
 
-        // Top 10 tags by usage
         List<Tag> top = tags.size() > 10 ? tags.subList(0, 10) : tags;
         for (int i = 0; i < top.size(); i++) {
             entries.add(new BarEntry(i, top.get(i).getUsageCount()));
@@ -151,11 +137,9 @@ public class DashboardActivity extends Activity {
         return chart;
     }
 
-    // ── Line: tagging progress ────────────────────────────────────────────────
-
     private LineChart buildProgressLine(List<MediaFile> files) {
-        int total    = files.size();
-        int tagged   = 0;
+        int total   = files.size();
+        int tagged  = 0;
         for (MediaFile f : files) {
             if (!f.getTags().isEmpty()) tagged++;
         }
@@ -182,14 +166,10 @@ public class DashboardActivity extends Activity {
         chart.getDescription().setEnabled(false);
         chart.setLayoutParams(new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 300));
-
-        // Summary label
         chart.setNoDataText("Tagged: " + tagged + "  Untagged: " + untagged);
         chart.invalidate();
         return chart;
     }
-
-    // ── Table: tag co-occurrence ──────────────────────────────────────────────
 
     private View buildCoOccurrenceTable(List<Tag> tags, List<MediaFile> files) {
         LinearLayout table = new LinearLayout(this);
@@ -197,7 +177,6 @@ public class DashboardActivity extends Activity {
         table.setBackgroundColor(0xFF1A1A2E);
         table.setPadding(16, 16, 16, 16);
 
-        // Show top 5 tags and their co-occurrences
         List<Tag> top = tags.size() > 5 ? tags.subList(0, 5) : tags;
 
         for (Tag tag : top) {
@@ -223,13 +202,11 @@ public class DashboardActivity extends Activity {
         return table;
     }
 
-    // ── Bar: file size ranges ─────────────────────────────────────────────────
-
     private BarChart buildSizeRangeBar(List<MediaFile> files) {
-        int tiny   = 0; // < 1MB
-        int small  = 0; // 1–10MB
-        int medium = 0; // 10–100MB
-        int large  = 0; // > 100MB
+        int tiny   = 0;
+        int small  = 0;
+        int medium = 0;
+        int large  = 0;
 
         for (MediaFile f : files) {
             long mb = f.getSize() / (1024 * 1024);
@@ -263,8 +240,6 @@ public class DashboardActivity extends Activity {
         return chart;
     }
 
-    // ── View helpers ──────────────────────────────────────────────────────────
-
     private TextView makeTitle(String text) {
         TextView tv = new TextView(this);
         tv.setText(text);
@@ -274,7 +249,7 @@ public class DashboardActivity extends Activity {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = 24;
+        lp.topMargin    = 24;
         lp.bottomMargin = 8;
         tv.setLayoutParams(lp);
         return tv;
