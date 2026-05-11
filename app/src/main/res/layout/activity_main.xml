@@ -46,7 +46,15 @@
             android:text="Sort"
             android:textSize="11sp"
             android:layout_marginStart="6dp"/>
-
+        
+        <Button
+            android:id="@+id/btnFilter"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Filter"
+            android:textSize="11sp"
+            android:layout_marginStart="6dp"/>
+        
         <Button
             android:id="@+id/btnGroupBy"
             android:layout_width="wrap_content"
