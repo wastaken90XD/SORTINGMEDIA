@@ -109,6 +109,41 @@ public class SettingsActivity extends Activity {
         btnAddFolder.setOnClickListener(v -> showAddFolderDialog(root));
         root.addView(btnAddFolder);
 
+
+        // ── Crash log ─────────────────────────────────────────────────────────
+root.addView(makeTitle("Crash Log"));
+
+Button btnViewLog = makeButton("View Crash Log");
+btnViewLog.setOnClickListener(v -> {
+    String log = CrashLogger.readLog(this);
+
+    // Show in scrollable dialog
+    android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+    TextView logView = new TextView(this);
+    logView.setText(log);
+    logView.setTextColor(0xFFCCCCCC);
+    logView.setTextSize(10f);
+    logView.setPadding(16, 16, 16, 16);
+    scroll.addView(logView);
+
+    new AlertDialog.Builder(this)
+        .setTitle("Crash Log")
+        .setView(scroll)
+        .setPositiveButton("Copy", (d, w) -> {
+            android.content.ClipboardManager cm =
+                (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("crash", log));
+            Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show();
+        })
+        .setNegativeButton("Clear", (d, w) -> {
+            CrashLogger.clearLog(this);
+            Toast.makeText(this, "Log cleared", Toast.LENGTH_SHORT).show();
+        })
+        .setNeutralButton("Close", null)
+        .show();
+});
+root.addView(btnViewLog);
+        
         // ── Back ──────────────────────────────────────────────────────────────
         Button btnBack = makeButton("← Back");
         btnBack.setOnClickListener(v -> finish());
