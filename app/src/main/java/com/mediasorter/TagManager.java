@@ -46,38 +46,42 @@ public class TagManager {
 
     // ── Apply / Remove ────────────────────────────────────────────────────────
 
-    public void applyTag(MediaFile file, String tagName) {
-        if (file.hasTag(tagName)) return;
-        file.addTag(tagName);
+public void applyTag(MediaFile file, String tagName) {
+    if (file.hasTag(tagName)) return;
+    file.addTag(tagName);
 
-        executor.submit(() -> {
-            synchronized (tagMap) {
-                Tag tag = tagMap.get(tagName);
-                if (tag == null) {
-                    tag = new Tag(tagName);
-                    tagMap.put(tagName, tag);
-                    db.tagDao().insert(tag);
-                }
-                tag.incrementUsage();
+    executor.submit(() -> {
+        synchronized (tagMap) {
+            Tag tag = tagMap.get(tagName);
+            if (tag == null) {
+                tag = new Tag(tagName);
+                tagMap.put(tagName, tag);
+                db.tagDao().insert(tag);
+            }
+            tag.incrementUsage();
+            db.tagDao().update(tag);
+        }
+        // Write to file metadata
+        MetadataWriter.writeTags(file.getPath(), file.getTags());
+    });
+}
+
+public void removeTag(MediaFile file, String tagName) {
+    if (!file.hasTag(tagName)) return;
+    file.removeTag(tagName);
+
+    executor.submit(() -> {
+        synchronized (tagMap) {
+            Tag tag = tagMap.get(tagName);
+            if (tag != null) {
+                tag.decrementUsage();
                 db.tagDao().update(tag);
             }
-        });
-    }
-
-    public void removeTag(MediaFile file, String tagName) {
-        if (!file.hasTag(tagName)) return;
-        file.removeTag(tagName);
-
-        executor.submit(() -> {
-            synchronized (tagMap) {
-                Tag tag = tagMap.get(tagName);
-                if (tag != null) {
-                    tag.decrementUsage();
-                    db.tagDao().update(tag);
-                }
-            }
-        });
-    }
+        }
+        // Write updated tags to file metadata
+        MetadataWriter.writeTags(file.getPath(), file.getTags());
+    });
+}
 
     public void toggleTag(MediaFile file, String tagName) {
         if (file.hasTag(tagName)) removeTag(file, tagName);
