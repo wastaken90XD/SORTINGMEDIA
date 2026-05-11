@@ -98,20 +98,24 @@ public class PreviewManager {
 
     // ── Video ─────────────────────────────────────────────────────────────────
 
-    private void loadVideo(MediaFile file) {
-        videoPreview.setVisibility(View.VISIBLE);
-        videoPreview.setVideoURI(Uri.parse(file.getPath()));
-        videoPreview.setOnPreparedListener(mp -> {
-            mp.setLooping(false);
-            videoPreview.start();
-        });
-        videoPreview.setOnErrorListener((mp, what, extra) -> {
-            showUnsupported(CodecChecker.getUnsupportedReason(file));
-            return true;
-        });
-        videoPreview.requestFocus();
-    }
-
+   private void loadVideo(MediaFile file) {
+    videoPreview.setVisibility(View.VISIBLE);
+    android.widget.MediaController mc =
+        new android.widget.MediaController(context);
+    mc.setAnchorView(videoPreview);
+    videoPreview.setMediaController(mc);
+    videoPreview.setVideoURI(android.net.Uri.parse(file.getPath()));
+    videoPreview.setOnPreparedListener(mp -> {
+        mp.setLooping(false);
+        videoPreview.start();
+        mc.show(3000);
+    });
+    videoPreview.setOnErrorListener((mp, what, extra) -> {
+        showUnsupported(CodecChecker.getUnsupportedReason(file));
+        return true;
+    });
+    videoPreview.requestFocus();
+}
 
     // ── Details ───────────────────────────────────────────────────────────────
 
