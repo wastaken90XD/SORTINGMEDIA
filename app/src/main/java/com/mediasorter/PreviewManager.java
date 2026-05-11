@@ -32,6 +32,7 @@ public class PreviewManager {
     private final Handler         mainHandler = new Handler(Looper.getMainLooper());
 
     // Views
+    private GestureDetector swipeDetector;
     private ImageView imagePreview;
     private VideoView videoPreview;
     private View      unsupportedPreview;
@@ -73,6 +74,10 @@ public class PreviewManager {
         btnDone.setOnClickListener(v -> { if (actionListener != null) actionListener.onDone(); });
     }
 
+    public void setSwipeDetector(GestureDetector detector) {
+    this.swipeDetector = detector;
+}
+    
     private void bindViews(View root) {
         imagePreview       = root.findViewById(R.id.imagePreview);
         videoPreview       = root.findViewById(R.id.videoPreview);
