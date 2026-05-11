@@ -143,16 +143,15 @@ public class PreviewManager {
         matrix.postTranslate(translateX, translateY);
         imagePreview.setImageMatrix(matrix);
     }
-
+    
     private void resetZoom() {
-        scaleFactor = 1.0f;
-        translateX  = 0f;
-        translateY  = 0f;
-        if (imagePreview != null) {
-            Matrix matrix = new Matrix();
-            imagePreview.setImageMatrix(matrix);
-        }
+    scaleFactor = 1.0f;
+    translateX  = 0f;
+    translateY  = 0f;
+    if (imagePreview != null) {
+        imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
     }
+}
 
     // ── Load file ─────────────────────────────────────────────────────────────
 
@@ -184,26 +183,34 @@ public class PreviewManager {
     }
 
     // ── Image ─────────────────────────────────────────────────────────────────
-
+    
     private void loadImage(MediaFile file) {
-        executor.submit(() -> {
-            BitmapFactory.Options opts = new BitmapFactory.Options();
-            opts.inJustDecodeBounds = true;
-            BitmapFactory.decodeFile(file.getPath(), opts);
-            opts.inSampleSize       = calculateSampleSize(opts, 1920, 1080);
-            opts.inJustDecodeBounds = false;
-            Bitmap bmp = BitmapFactory.decodeFile(file.getPath(), opts);
+    executor.submit(() -> {
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+        opts.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(file.getPath(), opts);
+        opts.inSampleSize       = calculateSampleSize(opts, 1920, 1080);
+        opts.inJustDecodeBounds = false;
+        Bitmap bmp = BitmapFactory.decodeFile(file.getPath(), opts);
 
-            mainHandler.post(() -> {
-                if (bmp != null) {
-                    imagePreview.setVisibility(View.VISIBLE);
-                    imagePreview.setImageBitmap(bmp);
-                } else {
-                    showUnsupported("Could not decode image");
-                }
-            });
+        mainHandler.post(() -> {
+            if (bmp != null) {
+                imagePreview.setVisibility(View.VISIBLE);
+                // Fit to view first then allow zoom
+                imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                imagePreview.setImageBitmap(bmp);
+                // Switch to matrix after bitmap is set
+                imagePreview.post(() -> {
+                    imagePreview.setScaleType(ImageView.ScaleType.MATRIX);
+                    Matrix m = new Matrix(imagePreview.getImageMatrix());
+                    imagePreview.setImageMatrix(m);
+                });
+            } else {
+                showUnsupported("Could not decode image");
+            }
         });
-    }
+    });
+}
 
     private int calculateSampleSize(BitmapFactory.Options opts, int reqW, int reqH) {
         int inW = opts.outWidth;
