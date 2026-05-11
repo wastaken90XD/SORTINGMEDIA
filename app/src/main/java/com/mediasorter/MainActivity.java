@@ -142,26 +142,22 @@ public class MainActivity extends Activity
 
         // Swipe left/right for navigation
         GestureDetector swipeDetector = new GestureDetector(this,
-            new GestureDetector.SimpleOnGestureListener() {
-                @Override
-                public boolean onFling(MotionEvent e1, MotionEvent e2,
-                                       float vX, float vY) {
-                    if (e1 == null || e2 == null) return false;
-                    float dx = e2.getX() - e1.getX();
-                    float dy = e2.getY() - e1.getY();
-                    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 100) {
-                        if (dx < 0) navigateNext();
-                        else        navigatePrev();
-                        return true;
-                    }
-                    return false;
-                }
-            });
-
-        previewContainer.setOnTouchListener((v, event) -> {
-            swipeDetector.onTouchEvent(event);
+    new GestureDetector.SimpleOnGestureListener() {
+        @Override
+        public boolean onFling(MotionEvent e1, MotionEvent e2,
+                               float vX, float vY) {
+            if (e1 == null || e2 == null) return false;
+            float dx = e2.getX() - e1.getX();
+            float dy = e2.getY() - e1.getY();
+            if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 100) {
+                if (dx < 0) navigateNext();
+                else        navigatePrev();
+                return true;
+            }
             return false;
-        });
+        }
+    });
+        previewManager.setSwipeDetector(swipeDetector);
 
         progressLabel = findViewById(R.id.progressLabel);
 
