@@ -50,14 +50,15 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     }
 
     public void updateFile(MediaFile file) {
-        for (int i = 0; i < files.size(); i++) {
-            if (files.get(i).getPath().equals(file.getPath())) {
-                files.set(i, file);
-                notifyItemChanged(i);
-                return;
-            }
+    for (int i = 0; i < files.size(); i++) {
+        if (files.get(i).getPath().equals(file.getPath())) {
+            // Replace the whole object not just notify
+            files.set(i, file);
+            notifyItemChanged(i);
+            return;
         }
     }
+}
     
     public String getSelectedPath() {
     return selectedPath;
