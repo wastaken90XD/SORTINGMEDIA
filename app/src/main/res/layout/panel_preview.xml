@@ -48,39 +48,111 @@
 
     </LinearLayout>
 
-    <!-- File details overlay at bottom -->
+    <!-- Bottom overlay — file details + action buttons -->
     <LinearLayout
-        android:id="@+id/fileDetailsBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:orientation="vertical"
-        android:background="#CC0F0F1A"
-        android:padding="10dp">
+        android:background="#CC0F0F1A">
 
-        <TextView
-            android:id="@+id/detailFileName"
+        <!-- File details -->
+        <LinearLayout
+            android:id="@+id/fileDetailsBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="#FFFFFF"
-            android:textSize="13sp"
-            android:textStyle="bold"/>
+            android:orientation="vertical"
+            android:padding="8dp">
 
-        <TextView
-            android:id="@+id/detailMeta"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="#AAAAAA"
-            android:textSize="11sp"
-            android:layout_marginTop="2dp"/>
+            <TextView
+                android:id="@+id/detailFileName"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:singleLine="true"
+                android:ellipsize="middle"/>
 
-        <TextView
-            android:id="@+id/detailPath"
+            <TextView
+                android:id="@+id/detailMeta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#AAAAAA"
+                android:textSize="10sp"
+                android:layout_marginTop="2dp"/>
+
+            <TextView
+                android:id="@+id/detailPath"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#666666"
+                android:textSize="9sp"
+                android:layout_marginTop="2dp"
+                android:singleLine="true"
+                android:ellipsize="start"/>
+
+        </LinearLayout>
+
+        <!-- Action buttons -->
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="#666666"
-            android:textSize="10sp"
-            android:layout_marginTop="2dp"/>
+            android:layout_height="44dp"
+            android:orientation="horizontal"
+            android:background="#1A1A2E">
+
+            <Button
+                android:id="@+id/btnTags"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="TAGS"
+                android:textSize="11sp"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#E94560"/>
+
+            <Button
+                android:id="@+id/btnSkip"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="SKIP"
+                android:textSize="11sp"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#444466"/>
+
+            <Button
+                android:id="@+id/btnFlag"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="FLAG"
+                android:textSize="11sp"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#AA6600"/>
+
+            <Button
+                android:id="@+id/btnDone"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="DONE"
+                android:textSize="11sp"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#226622"/>
+
+            <!-- Position counter -->
+            <TextView
+                android:id="@+id/positionCounter"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:textColor="#AAAAAA"
+                android:textSize="11sp"
+                android:text="0 / 0"/>
+
+        </LinearLayout>
 
     </LinearLayout>
 
