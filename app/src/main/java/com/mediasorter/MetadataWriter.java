@@ -55,6 +55,10 @@ public class MetadataWriter {
     private static boolean writeJpegXmp(String filePath, List<String> tags) {
         try {
             File file = new File(filePath);
+            Log.d(TAG, "Attempting write to: " + filePath);
+            Log.d(TAG, "File exists: " + file.exists());
+            Log.d(TAG, "File writable: " + file.canWrite());
+            Log.d(TAG, "File size: " + file.length());
             if (!file.exists() || !file.canWrite()) return false;
 
             // Build XMP block
