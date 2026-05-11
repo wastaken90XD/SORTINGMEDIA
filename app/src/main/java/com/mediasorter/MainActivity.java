@@ -14,7 +14,6 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.TextView;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -24,8 +23,8 @@ import com.mediasorter.adapters.TagAdapter;
 import com.mediasorter.models.Group;
 import com.mediasorter.models.MediaFile;
 import com.mediasorter.models.Tag;
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends Activity
         implements FolderWatcher.Listener, MediaIndexer.IndexListener {
@@ -40,10 +39,11 @@ public class MainActivity extends Activity
     private PreviewManager  previewManager;
     private ThumbnailLoader thumbnailLoader;
     private SortManager     sortManager;
+    private FileStatus      fileStatus;
+    private FilterManager   filterManager;
 
     private MediaAdapter mediaAdapter;
     private TagAdapter   tagAdapter;
-
     private QuickTagPanel quickTagPanel;
 
     private List<MediaFile> currentFiles = new ArrayList<>();
@@ -54,6 +54,7 @@ public class MainActivity extends Activity
     private EditText newTagInput;
     private TextView progressLabel;
     private Button   btnSort;
+    private Button   btnFilter;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -93,6 +94,8 @@ public class MainActivity extends Activity
         cacheManager    = new CacheManager(this);
         thumbnailLoader = new ThumbnailLoader(this);
         sortManager     = new SortManager();
+        fileStatus      = new FileStatus(this);
+        filterManager   = new FilterManager(fileStatus);
         indexer.setListener(this);
     }
 
@@ -112,7 +115,14 @@ public class MainActivity extends Activity
 
         FrameLayout previewContainer = findViewById(R.id.previewPanel);
         getLayoutInflater().inflate(R.layout.panel_preview, previewContainer, true);
-        previewManager = new PreviewManager(this, previewContainer);
+        previewManager = new PreviewManager(this, previewContainer, fileStatus);
+
+        previewManager.setActionListener(new PreviewManager.ActionListener() {
+            @Override public void onTags() { quickTagPanel.show(); }
+            @Override public void onSkip() { handleSkip(); }
+            @Override public void onFlag() { handleFlag(); }
+            @Override public void onDone() { handleDone(); }
+        });
 
         quickTagPanel = new QuickTagPanel(this, previewContainer);
         quickTagPanel.setListener(new QuickTagPanel.Listener() {
@@ -127,15 +137,16 @@ public class MainActivity extends Activity
                 mediaAdapter.updateFile(file);
                 updateProgress();
             }
-            @Override
-            public void onDismiss() {}
+            @Override public void onDismiss() {}
         });
 
+        // Swipe left/right for navigation
         GestureDetector swipeDetector = new GestureDetector(this,
             new GestureDetector.SimpleOnGestureListener() {
                 @Override
                 public boolean onFling(MotionEvent e1, MotionEvent e2,
                                        float vX, float vY) {
+                    if (e1 == null || e2 == null) return false;
                     float dx = e2.getX() - e1.getX();
                     float dy = e2.getY() - e1.getY();
                     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 100) {
@@ -186,6 +197,10 @@ public class MainActivity extends Activity
         btnSort.setText(sortManager.getLabel());
         btnSort.setOnClickListener(v -> showSortMenu(v));
 
+        btnFilter = findViewById(R.id.btnFilter);
+        btnFilter.setText(filterManager.getLabel());
+        btnFilter.setOnClickListener(v -> showFilterMenu(v));
+
         Button btnGroupBy = findViewById(R.id.btnGroupBy);
         btnGroupBy.setOnClickListener(v -> showGroupMenu(v));
 
@@ -211,6 +226,35 @@ public class MainActivity extends Activity
         }
     }
 
+    // ── Quick actions ─────────────────────────────────────────────────────────
+
+    private void handleSkip() {
+        if (currentIndex < 0 || currentIndex >= currentFiles.size()) return;
+        MediaFile file = currentFiles.get(currentIndex);
+        fileStatus.setSkipped(file.getPath());
+        navigateNext();
+    }
+
+    private void handleFlag() {
+        if (currentIndex < 0 || currentIndex >= currentFiles.size()) return;
+        MediaFile file = currentFiles.get(currentIndex);
+        if (fileStatus.isFlagged(file.getPath())) {
+            fileStatus.clearStatus(file.getPath());
+        } else {
+            fileStatus.setFlagged(file.getPath());
+        }
+        previewManager.load(file);
+    }
+
+    private void handleDone() {
+        if (currentIndex < 0 || currentIndex >= currentFiles.size()) return;
+        MediaFile file = currentFiles.get(currentIndex);
+        fileStatus.setDone(file.getPath());
+        navigateNext();
+    }
+
+    // ── Navigation ────────────────────────────────────────────────────────────
+
     private void navigateNext() {
         if (currentFiles.isEmpty()) return;
         currentIndex = (currentIndex + 1) % currentFiles.size();
@@ -227,6 +271,7 @@ public class MainActivity extends Activity
         if (index < 0 || index >= currentFiles.size()) return;
         MediaFile file = currentFiles.get(index);
         previewManager.load(file);
+        previewManager.setPosition(index + 1, currentFiles.size());
         tagAdapter.setCurrentFile(file);
         tagAdapter.setTags(tagManager.getAllTags());
         mediaAdapter.setSelected(file.getPath());
@@ -240,6 +285,7 @@ public class MainActivity extends Activity
             currentIndex = currentFiles.size() - 1;
         }
         previewManager.load(file);
+        previewManager.setPosition(currentIndex + 1, currentFiles.size());
         tagAdapter.setCurrentFile(file);
         tagAdapter.setTags(tagManager.getAllTags());
         quickTagPanel.setCurrentFile(file, tagManager.getAllTags());
@@ -256,14 +302,20 @@ public class MainActivity extends Activity
         updateProgress();
     }
 
+    // ── Search ────────────────────────────────────────────────────────────────
+
     private void runSearch(String query) {
         searchManager.setFullList(indexer.getIndex());
         List<MediaFile> results = searchManager.search(query);
+        results = filterManager.apply(results);
         sortManager.sort(results);
         currentFiles = results;
+        currentIndex = -1;
         mediaAdapter.setFiles(results);
         updateProgress();
     }
+
+    // ── Sort ──────────────────────────────────────────────────────────────────
 
     private void showSortMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
@@ -293,6 +345,34 @@ public class MainActivity extends Activity
         menu.show();
     }
 
+    // ── Filter ────────────────────────────────────────────────────────────────
+
+    private void showFilterMenu(View anchor) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add("All");
+        menu.getMenu().add("Untagged");
+        menu.getMenu().add("Flagged");
+        menu.getMenu().add("Skipped");
+        menu.getMenu().add("Done");
+
+        menu.setOnMenuItemClickListener(item -> {
+            switch (item.getTitle().toString()) {
+                case "All":      filterManager.setFilter(FilterManager.Filter.ALL);      break;
+                case "Untagged": filterManager.setFilter(FilterManager.Filter.UNTAGGED); break;
+                case "Flagged":  filterManager.setFilter(FilterManager.Filter.FLAGGED);  break;
+                case "Skipped":  filterManager.setFilter(FilterManager.Filter.SKIPPED);  break;
+                case "Done":     filterManager.setFilter(FilterManager.Filter.DONE);     break;
+            }
+            btnFilter.setText(filterManager.getLabel());
+            applyGrouping();
+            return true;
+        });
+
+        menu.show();
+    }
+
+    // ── Group ─────────────────────────────────────────────────────────────────
+
     private void showGroupMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
         menu.getMenu().add("By File Type");
@@ -318,11 +398,15 @@ public class MainActivity extends Activity
         List<Group>     groups    = groupManager.group(indexer.getIndex());
         List<MediaFile> flattened = new ArrayList<>();
         for (Group g : groups) flattened.addAll(g.getFiles());
+        flattened = filterManager.apply(flattened);
         sortManager.sort(flattened);
         currentFiles = flattened;
+        currentIndex = -1;
         mediaAdapter.setFiles(flattened);
         updateProgress();
     }
+
+    // ── Progress ──────────────────────────────────────────────────────────────
 
     private void updateProgress() {
         int total  = currentFiles.size();
@@ -335,6 +419,8 @@ public class MainActivity extends Activity
             progressLabel.setText(tagged + " / " + total + "  (" + pct + "%)");
         }
     }
+
+    // ── Folder dialog ─────────────────────────────────────────────────────────
 
     private void showAddFolderDialog() {
         EditText input = new EditText(this);
@@ -354,6 +440,8 @@ public class MainActivity extends Activity
             .setNegativeButton("Cancel", null)
             .show();
     }
+
+    // ── FolderWatcher ─────────────────────────────────────────────────────────
 
     @Override
     public void onFileAdded(String path) {
@@ -377,6 +465,8 @@ public class MainActivity extends Activity
             indexer.rescan(new java.io.File(path).getParent());
         });
     }
+
+    // ── MediaIndexer ──────────────────────────────────────────────────────────
 
     @Override
     public void onFileFound(MediaFile file) {
