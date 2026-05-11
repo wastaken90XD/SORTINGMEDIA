@@ -141,7 +141,7 @@ public class MainActivity extends Activity
         });
 
         // Swipe left/right for navigation
-        GestureDetector swipeDetector = new GestureDetector(this,
+  GestureDetector swipeDetector = new GestureDetector(this,
     new GestureDetector.SimpleOnGestureListener() {
         @Override
         public boolean onFling(MotionEvent e1, MotionEvent e2,
@@ -157,7 +157,7 @@ public class MainActivity extends Activity
             return false;
         }
     });
-        previewManager.setSwipeDetector(swipeDetector);
+previewManager.setSwipeDetector(swipeDetector);
 
         progressLabel = findViewById(R.id.progressLabel);
 
