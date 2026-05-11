@@ -102,38 +102,35 @@ public class PreviewManager {
                 }
             });
 
-        imagePreview.setScaleType(ImageView.ScaleType.MATRIX);
         imagePreview.setOnTouchListener((v, event) -> {
             scaleDetector.onTouchEvent(event);
+            swipeDetector.onTouchEvent(event); // add this
 
-            switch (event.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                    lastTouchX = event.getX();
-                    lastTouchY = event.getY();
-                    break;
-                case MotionEvent.ACTION_MOVE:
-                    if (!scaleDetector.isInProgress() && scaleFactor > 1.0f) {
-                        translateX += event.getX() - lastTouchX;
-                        translateY += event.getY() - lastTouchY;
-                        applyMatrix();
-                    }
-                    lastTouchX = event.getX();
-                    lastTouchY = event.getY();
-                    break;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_POINTER_UP:
-                    // Reset pan when zoomed back to 1x
-                    if (scaleFactor <= MIN_ZOOM) {
-                        translateX  = 0f;
-                        translateY  = 0f;
-                        scaleFactor = MIN_ZOOM;
-                        applyMatrix();
-                    }
-                    break;
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                lastTouchX = event.getX();
+                lastTouchY = event.getY();
+                break;
+        case MotionEvent.ACTION_MOVE:
+            if (!scaleDetector.isInProgress() && scaleFactor > 1.0f) {
+                translateX += event.getX() - lastTouchX;
+                translateY += event.getY() - lastTouchY;
+                applyMatrix();
             }
-            return true;
-        });
+            lastTouchX = event.getX();
+            lastTouchY = event.getY();
+            break;
+        case MotionEvent.ACTION_UP:
+            if (scaleFactor <= MIN_ZOOM) {
+                translateX  = 0f;
+                translateY  = 0f;
+                scaleFactor = MIN_ZOOM;
+                resetZoom();
+            }
+            break;
     }
+    return true;
+});
 
     private void applyMatrix() {
         Matrix matrix = new Matrix();
