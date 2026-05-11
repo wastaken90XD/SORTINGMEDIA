@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
@@ -31,8 +32,6 @@ public class PreviewManager {
     private final ExecutorService executor    = Executors.newSingleThreadExecutor();
     private final Handler         mainHandler = new Handler(Looper.getMainLooper());
 
-    // Views
-    private GestureDetector swipeDetector;
     private ImageView imagePreview;
     private VideoView videoPreview;
     private View      unsupportedPreview;
@@ -46,24 +45,29 @@ public class PreviewManager {
     private Button    btnFlag;
     private Button    btnDone;
 
-    private ActionListener actionListener;
-    private FileStatus     fileStatus;
-
-    // Pinch to zoom
+    private ActionListener       actionListener;
+    private FileStatus           fileStatus;
+    private GestureDetector      swipeDetector;
     private ScaleGestureDetector scaleDetector;
-    private float                scaleFactor = 1.0f;
-    private float                translateX  = 0f;
-    private float                translateY  = 0f;
-    private float                lastTouchX  = 0f;
-    private float                lastTouchY  = 0f;
-    private static final float   MIN_ZOOM    = 1.0f;
-    private static final float   MAX_ZOOM    = 8.0f;
+
+    private float scaleFactor = 1.0f;
+    private float translateX  = 0f;
+    private float translateY  = 0f;
+    private float lastTouchX  = 0f;
+    private float lastTouchY  = 0f;
+
+    private static final float MIN_ZOOM = 1.0f;
+    private static final float MAX_ZOOM = 8.0f;
 
     public PreviewManager(Context context, View previewRoot, FileStatus fileStatus) {
         this.context    = context;
         this.fileStatus = fileStatus;
         bindViews(previewRoot);
         setupZoom();
+    }
+
+    public void setSwipeDetector(GestureDetector detector) {
+        this.swipeDetector = detector;
     }
 
     public void setActionListener(ActionListener l) {
@@ -74,10 +78,6 @@ public class PreviewManager {
         btnDone.setOnClickListener(v -> { if (actionListener != null) actionListener.onDone(); });
     }
 
-    public void setSwipeDetector(GestureDetector detector) {
-    this.swipeDetector = detector;
-}
-    
     private void bindViews(View root) {
         imagePreview       = root.findViewById(R.id.imagePreview);
         videoPreview       = root.findViewById(R.id.videoPreview);
@@ -93,8 +93,6 @@ public class PreviewManager {
         btnDone            = root.findViewById(R.id.btnDone);
     }
 
-    // ── Pinch to zoom ─────────────────────────────────────────────────────────
-
     private void setupZoom() {
         scaleDetector = new ScaleGestureDetector(context,
             new ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -109,53 +107,51 @@ public class PreviewManager {
 
         imagePreview.setOnTouchListener((v, event) -> {
             scaleDetector.onTouchEvent(event);
-            swipeDetector.onTouchEvent(event); // add this
+            if (swipeDetector != null) swipeDetector.onTouchEvent(event);
 
-        switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                lastTouchX = event.getX();
-                lastTouchY = event.getY();
-                break;
-        case MotionEvent.ACTION_MOVE:
-            if (!scaleDetector.isInProgress() && scaleFactor > 1.0f) {
-                translateX += event.getX() - lastTouchX;
-                translateY += event.getY() - lastTouchY;
-                applyMatrix();
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    lastTouchX = event.getX();
+                    lastTouchY = event.getY();
+                    break;
+                case MotionEvent.ACTION_MOVE:
+                    if (!scaleDetector.isInProgress() && scaleFactor > 1.0f) {
+                        translateX += event.getX() - lastTouchX;
+                        translateY += event.getY() - lastTouchY;
+                        applyMatrix();
+                    }
+                    lastTouchX = event.getX();
+                    lastTouchY = event.getY();
+                    break;
+                case MotionEvent.ACTION_UP:
+                    if (scaleFactor <= MIN_ZOOM) {
+                        resetZoom();
+                    }
+                    break;
             }
-            lastTouchX = event.getX();
-            lastTouchY = event.getY();
-            break;
-        case MotionEvent.ACTION_UP:
-            if (scaleFactor <= MIN_ZOOM) {
-                translateX  = 0f;
-                translateY  = 0f;
-                scaleFactor = MIN_ZOOM;
-                resetZoom();
-            }
-            break;
+            return true;
+        });
     }
-    return true;
-});
 
     private void applyMatrix() {
         Matrix matrix = new Matrix();
         matrix.setScale(scaleFactor, scaleFactor,
-            imagePreview.getWidth() / 2f,
+            imagePreview.getWidth()  / 2f,
             imagePreview.getHeight() / 2f);
         matrix.postTranslate(translateX, translateY);
         imagePreview.setImageMatrix(matrix);
     }
-    
-    private void resetZoom() {
-    scaleFactor = 1.0f;
-    translateX  = 0f;
-    translateY  = 0f;
-    if (imagePreview != null) {
-        imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
-    }
-}
 
-    // ── Load file ─────────────────────────────────────────────────────────────
+    private void resetZoom() {
+        scaleFactor = 1.0f;
+        translateX  = 0f;
+        translateY  = 0f;
+        if (imagePreview != null) {
+            imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        }
+    }
+
+    // ── Load ─────────────────────────────────────────────────────────────────
 
     public void load(MediaFile file) {
         stopMedia();
@@ -165,7 +161,6 @@ public class PreviewManager {
         updateButtonStates(file);
 
         CodecChecker.Support support = CodecChecker.check(file);
-
         if (support == CodecChecker.Support.NONE) {
             showUnsupported(CodecChecker.getUnsupportedReason(file));
             return;
@@ -185,34 +180,32 @@ public class PreviewManager {
     }
 
     // ── Image ─────────────────────────────────────────────────────────────────
-    
-    private void loadImage(MediaFile file) {
-    executor.submit(() -> {
-        BitmapFactory.Options opts = new BitmapFactory.Options();
-        opts.inJustDecodeBounds = true;
-        BitmapFactory.decodeFile(file.getPath(), opts);
-        opts.inSampleSize       = calculateSampleSize(opts, 1920, 1080);
-        opts.inJustDecodeBounds = false;
-        Bitmap bmp = BitmapFactory.decodeFile(file.getPath(), opts);
 
-        mainHandler.post(() -> {
-            if (bmp != null) {
-                imagePreview.setVisibility(View.VISIBLE);
-                // Fit to view first then allow zoom
-                imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                imagePreview.setImageBitmap(bmp);
-                // Switch to matrix after bitmap is set
-                imagePreview.post(() -> {
-                    imagePreview.setScaleType(ImageView.ScaleType.MATRIX);
-                    Matrix m = new Matrix(imagePreview.getImageMatrix());
-                    imagePreview.setImageMatrix(m);
-                });
-            } else {
-                showUnsupported("Could not decode image");
-            }
+    private void loadImage(MediaFile file) {
+        executor.submit(() -> {
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(file.getPath(), opts);
+            opts.inSampleSize       = calculateSampleSize(opts, 1920, 1080);
+            opts.inJustDecodeBounds = false;
+            Bitmap bmp = BitmapFactory.decodeFile(file.getPath(), opts);
+
+            mainHandler.post(() -> {
+                if (bmp != null) {
+                    imagePreview.setVisibility(View.VISIBLE);
+                    imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                    imagePreview.setImageBitmap(bmp);
+                    imagePreview.post(() -> {
+                        imagePreview.setScaleType(ImageView.ScaleType.MATRIX);
+                        Matrix m = new Matrix(imagePreview.getImageMatrix());
+                        imagePreview.setImageMatrix(m);
+                    });
+                } else {
+                    showUnsupported("Could not decode image");
+                }
+            });
         });
-    });
-}
+    }
 
     private int calculateSampleSize(BitmapFactory.Options opts, int reqW, int reqH) {
         int inW = opts.outWidth;
@@ -261,12 +254,15 @@ public class PreviewManager {
     private void updateButtonStates(MediaFile file) {
         if (fileStatus == null) return;
         String path = file.getPath();
-        btnSkip.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
-            fileStatus.isSkipped(path) ? 0xFF6666AA : 0xFF444466));
-        btnFlag.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
-            fileStatus.isFlagged(path) ? 0xFFFFAA00 : 0xFFAA6600));
-        btnDone.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
-            fileStatus.isDone(path) ? 0xFF44AA44 : 0xFF226622));
+        btnSkip.setBackgroundTintList(
+            android.content.res.ColorStateList.valueOf(
+                fileStatus.isSkipped(path) ? 0xFF6666AA : 0xFF444466));
+        btnFlag.setBackgroundTintList(
+            android.content.res.ColorStateList.valueOf(
+                fileStatus.isFlagged(path) ? 0xFFFFAA00 : 0xFFAA6600));
+        btnDone.setBackgroundTintList(
+            android.content.res.ColorStateList.valueOf(
+                fileStatus.isDone(path) ? 0xFF44AA44 : 0xFF226622));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
