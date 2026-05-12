@@ -31,12 +31,17 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
 
     // ── Data ──────────────────────────────────────────────────────────────────
 
-    public void setFiles(List<MediaFile> files) {
-        this.files = new ArrayList<>(files);
+    public void setFiles(List<MediaFile> newFiles) {
+        // Replace entire list — single operation
+        this.files = new ArrayList<>(newFiles);
         notifyDataSetChanged();
     }
 
     public void addFile(MediaFile file) {
+        // Avoid duplicates
+        for (MediaFile f : files) {
+            if (f.getPath().equals(file.getPath())) return;
+        }
         files.add(file);
         notifyItemInserted(files.size() - 1);
     }
@@ -54,6 +59,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     public void updateFile(MediaFile file) {
         for (int i = 0; i < files.size(); i++) {
             if (files.get(i).getPath().equals(file.getPath())) {
+                // Replace object reference — critical for tag display
                 files.set(i, file);
                 notifyItemChanged(i);
                 return;
@@ -62,8 +68,8 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     }
 
     public void setSelected(String path) {
-        String old = selectedPath;
-        selectedPath = path;
+        String old    = selectedPath;
+        selectedPath  = path;
         for (int i = 0; i < files.size(); i++) {
             String p = files.get(i).getPath();
             if (p.equals(old) || p.equals(path)) notifyItemChanged(i);
@@ -88,19 +94,24 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
 
         holder.fileName.setText(file.getName());
         holder.fileDetails.setText(
-            file.getFormattedSize() + "  •  " + file.getType().name().toLowerCase());
+            file.getFormattedSize()
+            + "  •  " + file.getType().name().toLowerCase());
 
-        // Tags
-        String tags = file.getTags().isEmpty()
-            ? "No tags"
-            : String.join("  ", file.getTags());
-        holder.fileTags.setText(tags);
+        // Tags — show all applied tags
+        List<String> tags = file.getTags();
+        if (tags.isEmpty()) {
+            holder.fileTags.setText("No tags");
+            holder.fileTags.setTextColor(0xFF666666);
+        } else {
+            holder.fileTags.setText(String.join("  ", tags));
+            holder.fileTags.setTextColor(0xFFE94560);
+        }
 
-        // Selection highlight
+        // Selection
         holder.itemView.setBackgroundColor(
             file.getPath().equals(selectedPath) ? 0xFF1A1A4E : 0x00000000);
 
-        // Load thumbnail only when view is visible
+        // Thumbnail — only loads when visible
         loader.load(file, holder.thumbnail);
 
         holder.itemView.setOnClickListener(v -> {
@@ -112,7 +123,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     @Override
     public void onViewRecycled(@NonNull ViewHolder holder) {
         super.onViewRecycled(holder);
-        // Cancel thumbnail load when view scrolls off screen
+        // Cancel load when view scrolls off screen
         if (holder.thumbnail.getTag() != null) {
             loader.cancel(holder.thumbnail.getTag().toString());
             holder.thumbnail.setImageBitmap(null);
