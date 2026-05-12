@@ -11,6 +11,8 @@ import java.util.concurrent.Executors;
 
 public class MediaIndexer {
 
+    private static final int PAGE_SIZE = 100;
+
     public interface IndexListener {
         void onFileFound(MediaFile file);
         void onScanComplete(List<MediaFile> allFiles);
@@ -18,7 +20,6 @@ public class MediaIndexer {
         void onFileRemoved(String path);
     }
 
-    // Manifest entry — filename + size + partial hash
     private static class ManifestEntry {
         String path;
         long   size;
@@ -31,14 +32,12 @@ public class MediaIndexer {
         }
     }
 
-    private final ExecutorService          executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService            executor = Executors.newSingleThreadExecutor();
     private final Map<String, ManifestEntry> manifest = new HashMap<>();
-    private final List<MediaFile>          index    = new ArrayList<>();
-    private IndexListener                  listener;
+    private final List<MediaFile>            index    = new ArrayList<>();
+    private IndexListener                    listener;
 
-    public void setListener(IndexListener l) {
-        this.listener = l;
-    }
+    public void setListener(IndexListener l) { this.listener = l; }
 
     // ── Full scan ─────────────────────────────────────────────────────────────
 
@@ -47,29 +46,46 @@ public class MediaIndexer {
             File folder = new File(folderPath);
             if (!folder.exists() || !folder.isDirectory()) return;
 
-            List<MediaFile> found = new ArrayList<>();
-            scanRecursive(folder, found);
+            List<MediaFile> page    = new ArrayList<>();
+            List<MediaFile> allFound = new ArrayList<>();
 
-            synchronized (index) {
-                index.addAll(found);
+            scanRecursive(folder, page, allFound);
+
+            // Emit any remaining partial page
+            if (!page.isEmpty() && listener != null) {
+                for (MediaFile f : page) listener.onFileFound(f);
             }
 
-            if (listener != null) listener.onScanComplete(new ArrayList<>(index));
+            synchronized (index) {
+                index.addAll(allFound);
+            }
+
+            if (listener != null) {
+                listener.onScanComplete(new ArrayList<>(index));
+            }
         });
     }
 
-    private void scanRecursive(File dir, List<MediaFile> found) {
+    private void scanRecursive(File dir, List<MediaFile> page,
+                                List<MediaFile> allFound) {
         File[] files = dir.listFiles();
         if (files == null) return;
 
         for (File f : files) {
             if (f.isDirectory()) {
-                scanRecursive(f, found);
+                scanRecursive(f, page, allFound);
             } else {
                 MediaFile mf = buildMediaFile(f);
                 if (mf.getType() != MediaFile.Type.UNSUPPORTED) {
-                    found.add(mf);
-                    if (listener != null) listener.onFileFound(mf);
+                    page.add(mf);
+                    allFound.add(mf);
+
+                    // Emit page when full
+                    if (page.size() >= PAGE_SIZE && listener != null) {
+                        List<MediaFile> batch = new ArrayList<>(page);
+                        for (MediaFile pf : batch) listener.onFileFound(pf);
+                        page.clear();
+                    }
                 }
             }
         }
@@ -94,19 +110,16 @@ public class MediaIndexer {
                 ManifestEntry existing = manifest.get(path);
 
                 if (existing == null) {
-                    // New file
                     MediaFile mf = buildMediaFile(f);
                     addToIndex(mf);
                     if (listener != null) listener.onFileFound(mf);
 
                 } else if (existing.size != size) {
-                    // Size changed — rebuild
                     MediaFile mf = buildMediaFile(f);
                     updateInIndex(mf);
                     if (listener != null) listener.onFileChanged(mf);
 
                 } else {
-                    // Size same — partial hash check
                     byte[] newHash = HashScanner.partialHash(path);
                     if (!HashScanner.hashesMatch(existing.hash, newHash)) {
                         MediaFile mf = buildMediaFile(f);
@@ -116,7 +129,7 @@ public class MediaIndexer {
                 }
             }
 
-            // Check for deletions
+            // Check deletions
             List<String> toRemove = new ArrayList<>();
             synchronized (index) {
                 for (MediaFile mf : index) {
@@ -140,6 +153,7 @@ public class MediaIndexer {
         MediaFile mf   = new MediaFile(f.getAbsolutePath(), f.length());
         byte[]    hash = HashScanner.partialHash(f.getAbsolutePath());
         mf.setPartialHash(hash);
+        mf.setDateAdded(f.lastModified());
         manifest.put(f.getAbsolutePath(),
             new ManifestEntry(f.getAbsolutePath(), f.length(), hash));
         return mf;
