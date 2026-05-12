@@ -11,10 +11,12 @@ import java.util.concurrent.Executors;
 
 public class MediaIndexer {
 
-    private static final int PAGE_SIZE = 100;
+    private static final int PAGE_SIZE     = 50;
+    private static final int PAGE_DELAY_MS = 100;
 
     public interface IndexListener {
         void onFileFound(MediaFile file);
+        void onPageLoaded(List<MediaFile> page);
         void onScanComplete(List<MediaFile> allFiles);
         void onFileChanged(MediaFile file);
         void onFileRemoved(String path);
@@ -35,55 +37,80 @@ public class MediaIndexer {
     private final ExecutorService            executor = Executors.newSingleThreadExecutor();
     private final Map<String, ManifestEntry> manifest = new HashMap<>();
     private final List<MediaFile>            index    = new ArrayList<>();
-    private IndexListener                    listener;
+    private       IndexListener              listener;
+    private       boolean                    scanning = false;
 
     public void setListener(IndexListener l) { this.listener = l; }
+    public boolean isScanning()              { return scanning; }
 
-    // ── Full scan ─────────────────────────────────────────────────────────────
+    // ── Full scan — throttled, flat, no hashing ───────────────────────────────
 
     public void scanFolder(String folderPath) {
-    executor.submit(() -> {
-        File folder = new File(folderPath);
-        if (!folder.exists() || !folder.isDirectory()) return;
+        if (scanning) return;
+        scanning = true;
 
-        File[] files = folder.listFiles();
-        if (files == null) return;
+        executor.submit(() -> {
+            File folder = new File(folderPath);
+            if (!folder.exists() || !folder.isDirectory()) {
+                scanning = false;
+                return;
+            }
 
-        List<MediaFile> page     = new ArrayList<>();
-        List<MediaFile> allFound = new ArrayList<>();
+            File[] files = folder.listFiles();
+            if (files == null) {
+                scanning = false;
+                return;
+            }
 
-        for (File f : files) {
-            // Skip directories entirely — flat scan only
-            if (f.isDirectory()) continue;
+            List<MediaFile> page     = new ArrayList<>();
+            List<MediaFile> allFound = new ArrayList<>();
 
-            MediaFile mf = buildMediaFile(f);
-            if (mf.getType() != MediaFile.Type.UNSUPPORTED) {
-                page.add(mf);
-                allFound.add(mf);
+            for (File f : files) {
+                if (f.isDirectory()) continue;
 
-                if (page.size() >= PAGE_SIZE && listener != null) {
-                    List<MediaFile> batch = new ArrayList<>(page);
-                    for (MediaFile pf : batch) listener.onFileFound(pf);
-                    page.clear();
+                // Skip already indexed files
+                if (manifest.containsKey(f.getAbsolutePath())) continue;
+
+                MediaFile mf = buildLight(f);
+                if (mf.getType() != MediaFile.Type.UNSUPPORTED) {
+                    page.add(mf);
+                    allFound.add(mf);
+
+                    if (page.size() >= PAGE_SIZE) {
+                        emitPage(new ArrayList<>(page));
+                        page.clear();
+
+                        // Throttle — give UI thread breathing room
+                        try { Thread.sleep(PAGE_DELAY_MS); }
+                        catch (InterruptedException ignored) {}
+                    }
                 }
             }
-        }
 
-        if (!page.isEmpty() && listener != null) {
-            for (MediaFile f : page) listener.onFileFound(f);
-        }
+            // Emit remaining
+            if (!page.isEmpty()) emitPage(new ArrayList<>(page));
 
-        synchronized (index) { index.addAll(allFound); }
+            synchronized (index) { index.addAll(allFound); }
 
-        if (listener != null) {
-            listener.onScanComplete(new ArrayList<>(index));
-        }
-    });
-}
+            scanning = false;
+
+            if (listener != null) {
+                listener.onScanComplete(new ArrayList<>(index));
+            }
+        });
+    }
+
+    private void emitPage(List<MediaFile> page) {
+        if (listener == null) return;
+        for (MediaFile f : page) listener.onFileFound(f);
+        listener.onPageLoaded(page);
+    }
 
     // ── Lightweight rescan ────────────────────────────────────────────────────
 
     public void rescan(String folderPath) {
+        if (scanning) return;
+
         executor.submit(() -> {
             File folder = new File(folderPath);
             if (!folder.exists()) return;
@@ -100,19 +127,20 @@ public class MediaIndexer {
                 ManifestEntry existing = manifest.get(path);
 
                 if (existing == null) {
-                    MediaFile mf = buildMediaFile(f);
+                    MediaFile mf = buildLight(f);
                     addToIndex(mf);
                     if (listener != null) listener.onFileFound(mf);
 
                 } else if (existing.size != size) {
-                    MediaFile mf = buildMediaFile(f);
+                    MediaFile mf = buildLight(f);
                     updateInIndex(mf);
                     if (listener != null) listener.onFileChanged(mf);
 
                 } else {
+                    // Size same — partial hash check
                     byte[] newHash = HashScanner.partialHash(path);
                     if (!HashScanner.hashesMatch(existing.hash, newHash)) {
-                        MediaFile mf = buildMediaFile(f);
+                        MediaFile mf = buildLight(f);
                         updateInIndex(mf);
                         if (listener != null) listener.onFileChanged(mf);
                     }
@@ -137,17 +165,30 @@ public class MediaIndexer {
         });
     }
 
-    // ── Index helpers ─────────────────────────────────────────────────────────
+    // ── Full reset + rescan ───────────────────────────────────────────────────
 
-    private MediaFile buildMediaFile(File f) {
-        MediaFile mf   = new MediaFile(f.getAbsolutePath(), f.length());
-        byte[]    hash = HashScanner.partialHash(f.getAbsolutePath());
-        mf.setPartialHash(hash);
+    public void fullReset(List<String> folders) {
+        executor.submit(() -> {
+            synchronized (index) { index.clear(); }
+            manifest.clear();
+            scanning = false;
+            for (String folder : folders) {
+                scanFolder(folder);
+            }
+        });
+    }
+
+    // ── Builders ──────────────────────────────────────────────────────────────
+
+    private MediaFile buildLight(File f) {
+        MediaFile mf = new MediaFile(f.getAbsolutePath(), f.length());
         mf.setDateAdded(f.lastModified());
         manifest.put(f.getAbsolutePath(),
-            new ManifestEntry(f.getAbsolutePath(), f.length(), hash));
+            new ManifestEntry(f.getAbsolutePath(), f.length(), null));
         return mf;
     }
+
+    // ── Index helpers ─────────────────────────────────────────────────────────
 
     private void addToIndex(MediaFile mf) {
         synchronized (index) { index.add(mf); }
