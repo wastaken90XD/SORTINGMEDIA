@@ -4,7 +4,6 @@
     android:layout_height="match_parent"
     android:background="#0F0F1A">
 
-    <!-- Image preview -->
     <ImageView
         android:id="@+id/imagePreview"
         android:layout_width="match_parent"
@@ -12,14 +11,12 @@
         android:scaleType="fitCenter"
         android:visibility="gone"/>
 
-    <!-- Video preview -->
     <VideoView
         android:id="@+id/videoPreview"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:visibility="gone"/>
 
-    <!-- Unsupported format -->
     <LinearLayout
         android:id="@+id/unsupportedPreview"
         android:layout_width="wrap_content"
@@ -48,7 +45,7 @@
 
     </LinearLayout>
 
-    <!-- Bottom overlay — file details + action buttons -->
+    <!-- Bottom overlay -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -62,14 +59,14 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="8dp">
+            android:padding="6dp">
 
             <TextView
                 android:id="@+id/detailFileName"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textColor="#FFFFFF"
-                android:textSize="12sp"
+                android:textSize="11sp"
                 android:textStyle="bold"
                 android:singleLine="true"
                 android:ellipsize="middle"/>
@@ -79,16 +76,16 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textColor="#AAAAAA"
-                android:textSize="10sp"
-                android:layout_marginTop="2dp"/>
+                android:textSize="9sp"
+                android:layout_marginTop="1dp"/>
 
             <TextView
                 android:id="@+id/detailPath"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="#666666"
-                android:textSize="9sp"
-                android:layout_marginTop="2dp"
+                android:textColor="#555555"
+                android:textSize="8sp"
+                android:layout_marginTop="1dp"
                 android:singleLine="true"
                 android:ellipsize="start"/>
 
@@ -107,7 +104,7 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:text="TAGS"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textColor="#FFFFFF"
                 android:backgroundTint="#E94560"/>
 
@@ -117,7 +114,7 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:text="SKIP"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textColor="#FFFFFF"
                 android:backgroundTint="#444466"/>
 
@@ -127,7 +124,7 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:text="FLAG"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textColor="#FFFFFF"
                 android:backgroundTint="#AA6600"/>
 
@@ -137,11 +134,10 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:text="DONE"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textColor="#FFFFFF"
                 android:backgroundTint="#226622"/>
 
-            <!-- Position counter -->
             <TextView
                 android:id="@+id/positionCounter"
                 android:layout_width="0dp"
@@ -149,7 +145,7 @@
                 android:layout_weight="1"
                 android:gravity="center"
                 android:textColor="#AAAAAA"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:text="0 / 0"/>
 
         </LinearLayout>
