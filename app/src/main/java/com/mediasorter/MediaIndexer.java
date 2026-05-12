@@ -42,54 +42,44 @@ public class MediaIndexer {
     // ── Full scan ─────────────────────────────────────────────────────────────
 
     public void scanFolder(String folderPath) {
-        executor.submit(() -> {
-            File folder = new File(folderPath);
-            if (!folder.exists() || !folder.isDirectory()) return;
+    executor.submit(() -> {
+        File folder = new File(folderPath);
+        if (!folder.exists() || !folder.isDirectory()) return;
 
-            List<MediaFile> page    = new ArrayList<>();
-            List<MediaFile> allFound = new ArrayList<>();
-
-            scanRecursive(folder, page, allFound);
-
-            // Emit any remaining partial page
-            if (!page.isEmpty() && listener != null) {
-                for (MediaFile f : page) listener.onFileFound(f);
-            }
-
-            synchronized (index) {
-                index.addAll(allFound);
-            }
-
-            if (listener != null) {
-                listener.onScanComplete(new ArrayList<>(index));
-            }
-        });
-    }
-
-    private void scanRecursive(File dir, List<MediaFile> page,
-                                List<MediaFile> allFound) {
-        File[] files = dir.listFiles();
+        File[] files = folder.listFiles();
         if (files == null) return;
 
-        for (File f : files) {
-            if (f.isDirectory()) {
-                scanRecursive(f, page, allFound);
-            } else {
-                MediaFile mf = buildMediaFile(f);
-                if (mf.getType() != MediaFile.Type.UNSUPPORTED) {
-                    page.add(mf);
-                    allFound.add(mf);
+        List<MediaFile> page     = new ArrayList<>();
+        List<MediaFile> allFound = new ArrayList<>();
 
-                    // Emit page when full
-                    if (page.size() >= PAGE_SIZE && listener != null) {
-                        List<MediaFile> batch = new ArrayList<>(page);
-                        for (MediaFile pf : batch) listener.onFileFound(pf);
-                        page.clear();
-                    }
+        for (File f : files) {
+            // Skip directories entirely — flat scan only
+            if (f.isDirectory()) continue;
+
+            MediaFile mf = buildMediaFile(f);
+            if (mf.getType() != MediaFile.Type.UNSUPPORTED) {
+                page.add(mf);
+                allFound.add(mf);
+
+                if (page.size() >= PAGE_SIZE && listener != null) {
+                    List<MediaFile> batch = new ArrayList<>(page);
+                    for (MediaFile pf : batch) listener.onFileFound(pf);
+                    page.clear();
                 }
             }
         }
-    }
+
+        if (!page.isEmpty() && listener != null) {
+            for (MediaFile f : page) listener.onFileFound(f);
+        }
+
+        synchronized (index) { index.addAll(allFound); }
+
+        if (listener != null) {
+            listener.onScanComplete(new ArrayList<>(index));
+        }
+    });
+}
 
     // ── Lightweight rescan ────────────────────────────────────────────────────
 
