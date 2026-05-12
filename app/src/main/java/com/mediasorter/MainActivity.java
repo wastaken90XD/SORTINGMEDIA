@@ -22,7 +22,6 @@ import com.mediasorter.adapters.MediaAdapter;
 import com.mediasorter.adapters.TagAdapter;
 import com.mediasorter.models.Group;
 import com.mediasorter.models.MediaFile;
-import com.mediasorter.models.Tag;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -41,9 +40,10 @@ public class MainActivity extends Activity
     private SortManager     sortManager;
     private FileStatus      fileStatus;
     private FilterManager   filterManager;
+    private GestureSettings gestureSettings;
 
-    private MediaAdapter mediaAdapter;
-    private TagAdapter   tagAdapter;
+    private MediaAdapter  mediaAdapter;
+    private TagAdapter    tagAdapter;
     private QuickTagPanel quickTagPanel;
 
     private List<MediaFile> currentFiles = new ArrayList<>();
@@ -55,6 +55,7 @@ public class MainActivity extends Activity
     private TextView progressLabel;
     private Button   btnSort;
     private Button   btnFilter;
+    private Button   btnScan;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -66,14 +67,17 @@ public class MainActivity extends Activity
         initManagers();
         initAdapters();
         initViews();
-        initFolders();
+        // No auto scan — user initiates
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        for (String folder : folderManager.getFolders()) {
-            indexer.rescan(folder);
+        // Only rescan if already indexed
+        if (!indexer.getIndex().isEmpty()) {
+            for (String folder : folderManager.getFolders()) {
+                indexer.rescan(folder);
+            }
         }
     }
 
@@ -82,20 +86,22 @@ public class MainActivity extends Activity
         super.onDestroy();
         folderWatcher.unwatchAll();
         if (previewManager != null) previewManager.release();
+        thumbnailLoader.shutdown();
     }
 
     private void initManagers() {
-        indexer         = new MediaIndexer();
-        tagManager      = new TagManager(this);
-        folderManager   = new FolderManager(this);
-        folderWatcher   = new FolderWatcher(this);
-        searchManager   = new SearchManager();
-        groupManager    = new GroupManager();
-        cacheManager    = new CacheManager(this);
-        thumbnailLoader = new ThumbnailLoader(this);
-        sortManager     = new SortManager();
-        fileStatus      = new FileStatus(this);
-        filterManager   = new FilterManager(fileStatus);
+        indexer          = new MediaIndexer();
+        tagManager       = new TagManager(this);
+        folderManager    = new FolderManager(this);
+        folderWatcher    = new FolderWatcher(this);
+        searchManager    = new SearchManager();
+        groupManager     = new GroupManager();
+        cacheManager     = new CacheManager(this);
+        thumbnailLoader  = new ThumbnailLoader(this);
+        sortManager      = new SortManager();
+        fileStatus       = new FileStatus(this);
+        filterManager    = new FilterManager(fileStatus);
+        gestureSettings  = new GestureSettings(this);
         indexer.setListener(this);
     }
 
@@ -140,24 +146,36 @@ public class MainActivity extends Activity
             @Override public void onDismiss() {}
         });
 
-        // Swipe left/right for navigation
-  GestureDetector swipeDetector = new GestureDetector(this,
-    new GestureDetector.SimpleOnGestureListener() {
-        @Override
-        public boolean onFling(MotionEvent e1, MotionEvent e2,
-                               float vX, float vY) {
-            if (e1 == null || e2 == null) return false;
-            float dx = e2.getX() - e1.getX();
-            float dy = e2.getY() - e1.getY();
-            if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 100) {
-                if (dx < 0) navigateNext();
-                else        navigatePrev();
-                return true;
-            }
-            return false;
-        }
-    });
-previewManager.setSwipeDetector(swipeDetector);
+        // Gesture detector — reads from GestureSettings
+        GestureDetector gestureDetector = new GestureDetector(this,
+            new GestureDetector.SimpleOnGestureListener() {
+                @Override
+                public boolean onFling(MotionEvent e1, MotionEvent e2,
+                                       float vX, float vY) {
+                    if (e1 == null || e2 == null) return false;
+                    float dx = e2.getX() - e1.getX();
+                    float dy = e2.getY() - e1.getY();
+
+                    if (Math.abs(dx) > Math.abs(dy)) {
+                        if (Math.abs(dx) > 100) {
+                            executeGesture(dx < 0
+                                ? gestureSettings.getLeft()
+                                : gestureSettings.getRight());
+                            return true;
+                        }
+                    } else {
+                        if (Math.abs(dy) > 100) {
+                            executeGesture(dy < 0
+                                ? gestureSettings.getUp()
+                                : gestureSettings.getDown());
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            });
+
+        previewManager.setSwipeDetector(gestureDetector);
 
         progressLabel = findViewById(R.id.progressLabel);
 
@@ -197,6 +215,16 @@ previewManager.setSwipeDetector(swipeDetector);
         btnFilter.setText(filterManager.getLabel());
         btnFilter.setOnClickListener(v -> showFilterMenu(v));
 
+        btnScan = findViewById(R.id.btnScan);
+        btnScan.setOnClickListener(v -> startScan());
+
+        Button btnRescan = findViewById(R.id.btnRescan);
+        btnRescan.setOnClickListener(v -> {
+            for (String folder : folderManager.getFolders()) {
+                indexer.rescan(folder);
+            }
+        });
+
         Button btnGroupBy = findViewById(R.id.btnGroupBy);
         btnGroupBy.setOnClickListener(v -> showGroupMenu(v));
 
@@ -211,14 +239,33 @@ previewManager.setSwipeDetector(swipeDetector);
         tagAdapter.setTags(tagManager.getAllTags());
     }
 
-    private void initFolders() {
+    // ── Scan ──────────────────────────────────────────────────────────────────
+
+    private void startScan() {
         if (folderManager.isEmpty()) {
             showAddFolderDialog();
-        } else {
-            for (String folder : folderManager.getFolders()) {
-                indexer.scanFolder(folder);
-                folderWatcher.watch(folder);
-            }
+            return;
+        }
+        btnScan.setEnabled(false);
+        btnScan.setText("Scanning…");
+        for (String folder : folderManager.getFolders()) {
+            indexer.scanFolder(folder);
+            folderWatcher.watch(folder);
+        }
+    }
+
+    // ── Gesture execution ─────────────────────────────────────────────────────
+
+    private void executeGesture(GestureSettings.GestureAction action) {
+        switch (action) {
+            case NEXT_FILE:    navigateNext();    break;
+            case PREV_FILE:    navigatePrev();    break;
+            case QUICK_TAGS:   quickTagPanel.show(); break;
+            case SKIP:         handleSkip();      break;
+            case FLAG:         handleFlag();      break;
+            case DONE:         handleDone();      break;
+            case FILTER_CYCLE: cycleFilter();     break;
+            case NOTHING:      break;
         }
     }
 
@@ -226,27 +273,32 @@ previewManager.setSwipeDetector(swipeDetector);
 
     private void handleSkip() {
         if (currentIndex < 0 || currentIndex >= currentFiles.size()) return;
-        MediaFile file = currentFiles.get(currentIndex);
-        fileStatus.setSkipped(file.getPath());
+        fileStatus.setSkipped(currentFiles.get(currentIndex).getPath());
         navigateNext();
     }
 
     private void handleFlag() {
         if (currentIndex < 0 || currentIndex >= currentFiles.size()) return;
         MediaFile file = currentFiles.get(currentIndex);
-        if (fileStatus.isFlagged(file.getPath())) {
+        if (fileStatus.isFlagged(file.getPath()))
             fileStatus.clearStatus(file.getPath());
-        } else {
+        else
             fileStatus.setFlagged(file.getPath());
-        }
         previewManager.load(file);
     }
 
     private void handleDone() {
         if (currentIndex < 0 || currentIndex >= currentFiles.size()) return;
-        MediaFile file = currentFiles.get(currentIndex);
-        fileStatus.setDone(file.getPath());
+        fileStatus.setDone(currentFiles.get(currentIndex).getPath());
         navigateNext();
+    }
+
+    private void cycleFilter() {
+        FilterManager.Filter[] filters = FilterManager.Filter.values();
+        int next = (filterManager.getCurrent().ordinal() + 1) % filters.length;
+        filterManager.setFilter(filters[next]);
+        btnFilter.setText(filterManager.getLabel());
+        applyGrouping();
     }
 
     // ── Navigation ────────────────────────────────────────────────────────────
@@ -337,7 +389,6 @@ previewManager.setSwipeDetector(swipeDetector);
             applyGrouping();
             return true;
         });
-
         menu.show();
     }
 
@@ -363,7 +414,6 @@ previewManager.setSwipeDetector(swipeDetector);
             applyGrouping();
             return true;
         });
-
         menu.show();
     }
 
@@ -386,7 +436,6 @@ previewManager.setSwipeDetector(swipeDetector);
             applyGrouping();
             return true;
         });
-
         menu.show();
     }
 
@@ -421,7 +470,6 @@ previewManager.setSwipeDetector(swipeDetector);
     private void showAddFolderDialog() {
         EditText input = new EditText(this);
         input.setHint("/sdcard/DCIM");
-
         new AlertDialog.Builder(this)
             .setTitle("Add folder to watch")
             .setView(input)
@@ -429,8 +477,7 @@ previewManager.setSwipeDetector(swipeDetector);
                 String path = input.getText().toString().trim();
                 if (!path.isEmpty()) {
                     folderManager.addFolder(path);
-                    indexer.scanFolder(path);
-                    folderWatcher.watch(path);
+                    startScan();
                 }
             })
             .setNegativeButton("Cancel", null)
@@ -470,13 +517,17 @@ previewManager.setSwipeDetector(swipeDetector);
     }
 
     @Override
+    public void onPageLoaded(List<MediaFile> page) {
+        mainHandler.post(this::applyGrouping);
+    }
+
+    @Override
     public void onScanComplete(List<MediaFile> allFiles) {
         mainHandler.post(() -> {
+            btnScan.setEnabled(true);
+            btnScan.setText("SCAN");
             searchManager.setFullList(allFiles);
             applyGrouping();
-            if (currentIndex >= currentFiles.size()) {
-                currentIndex = currentFiles.isEmpty() ? -1 : 0;
-            }
         });
     }
 
