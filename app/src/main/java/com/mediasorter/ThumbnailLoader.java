@@ -1,114 +1,139 @@
-package com.mediasorter;
+package com.mediasorter.adapters;
 
-import android.content.Context;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.media.MediaMetadataRetriever;
-import android.os.Handler;
-import android.os.Looper;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.ImageView;
+import android.widget.TextView;
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.RecyclerView;
+import com.mediasorter.R;
+import com.mediasorter.ThumbnailLoader;
 import com.mediasorter.models.MediaFile;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.ArrayList;
+import java.util.List;
 
-public class ThumbnailLoader {
+public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> {
 
-    private static final int THUMB_SIZE = 256;
-
-    private final ExecutorService executor = Executors.newFixedThreadPool(2);
-    private final Handler         mainHandler = new Handler(Looper.getMainLooper());
-    private final CacheManager    cache;
-
-    public ThumbnailLoader(Context context) {
-        this.cache = new CacheManager(context);
+    public interface OnFileClickListener {
+        void onFileClick(MediaFile file);
     }
 
-    public void load(MediaFile file, ImageView target) {
-        target.setTag(file.getPath());
+    private List<MediaFile>     files        = new ArrayList<>();
+    private OnFileClickListener listener;
+    private ThumbnailLoader     loader;
+    private String              selectedPath = null;
 
-        executor.submit(() -> {
-            Bitmap bmp = null;
+    public MediaAdapter(ThumbnailLoader loader, OnFileClickListener listener) {
+        this.loader   = loader;
+        this.listener = listener;
+    }
 
-            // Check cache first
-            File thumbFile = cache.getThumbnailFile(file.getPath());
-            if (thumbFile.exists()) {
-                bmp = BitmapFactory.decodeFile(thumbFile.getAbsolutePath());
+    // ── Data ──────────────────────────────────────────────────────────────────
+
+    public void setFiles(List<MediaFile> files) {
+        this.files = new ArrayList<>(files);
+        notifyDataSetChanged();
+    }
+
+    public void addFile(MediaFile file) {
+        files.add(file);
+        notifyItemInserted(files.size() - 1);
+    }
+
+    public void removeFile(String path) {
+        for (int i = 0; i < files.size(); i++) {
+            if (files.get(i).getPath().equals(path)) {
+                files.remove(i);
+                notifyItemRemoved(i);
+                return;
             }
+        }
+    }
 
-            // Generate if not cached
-            if (bmp == null) {
-                bmp = generate(file);
-                if (bmp != null) saveThumbnail(bmp, thumbFile);
+    public void updateFile(MediaFile file) {
+        for (int i = 0; i < files.size(); i++) {
+            if (files.get(i).getPath().equals(file.getPath())) {
+                files.set(i, file);
+                notifyItemChanged(i);
+                return;
             }
+        }
+    }
 
-            // Evict cache if needed
-            cache.evictIfNeeded();
+    public void setSelected(String path) {
+        String old = selectedPath;
+        selectedPath = path;
+        for (int i = 0; i < files.size(); i++) {
+            String p = files.get(i).getPath();
+            if (p.equals(old) || p.equals(path)) notifyItemChanged(i);
+        }
+    }
 
-            final Bitmap finalBmp = bmp;
-            mainHandler.post(() -> {
-                // Make sure view hasn't been recycled
-                if (file.getPath().equals(target.getTag())) {
-                    if (finalBmp != null) {
-                        target.setImageBitmap(finalBmp);
-                    } else {
-                        target.setImageResource(android.R.drawable.ic_menu_report_image);
-                    }
-                }
-            });
+    public String getSelectedPath() { return selectedPath; }
+
+    // ── RecyclerView ──────────────────────────────────────────────────────────
+
+    @NonNull
+    @Override
+    public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View v = LayoutInflater.from(parent.getContext())
+            .inflate(R.layout.item_media_file, parent, false);
+        return new ViewHolder(v);
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
+        MediaFile file = files.get(position);
+
+        holder.fileName.setText(file.getName());
+        holder.fileDetails.setText(
+            file.getFormattedSize() + "  •  " + file.getType().name().toLowerCase());
+
+        // Tags
+        String tags = file.getTags().isEmpty()
+            ? "No tags"
+            : String.join("  ", file.getTags());
+        holder.fileTags.setText(tags);
+
+        // Selection highlight
+        holder.itemView.setBackgroundColor(
+            file.getPath().equals(selectedPath) ? 0xFF1A1A4E : 0x00000000);
+
+        // Load thumbnail only when view is visible
+        loader.load(file, holder.thumbnail);
+
+        holder.itemView.setOnClickListener(v -> {
+            setSelected(file.getPath());
+            if (listener != null) listener.onFileClick(file);
         });
     }
 
-    private Bitmap generate(MediaFile file) {
-        switch (file.getType()) {
-            case IMAGE:  return generateImage(file.getPath());
-            case VIDEO:  return generateVideo(file.getPath());
-            default:     return null;
+    @Override
+    public void onViewRecycled(@NonNull ViewHolder holder) {
+        super.onViewRecycled(holder);
+        // Cancel thumbnail load when view scrolls off screen
+        if (holder.thumbnail.getTag() != null) {
+            loader.cancel(holder.thumbnail.getTag().toString());
+            holder.thumbnail.setImageBitmap(null);
         }
     }
 
-    private Bitmap generateImage(String path) {
-        BitmapFactory.Options opts = new BitmapFactory.Options();
-        opts.inJustDecodeBounds = true;
-        BitmapFactory.decodeFile(path, opts);
+    @Override
+    public int getItemCount() { return files.size(); }
 
-        opts.inSampleSize    = calculateSampleSize(opts, THUMB_SIZE, THUMB_SIZE);
-        opts.inJustDecodeBounds = false;
+    static class ViewHolder extends RecyclerView.ViewHolder {
+        ImageView thumbnail;
+        TextView  fileName;
+        TextView  fileDetails;
+        TextView  fileTags;
 
-        return BitmapFactory.decodeFile(path, opts);
-    }
-
-    private Bitmap generateVideo(String path) {
-        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
-        try {
-            retriever.setDataSource(path);
-            return retriever.getFrameAtTime(0);
-        } catch (Exception e) {
-            return null;
-        } finally {
-            try { retriever.release(); } catch (Exception ignored) {}
+        ViewHolder(View v) {
+            super(v);
+            thumbnail   = v.findViewById(R.id.thumbnail);
+            fileName    = v.findViewById(R.id.fileName);
+            fileDetails = v.findViewById(R.id.fileDetails);
+            fileTags    = v.findViewById(R.id.fileTags);
         }
-    }
-
-    private void saveThumbnail(Bitmap bmp, File file) {
-        try (FileOutputStream fos = new FileOutputStream(file)) {
-            bmp.compress(Bitmap.CompressFormat.JPEG, 80, fos);
-        } catch (Exception ignored) {}
-    }
-
-    private int calculateSampleSize(BitmapFactory.Options opts, int reqW, int reqH) {
-        int inW = opts.outWidth;
-        int inH = opts.outHeight;
-        int sampleSize = 1;
-
-        if (inH > reqH || inW > reqW) {
-            int halfH = inH / 2;
-            int halfW = inW / 2;
-            while ((halfH / sampleSize) >= reqH && (halfW / sampleSize) >= reqW) {
-                sampleSize *= 2;
-            }
-        }
-        return sampleSize;
     }
 }
