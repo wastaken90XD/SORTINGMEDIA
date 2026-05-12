@@ -19,7 +19,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         void onFileClick(MediaFile file);
     }
 
-    private List<MediaFile>     files    = new ArrayList<>();
+    private List<MediaFile>     files        = new ArrayList<>();
     private OnFileClickListener listener;
     private ThumbnailLoader     loader;
     private String              selectedPath = null;
@@ -28,6 +28,8 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         this.loader   = loader;
         this.listener = listener;
     }
+
+    // ── Data ──────────────────────────────────────────────────────────────────
 
     public void setFiles(List<MediaFile> files) {
         this.files = new ArrayList<>(files);
@@ -50,28 +52,27 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     }
 
     public void updateFile(MediaFile file) {
-    for (int i = 0; i < files.size(); i++) {
-        if (files.get(i).getPath().equals(file.getPath())) {
-            // Replace the whole object not just notify
-            files.set(i, file);
-            notifyItemChanged(i);
-            return;
+        for (int i = 0; i < files.size(); i++) {
+            if (files.get(i).getPath().equals(file.getPath())) {
+                files.set(i, file);
+                notifyItemChanged(i);
+                return;
+            }
         }
     }
-}
-    
-    public String getSelectedPath() {
-    return selectedPath;
-}
+
     public void setSelected(String path) {
         String old = selectedPath;
         selectedPath = path;
-        // Refresh old and new selection
         for (int i = 0; i < files.size(); i++) {
             String p = files.get(i).getPath();
             if (p.equals(old) || p.equals(path)) notifyItemChanged(i);
         }
     }
+
+    public String getSelectedPath() { return selectedPath; }
+
+    // ── RecyclerView ──────────────────────────────────────────────────────────
 
     @NonNull
     @Override
@@ -86,25 +87,36 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         MediaFile file = files.get(position);
 
         holder.fileName.setText(file.getName());
-        holder.fileDetails.setText(file.getFormattedSize()
-            + "  •  " + file.getType().name().toLowerCase());
+        holder.fileDetails.setText(
+            file.getFormattedSize() + "  •  " + file.getType().name().toLowerCase());
 
+        // Tags
         String tags = file.getTags().isEmpty()
             ? "No tags"
             : String.join("  ", file.getTags());
         holder.fileTags.setText(tags);
 
-        // Highlight selected
+        // Selection highlight
         holder.itemView.setBackgroundColor(
-            file.getPath().equals(selectedPath) ? 0xFF1A1A4E : 0x00000000
-        );
+            file.getPath().equals(selectedPath) ? 0xFF1A1A4E : 0x00000000);
 
+        // Load thumbnail only when view is visible
         loader.load(file, holder.thumbnail);
 
         holder.itemView.setOnClickListener(v -> {
             setSelected(file.getPath());
             if (listener != null) listener.onFileClick(file);
         });
+    }
+
+    @Override
+    public void onViewRecycled(@NonNull ViewHolder holder) {
+        super.onViewRecycled(holder);
+        // Cancel thumbnail load when view scrolls off screen
+        if (holder.thumbnail.getTag() != null) {
+            loader.cancel(holder.thumbnail.getTag().toString());
+            holder.thumbnail.setImageBitmap(null);
+        }
     }
 
     @Override
