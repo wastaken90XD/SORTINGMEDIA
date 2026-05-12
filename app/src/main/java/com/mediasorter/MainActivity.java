@@ -49,15 +49,18 @@ public class MainActivity extends Activity
     private List<MediaFile> currentFiles = new ArrayList<>();
     private int             currentIndex = -1;
 
+    // Single pending refresh — prevents multiple simultaneous refreshes
+    private boolean refreshPending = false;
+
     private EditText searchBar;
-    private EditText tagSearch;
-    private EditText newTagInput;
     private TextView progressLabel;
     private Button   btnSort;
     private Button   btnFilter;
     private Button   btnScan;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,13 +70,11 @@ public class MainActivity extends Activity
         initManagers();
         initAdapters();
         initViews();
-        // No auto scan — user initiates
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        // Only rescan if already indexed
         if (!indexer.getIndex().isEmpty()) {
             for (String folder : folderManager.getFolders()) {
                 indexer.rescan(folder);
@@ -89,19 +90,21 @@ public class MainActivity extends Activity
         thumbnailLoader.shutdown();
     }
 
+    // ── Init ──────────────────────────────────────────────────────────────────
+
     private void initManagers() {
-        indexer          = new MediaIndexer();
-        tagManager       = new TagManager(this);
-        folderManager    = new FolderManager(this);
-        folderWatcher    = new FolderWatcher(this);
-        searchManager    = new SearchManager();
-        groupManager     = new GroupManager();
-        cacheManager     = new CacheManager(this);
-        thumbnailLoader  = new ThumbnailLoader(this);
-        sortManager      = new SortManager();
-        fileStatus       = new FileStatus(this);
-        filterManager    = new FilterManager(fileStatus);
-        gestureSettings  = new GestureSettings(this);
+        indexer         = new MediaIndexer();
+        tagManager      = new TagManager(this);
+        folderManager   = new FolderManager(this);
+        folderWatcher   = new FolderWatcher(this);
+        searchManager   = new SearchManager();
+        groupManager    = new GroupManager();
+        cacheManager    = new CacheManager(this);
+        thumbnailLoader = new ThumbnailLoader(this);
+        sortManager     = new SortManager();
+        fileStatus      = new FileStatus(this);
+        filterManager   = new FilterManager(fileStatus);
+        gestureSettings = new GestureSettings(this);
         indexer.setListener(this);
     }
 
@@ -134,19 +137,12 @@ public class MainActivity extends Activity
         quickTagPanel.setListener(new QuickTagPanel.Listener() {
             @Override
             public void onTagToggled(String tagName, boolean applied) {
-                if (currentIndex < 0 || currentIndex >= currentFiles.size()) return;
-                MediaFile file = currentFiles.get(currentIndex);
-                if (applied) tagManager.applyTag(file, tagName);
-                else         tagManager.removeTag(file, tagName);
-                tagAdapter.setCurrentFile(file);
-                tagAdapter.setTags(tagManager.getAllTags());
-                mediaAdapter.updateFile(file);
-                updateProgress();
+                applyTagToCurrentFile(tagName, applied);
             }
             @Override public void onDismiss() {}
         });
 
-        // Gesture detector — reads from GestureSettings
+        // Gesture detector
         GestureDetector gestureDetector = new GestureDetector(this,
             new GestureDetector.SimpleOnGestureListener() {
                 @Override
@@ -155,7 +151,6 @@ public class MainActivity extends Activity
                     if (e1 == null || e2 == null) return false;
                     float dx = e2.getX() - e1.getX();
                     float dy = e2.getY() - e1.getY();
-
                     if (Math.abs(dx) > Math.abs(dy)) {
                         if (Math.abs(dx) > 100) {
                             executeGesture(dx < 0
@@ -178,18 +173,17 @@ public class MainActivity extends Activity
         previewManager.setSwipeDetector(gestureDetector);
 
         progressLabel = findViewById(R.id.progressLabel);
+        searchBar     = findViewById(R.id.searchBar);
 
-        searchBar = findViewById(R.id.searchBar);
         searchBar.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
             @Override public void afterTextChanged(Editable s) {}
             @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
-                runSearch(s.toString());
+                scheduleRefresh();
             }
         });
 
-        tagSearch = findViewById(R.id.tagSearch);
-        tagSearch.addTextChangedListener(new TextWatcher() {
+        findViewById(R.id.tagSearch).addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
             @Override public void afterTextChanged(Editable s) {}
             @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
@@ -197,14 +191,15 @@ public class MainActivity extends Activity
             }
         });
 
-        newTagInput = findViewById(R.id.newTagInput);
+        ((EditText) findViewById(R.id.newTagInput));
         Button btnAddTag = findViewById(R.id.btnAddTag);
         btnAddTag.setOnClickListener(v -> {
-            String name = newTagInput.getText().toString().trim();
+            EditText input = findViewById(R.id.newTagInput);
+            String name = input.getText().toString().trim();
             if (name.isEmpty()) return;
             tagManager.createTag(name);
             tagAdapter.setTags(tagManager.getAllTags());
-            newTagInput.setText("");
+            input.setText("");
         });
 
         btnSort = findViewById(R.id.btnSort);
@@ -218,25 +213,67 @@ public class MainActivity extends Activity
         btnScan = findViewById(R.id.btnScan);
         btnScan.setOnClickListener(v -> startScan());
 
-        Button btnRescan = findViewById(R.id.btnRescan);
-        btnRescan.setOnClickListener(v -> {
+        findViewById(R.id.btnRescan).setOnClickListener(v -> {
             for (String folder : folderManager.getFolders()) {
                 indexer.rescan(folder);
             }
         });
 
-        Button btnGroupBy = findViewById(R.id.btnGroupBy);
-        btnGroupBy.setOnClickListener(v -> showGroupMenu(v));
+        findViewById(R.id.btnGroupBy).setOnClickListener(v -> showGroupMenu(v));
 
-        Button btnDashboard = findViewById(R.id.btnDashboard);
-        btnDashboard.setOnClickListener(v ->
+        findViewById(R.id.btnDashboard).setOnClickListener(v ->
             startActivity(new Intent(this, DashboardActivity.class)));
 
-        Button btnSettings = findViewById(R.id.btnSettings);
-        btnSettings.setOnClickListener(v ->
+        findViewById(R.id.btnSettings).setOnClickListener(v ->
             startActivity(new Intent(this, SettingsActivity.class)));
 
         tagAdapter.setTags(tagManager.getAllTags());
+    }
+
+    // ── Single refresh path ───────────────────────────────────────────────────
+
+    // All UI updates funnel through here — prevents concurrent refreshes
+    private void scheduleRefresh() {
+        if (refreshPending) return;
+        refreshPending = true;
+        mainHandler.postDelayed(this::executeRefresh, 150);
+    }
+
+    private void executeRefresh() {
+        refreshPending = false;
+
+        String query = searchBar.getText().toString().trim();
+
+        // Get base list from indexer
+        List<MediaFile> base = indexer.getIndex();
+
+        // Search
+        if (!query.isEmpty()) {
+            searchManager.setFullList(base);
+            base = searchManager.search(query);
+        }
+
+        // Group
+        List<Group>     groups    = groupManager.group(base);
+        List<MediaFile> flattened = new ArrayList<>();
+        for (Group g : groups) flattened.addAll(g.getFiles());
+
+        // Filter
+        flattened = filterManager.apply(flattened);
+
+        // Sort
+        sortManager.sort(flattened);
+
+        currentFiles = flattened;
+
+        // Single adapter update
+        mediaAdapter.setFiles(currentFiles);
+        updateProgress();
+
+        // Restore selection
+        if (currentIndex >= currentFiles.size()) {
+            currentIndex = currentFiles.isEmpty() ? -1 : 0;
+        }
     }
 
     // ── Scan ──────────────────────────────────────────────────────────────────
@@ -247,7 +284,7 @@ public class MainActivity extends Activity
             return;
         }
         btnScan.setEnabled(false);
-        btnScan.setText("Scanning…");
+        btnScan.setText("…");
         for (String folder : folderManager.getFolders()) {
             indexer.scanFolder(folder);
             folderWatcher.watch(folder);
@@ -258,13 +295,13 @@ public class MainActivity extends Activity
 
     private void executeGesture(GestureSettings.GestureAction action) {
         switch (action) {
-            case NEXT_FILE:    navigateNext();    break;
-            case PREV_FILE:    navigatePrev();    break;
+            case NEXT_FILE:    navigateNext();       break;
+            case PREV_FILE:    navigatePrev();       break;
             case QUICK_TAGS:   quickTagPanel.show(); break;
-            case SKIP:         handleSkip();      break;
-            case FLAG:         handleFlag();      break;
-            case DONE:         handleDone();      break;
-            case FILTER_CYCLE: cycleFilter();     break;
+            case SKIP:         handleSkip();         break;
+            case FLAG:         handleFlag();         break;
+            case DONE:         handleDone();         break;
+            case FILTER_CYCLE: cycleFilter();        break;
             case NOTHING:      break;
         }
     }
@@ -298,7 +335,37 @@ public class MainActivity extends Activity
         int next = (filterManager.getCurrent().ordinal() + 1) % filters.length;
         filterManager.setFilter(filters[next]);
         btnFilter.setText(filterManager.getLabel());
-        applyGrouping();
+        scheduleRefresh();
+    }
+
+    // ── Tag application ───────────────────────────────────────────────────────
+
+    private void applyTagToCurrentFile(String tagName, boolean applied) {
+        if (currentIndex < 0 || currentIndex >= currentFiles.size()) return;
+        MediaFile file = currentFiles.get(currentIndex);
+        if (applied) tagManager.applyTag(file, tagName);
+        else         tagManager.removeTag(file, tagName);
+
+        // Update the exact same object in currentFiles
+        currentFiles.set(currentIndex, file);
+
+        // Update adapter with same object reference
+        mediaAdapter.updateFile(file);
+
+        // Update tag panel
+        tagAdapter.setCurrentFile(file);
+        tagAdapter.setTags(tagManager.getAllTags());
+
+        // Update quick tags
+        quickTagPanel.setCurrentFile(file,
+            tagManager.getTopTags(5),
+            tagManager.getRecentTags(5));
+
+        updateProgress();
+    }
+
+    private void onTagToggled(String tagName, boolean applied) {
+        applyTagToCurrentFile(tagName, applied);
     }
 
     // ── Navigation ────────────────────────────────────────────────────────────
@@ -323,7 +390,9 @@ public class MainActivity extends Activity
         tagAdapter.setCurrentFile(file);
         tagAdapter.setTags(tagManager.getAllTags());
         mediaAdapter.setSelected(file.getPath());
-        quickTagPanel.setCurrentFile(file, tagManager.getAllTags());
+        quickTagPanel.setCurrentFile(file,
+            tagManager.getTopTags(5),
+            tagManager.getRecentTags(5));
     }
 
     private void onFileSelected(MediaFile file) {
@@ -336,34 +405,12 @@ public class MainActivity extends Activity
         previewManager.setPosition(currentIndex + 1, currentFiles.size());
         tagAdapter.setCurrentFile(file);
         tagAdapter.setTags(tagManager.getAllTags());
-        quickTagPanel.setCurrentFile(file, tagManager.getAllTags());
+        quickTagPanel.setCurrentFile(file,
+            tagManager.getTopTags(5),
+            tagManager.getRecentTags(5));
     }
 
-    private void onTagToggled(String tagName, boolean applied) {
-        if (currentIndex < 0 || currentIndex >= currentFiles.size()) return;
-        MediaFile file = currentFiles.get(currentIndex);
-        if (applied) tagManager.applyTag(file, tagName);
-        else         tagManager.removeTag(file, tagName);
-        tagAdapter.setCurrentFile(file);
-        tagAdapter.setTags(tagManager.getAllTags());
-        mediaAdapter.updateFile(file);
-        updateProgress();
-    }
-
-    // ── Search ────────────────────────────────────────────────────────────────
-
-    private void runSearch(String query) {
-        searchManager.setFullList(indexer.getIndex());
-        List<MediaFile> results = searchManager.search(query);
-        results = filterManager.apply(results);
-        sortManager.sort(results);
-        currentFiles = results;
-        currentIndex = -1;
-        mediaAdapter.setFiles(results);
-        updateProgress();
-    }
-
-    // ── Sort ──────────────────────────────────────────────────────────────────
+    // ── Sort / Filter / Group ─────────────────────────────────────────────────
 
     private void showSortMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
@@ -374,7 +421,6 @@ public class MainActivity extends Activity
         menu.getMenu().add("Date ↑");
         menu.getMenu().add("Date ↓");
         menu.getMenu().add("Type");
-
         menu.setOnMenuItemClickListener(item -> {
             switch (item.getTitle().toString()) {
                 case "Name A-Z": sortManager.setSortBy(SortManager.SortBy.NAME_ASC);  break;
@@ -386,13 +432,11 @@ public class MainActivity extends Activity
                 case "Type":     sortManager.setSortBy(SortManager.SortBy.TYPE);      break;
             }
             btnSort.setText(sortManager.getLabel());
-            applyGrouping();
+            scheduleRefresh();
             return true;
         });
         menu.show();
     }
-
-    // ── Filter ────────────────────────────────────────────────────────────────
 
     private void showFilterMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
@@ -401,7 +445,6 @@ public class MainActivity extends Activity
         menu.getMenu().add("Flagged");
         menu.getMenu().add("Skipped");
         menu.getMenu().add("Done");
-
         menu.setOnMenuItemClickListener(item -> {
             switch (item.getTitle().toString()) {
                 case "All":      filterManager.setFilter(FilterManager.Filter.ALL);      break;
@@ -411,13 +454,11 @@ public class MainActivity extends Activity
                 case "Done":     filterManager.setFilter(FilterManager.Filter.DONE);     break;
             }
             btnFilter.setText(filterManager.getLabel());
-            applyGrouping();
+            scheduleRefresh();
             return true;
         });
         menu.show();
     }
-
-    // ── Group ─────────────────────────────────────────────────────────────────
 
     private void showGroupMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
@@ -425,7 +466,6 @@ public class MainActivity extends Activity
         menu.getMenu().add("By Tag");
         menu.getMenu().add("By Date");
         menu.getMenu().add("By Folder");
-
         menu.setOnMenuItemClickListener(item -> {
             switch (item.getTitle().toString()) {
                 case "By File Type": groupManager.setGroupBy(Group.GroupBy.FILE_TYPE); break;
@@ -433,22 +473,10 @@ public class MainActivity extends Activity
                 case "By Date":      groupManager.setGroupBy(Group.GroupBy.DATE);      break;
                 case "By Folder":    groupManager.setGroupBy(Group.GroupBy.FOLDER);    break;
             }
-            applyGrouping();
+            scheduleRefresh();
             return true;
         });
         menu.show();
-    }
-
-    private void applyGrouping() {
-        List<Group>     groups    = groupManager.group(indexer.getIndex());
-        List<MediaFile> flattened = new ArrayList<>();
-        for (Group g : groups) flattened.addAll(g.getFiles());
-        flattened = filterManager.apply(flattened);
-        sortManager.sort(flattened);
-        currentFiles = flattened;
-        currentIndex = -1;
-        mediaAdapter.setFiles(flattened);
-        updateProgress();
     }
 
     // ── Progress ──────────────────────────────────────────────────────────────
@@ -495,8 +523,8 @@ public class MainActivity extends Activity
     @Override
     public void onFileDeleted(String path) {
         mainHandler.post(() -> {
-            mediaAdapter.removeFile(path);
             currentFiles.removeIf(f -> f.getPath().equals(path));
+            mediaAdapter.removeFile(path);
             updateProgress();
         });
     }
@@ -513,12 +541,13 @@ public class MainActivity extends Activity
 
     @Override
     public void onFileFound(MediaFile file) {
-        mainHandler.post(() -> mediaAdapter.addFile(file));
+        // Don't update UI per file — wait for page or complete
     }
 
     @Override
     public void onPageLoaded(List<MediaFile> page) {
-        mainHandler.post(this::applyGrouping);
+        // Schedule single refresh — debounced, won't stack
+        mainHandler.post(this::scheduleRefresh);
     }
 
     @Override
@@ -526,21 +555,29 @@ public class MainActivity extends Activity
         mainHandler.post(() -> {
             btnScan.setEnabled(true);
             btnScan.setText("SCAN");
-            searchManager.setFullList(allFiles);
-            applyGrouping();
+            executeRefresh();
         });
     }
 
     @Override
     public void onFileChanged(MediaFile file) {
-        mainHandler.post(() -> mediaAdapter.updateFile(file));
+        mainHandler.post(() -> {
+            // Update in currentFiles
+            for (int i = 0; i < currentFiles.size(); i++) {
+                if (currentFiles.get(i).getPath().equals(file.getPath())) {
+                    currentFiles.set(i, file);
+                    break;
+                }
+            }
+            mediaAdapter.updateFile(file);
+        });
     }
 
     @Override
     public void onFileRemoved(String path) {
         mainHandler.post(() -> {
-            mediaAdapter.removeFile(path);
             currentFiles.removeIf(f -> f.getPath().equals(path));
+            mediaAdapter.removeFile(path);
             updateProgress();
         });
     }
