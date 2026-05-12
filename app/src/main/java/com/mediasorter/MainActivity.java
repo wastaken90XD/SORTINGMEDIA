@@ -192,8 +192,7 @@ public class MainActivity extends Activity
         });
 
         // After setContentView
-        EditText newTagInput = findViewById(R.id.newTagInput);
-        String tagText = newTagInput.getText().toString();
+        EditText newTagInput = (EditText) findViewById(R.id.newTagInput);
         Button btnAddTag = findViewById(R.id.btnAddTag);
         btnAddTag.setOnClickListener(v -> {
             EditText input = findViewById(R.id.newTagInput);
