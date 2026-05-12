@@ -19,7 +19,7 @@
             android:id="@+id/progressLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="0 / 0  (0%)"
+            android:text="0 / 0"
             android:textColor="#AAAAAA"
             android:textSize="11sp"
             android:layout_marginEnd="8dp"/>
@@ -29,7 +29,7 @@
             android:layout_width="0dp"
             android:layout_height="36dp"
             android:layout_weight="1"
-            android:hint="Search by name or tag…"
+            android:hint="Search…"
             android:textColorHint="#888888"
             android:textColor="#FFFFFF"
             android:background="#2A2A3E"
@@ -40,36 +40,53 @@
             android:singleLine="true"/>
 
         <Button
+            android:id="@+id/btnScan"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="SCAN"
+            android:textSize="11sp"
+            android:backgroundTint="#E94560"
+            android:layout_marginStart="6dp"/>
+
+        <Button
+            android:id="@+id/btnRescan"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="↺"
+            android:textSize="14sp"
+            android:layout_marginStart="4dp"/>
+
+        <Button
             android:id="@+id/btnSort"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
             android:text="Sort"
             android:textSize="11sp"
-            android:layout_marginStart="6dp"/>
-        
+            android:layout_marginStart="4dp"/>
+
         <Button
             android:id="@+id/btnFilter"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
             android:text="Filter"
             android:textSize="11sp"
-            android:layout_marginStart="6dp"/>
-        
+            android:layout_marginStart="4dp"/>
+
         <Button
             android:id="@+id/btnGroupBy"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
-            android:text="Group ▾"
+            android:text="Group"
             android:textSize="11sp"
-            android:layout_marginStart="6dp"/>
+            android:layout_marginStart="4dp"/>
 
         <Button
             android:id="@+id/btnDashboard"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
-            android:text="Dashboard"
-            android:textSize="11sp"
-            android:layout_marginStart="6dp"/>
+            android:text="📊"
+            android:textSize="14sp"
+            android:layout_marginStart="4dp"/>
 
         <Button
             android:id="@+id/btnSettings"
@@ -77,7 +94,7 @@
             android:layout_height="36dp"
             android:text="⚙"
             android:textSize="14sp"
-            android:layout_marginStart="6dp"/>
+            android:layout_marginStart="4dp"/>
 
     </LinearLayout>
 
