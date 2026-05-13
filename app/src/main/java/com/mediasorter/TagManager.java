@@ -15,15 +15,19 @@ import java.util.concurrent.Executors;
 
 public class TagManager {
 
-    private static final String PREFS        = "tag_recent_prefs";
-    private static final String KEY_RECENT   = "recent_tags";
-    private static final int    MAX_RECENT   = 10;
+    private static final String PREFS      = "tag_recent_prefs";
+    private static final String KEY_RECENT = "recent_tags";
+    private static final int    MAX_RECENT = 10;
 
-    private final TagDatabase       db;
-    private final ExecutorService   executor = Executors.newSingleThreadExecutor();
-    private final Map<String, Tag>  tagMap   = new HashMap<>();
+    private final TagDatabase        db;
+    private final ExecutorService    executor  = Executors.newSingleThreadExecutor();
+    private final Map<String, Tag>   tagMap    = new HashMap<>();
     private final LinkedList<String> recentTags;
-    private final SharedPreferences prefs;
+    private final SharedPreferences  prefs;
+
+    // Tag cache — maps filePath → list of tag names
+    // Survives list rebuilds so tags don't disappear on refresh
+    private final Map<String, List<String>> tagCache = new HashMap<>();
 
     public TagManager(Context context) {
         this.db         = TagDatabase.getInstance(context);
@@ -43,7 +47,7 @@ public class TagManager {
         });
     }
 
-    // ── Recent tags persistence ───────────────────────────────────────────────
+    // ── Recent tags ───────────────────────────────────────────────────────────
 
     private LinkedList<String> loadRecentTags() {
         LinkedList<String> list = new LinkedList<>();
@@ -72,22 +76,50 @@ public class TagManager {
         saveRecentTags();
     }
 
+    // ── Tag cache ─────────────────────────────────────────────────────────────
+
+    public void cacheFileTags(String path, List<String> tags) {
+        tagCache.put(path, new ArrayList<>(tags));
+    }
+
+    public List<String> getCachedTags(String path) {
+        List<String> cached = tagCache.get(path);
+        return cached != null ? new ArrayList<>(cached) : new ArrayList<>();
+    }
+
+    // Restore tags from cache to file objects — call before every refresh
+    public void restoreTagsToFiles(List<MediaFile> files) {
+        for (MediaFile f : files) {
+            List<String> cached = tagCache.get(f.getPath());
+            if (cached != null && !cached.isEmpty()) {
+                for (String tag : cached) {
+                    if (!f.hasTag(tag)) f.addTag(tag);
+                }
+            }
+        }
+    }
+
     // ── Create ────────────────────────────────────────────────────────────────
 
     public void createTag(String name) {
+        String trimmed = name.trim();
+        if (trimmed.isEmpty()) return;
         executor.submit(() -> {
-            Tag tag = new Tag(name.trim());
+            Tag tag = new Tag(trimmed);
             db.tagDao().insert(tag);
-            synchronized (tagMap) { tagMap.put(name, tag); }
+            synchronized (tagMap) { tagMap.put(trimmed, tag); }
         });
     }
 
-    // ── Apply / Remove ────────────────────────────────────────────────────────
+    // ── Apply ─────────────────────────────────────────────────────────────────
 
     public void applyTag(MediaFile file, String tagName) {
         if (file.hasTag(tagName)) return;
         file.addTag(tagName);
         addToRecent(tagName);
+
+        // Update cache immediately — before background thread runs
+        cacheFileTags(file.getPath(), file.getTags());
 
         executor.submit(() -> {
             synchronized (tagMap) {
@@ -104,9 +136,14 @@ public class TagManager {
         });
     }
 
+    // ── Remove ────────────────────────────────────────────────────────────────
+
     public void removeTag(MediaFile file, String tagName) {
         if (!file.hasTag(tagName)) return;
         file.removeTag(tagName);
+
+        // Update cache immediately
+        cacheFileTags(file.getPath(), file.getTags());
 
         executor.submit(() -> {
             synchronized (tagMap) {
@@ -134,6 +171,7 @@ public class TagManager {
                 if (tag != null) db.tagDao().delete(tag);
             }
         });
+        tagCache.forEach((path, tags) -> tags.remove(name));
     }
 
     // ── Query ─────────────────────────────────────────────────────────────────
@@ -147,13 +185,11 @@ public class TagManager {
         }
     }
 
-    // Top N tags by usage count
     public List<Tag> getTopTags(int n) {
         List<Tag> all = getAllTags();
         return all.subList(0, Math.min(n, all.size()));
     }
 
-    // Last N recently used tags
     public List<Tag> getRecentTags(int n) {
         List<Tag> result = new ArrayList<>();
         synchronized (tagMap) {
