@@ -49,7 +49,6 @@ public class MainActivity extends Activity
     private List<MediaFile> currentFiles = new ArrayList<>();
     private int             currentIndex = -1;
 
-    // Single pending refresh — prevents multiple simultaneous refreshes
     private boolean refreshPending = false;
 
     private EditText searchBar;
@@ -142,7 +141,6 @@ public class MainActivity extends Activity
             @Override public void onDismiss() {}
         });
 
-        // Gesture detector
         GestureDetector gestureDetector = new GestureDetector(this,
             new GestureDetector.SimpleOnGestureListener() {
                 @Override
@@ -182,17 +180,16 @@ public class MainActivity extends Activity
                 scheduleRefresh();
             }
         });
-            
-        ((EditText) findViewById(R.id.tagSearch)).addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
-            @Override public void afterTextChanged(Editable s) {}
-            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
-                tagAdapter.setTags(tagManager.searchTags(s.toString()));
-            }
-        });
 
-        // After setContentView
-        EditText newTagInput = (EditText) findViewById(R.id.newTagInput);
+        ((EditText) findViewById(R.id.tagSearch)).addTextChangedListener(
+            new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+                @Override public void afterTextChanged(Editable s) {}
+                @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                    tagAdapter.setTags(tagManager.searchTags(s.toString()));
+                }
+            });
+
         Button btnAddTag = findViewById(R.id.btnAddTag);
         btnAddTag.setOnClickListener(v -> {
             EditText input = findViewById(R.id.newTagInput);
@@ -231,9 +228,8 @@ public class MainActivity extends Activity
         tagAdapter.setTags(tagManager.getAllTags());
     }
 
-    // ── Single refresh path ───────────────────────────────────────────────────
+    // ── Refresh — single path ─────────────────────────────────────────────────
 
-    // All UI updates funnel through here — prevents concurrent refreshes
     private void scheduleRefresh() {
         if (refreshPending) return;
         refreshPending = true;
@@ -245,8 +241,11 @@ public class MainActivity extends Activity
 
         String query = searchBar.getText().toString().trim();
 
-        // Get base list from indexer
+        // Get base list
         List<MediaFile> base = indexer.getIndex();
+
+        // Restore tags from cache — prevents tags disappearing on refresh
+        tagManager.restoreTagsToFiles(base);
 
         // Search
         if (!query.isEmpty()) {
@@ -266,12 +265,9 @@ public class MainActivity extends Activity
         sortManager.sort(flattened);
 
         currentFiles = flattened;
-
-        // Single adapter update
         mediaAdapter.setFiles(currentFiles);
         updateProgress();
 
-        // Restore selection
         if (currentIndex >= currentFiles.size()) {
             currentIndex = currentFiles.isEmpty() ? -1 : 0;
         }
@@ -292,7 +288,7 @@ public class MainActivity extends Activity
         }
     }
 
-    // ── Gesture execution ─────────────────────────────────────────────────────
+    // ── Gesture ───────────────────────────────────────────────────────────────
 
     private void executeGesture(GestureSettings.GestureAction action) {
         switch (action) {
@@ -344,20 +340,21 @@ public class MainActivity extends Activity
     private void applyTagToCurrentFile(String tagName, boolean applied) {
         if (currentIndex < 0 || currentIndex >= currentFiles.size()) return;
         MediaFile file = currentFiles.get(currentIndex);
+
         if (applied) tagManager.applyTag(file, tagName);
         else         tagManager.removeTag(file, tagName);
 
-        // Update the exact same object in currentFiles
+        // Update same object in currentFiles
         currentFiles.set(currentIndex, file);
 
-        // Update adapter with same object reference
+        // Update adapter with same reference
         mediaAdapter.updateFile(file);
 
-        // Update tag panel
+        // Update tag panels
         tagAdapter.setCurrentFile(file);
         tagAdapter.setTags(tagManager.getAllTags());
 
-        // Update quick tags
+        // Update quick tag panel
         quickTagPanel.setCurrentFile(file,
             tagManager.getTopTags(5),
             tagManager.getRecentTags(5));
@@ -542,18 +539,35 @@ public class MainActivity extends Activity
 
     @Override
     public void onFileFound(MediaFile file) {
-        // Don't update UI per file — wait for page or complete
+        // Tags already loaded in buildLight via XmpReader
+        // Cache them immediately
+        if (!file.getTags().isEmpty()) {
+            tagManager.cacheFileTags(file.getPath(), file.getTags());
+        }
     }
 
     @Override
     public void onPageLoaded(List<MediaFile> page) {
-        // Schedule single refresh — debounced, won't stack
-        mainHandler.post(this::scheduleRefresh);
+        mainHandler.post(() -> {
+            // Cache tags for this page
+            for (MediaFile f : page) {
+                if (!f.getTags().isEmpty()) {
+                    tagManager.cacheFileTags(f.getPath(), f.getTags());
+                }
+            }
+            scheduleRefresh();
+        });
     }
 
     @Override
     public void onScanComplete(List<MediaFile> allFiles) {
         mainHandler.post(() -> {
+            // Cache all tags from XMP
+            for (MediaFile f : allFiles) {
+                if (!f.getTags().isEmpty()) {
+                    tagManager.cacheFileTags(f.getPath(), f.getTags());
+                }
+            }
             btnScan.setEnabled(true);
             btnScan.setText("SCAN");
             executeRefresh();
@@ -563,7 +577,10 @@ public class MainActivity extends Activity
     @Override
     public void onFileChanged(MediaFile file) {
         mainHandler.post(() -> {
-            // Update in currentFiles
+            // Re-cache tags for changed file
+            if (!file.getTags().isEmpty()) {
+                tagManager.cacheFileTags(file.getPath(), file.getTags());
+            }
             for (int i = 0; i < currentFiles.size(); i++) {
                 if (currentFiles.get(i).getPath().equals(file.getPath())) {
                     currentFiles.set(i, file);
