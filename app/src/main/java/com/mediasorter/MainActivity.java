@@ -182,8 +182,8 @@ public class MainActivity extends Activity
                 scheduleRefresh();
             }
         });
-
-        findViewById(R.id.tagSearch).addTextChangedListener(new TextWatcher() {
+            
+        ((EditText) findViewById(R.id.tagSearch)).addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
             @Override public void afterTextChanged(Editable s) {}
             @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
