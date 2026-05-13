@@ -120,15 +120,17 @@ public class QuickTagPanel {
             btn.setLayoutParams(lp);
 
             btn.setOnClickListener(v -> {
-                if (currentFile == null) return;
-                boolean nowApplied = currentFile.hasTag(tag.getName());
-                if (listener != null) {
-                    listener.onTagToggled(tag.getName(), !nowApplied);
-                }
-                // Toggle visual immediately
-                btn.setBackgroundColor(!nowApplied ? 0xFFE94560 : 0xFF2A2A3E);
-                btn.setTextColor(!nowApplied ? 0xFF121212 : 0xFFFFFFFF);
-            });
+    if (currentFile == null) return;
+    boolean nowApplied = currentFile.hasTag(tag.getName());
+    if (listener != null) {
+        listener.onTagToggled(tag.getName(), !nowApplied);
+    }
+    // Update local file state immediately
+    if (!nowApplied) currentFile.addTag(tag.getName());
+    else             currentFile.removeTag(tag.getName());
+    btn.setBackgroundColor(!nowApplied ? 0xFFE94560 : 0xFF2A2A3E);
+    btn.setTextColor(!nowApplied ? 0xFF121212 : 0xFFFFFFFF);
+});
 
             row.addView(btn);
         }
