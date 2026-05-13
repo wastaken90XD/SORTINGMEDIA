@@ -43,8 +43,6 @@ public class MediaIndexer {
     public void setListener(IndexListener l) { this.listener = l; }
     public boolean isScanning()              { return scanning; }
 
-    // ── Full scan ─────────────────────────────────────────────────────────────
-
     public void scanFolder(String folderPath) {
         if (scanning) return;
         scanning = true;
@@ -96,8 +94,6 @@ public class MediaIndexer {
             }
         });
     }
-
-    // ── Rescan ────────────────────────────────────────────────────────────────
 
     public void rescan(String folderPath) {
         if (scanning) return;
@@ -154,8 +150,6 @@ public class MediaIndexer {
         });
     }
 
-    // ── Full reset ────────────────────────────────────────────────────────────
-
     public void fullReset(List<String> folders) {
         synchronized (index) { index.clear(); }
         manifest.clear();
@@ -163,17 +157,18 @@ public class MediaIndexer {
         for (String folder : folders) scanFolder(folder);
     }
 
-    // ── Build ─────────────────────────────────────────────────────────────────
-
     private MediaFile buildLight(File f) {
         MediaFile mf = new MediaFile(f.getAbsolutePath(), f.length());
         mf.setDateAdded(f.lastModified());
+
+        // Read existing XMP tags from file metadata
+        List<String> existingTags = XmpReader.readTags(f.getAbsolutePath());
+        for (String tag : existingTags) mf.addTag(tag);
+
         manifest.put(f.getAbsolutePath(),
             new ManifestEntry(f.getAbsolutePath(), f.length(), null));
         return mf;
     }
-
-    // ── Index helpers ─────────────────────────────────────────────────────────
 
     private void addToIndex(MediaFile mf) {
         synchronized (index) { index.add(mf); }
