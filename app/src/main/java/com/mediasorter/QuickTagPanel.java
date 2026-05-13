@@ -1,7 +1,6 @@
 package com.mediasorter;
 
 import android.content.Context;
-import android.graphics.Color;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -31,13 +30,11 @@ public class QuickTagPanel {
     public QuickTagPanel(Context context, FrameLayout container) {
         this.context = context;
 
-        // Outer panel — fixed 2 row height at bottom
         panel = new LinearLayout(context);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackgroundColor(0xEE0F0F1A);
         panel.setPadding(4, 4, 4, 4);
 
-        // Row 1 — most used tags
         HorizontalScrollView scroll1 = new HorizontalScrollView(context);
         scroll1.setHorizontalScrollBarEnabled(false);
         row1 = new LinearLayout(context);
@@ -45,7 +42,6 @@ public class QuickTagPanel {
         row1.setGravity(Gravity.CENTER_VERTICAL);
         scroll1.addView(row1);
 
-        // Row 2 — recently used tags
         HorizontalScrollView scroll2 = new HorizontalScrollView(context);
         scroll2.setHorizontalScrollBarEnabled(false);
         row2 = new LinearLayout(context);
@@ -61,20 +57,17 @@ public class QuickTagPanel {
         panel.addView(scroll1);
         panel.addView(scroll2);
 
-        // Add to container at bottom
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, 80);
-        lp.gravity = Gravity.BOTTOM;
-        // Offset above action buttons (44dp) + details bar (~60dp)
+        lp.gravity      = Gravity.BOTTOM;
         lp.bottomMargin = 104;
         container.addView(panel, lp);
     }
 
     public void setListener(Listener l) { this.listener = l; }
 
-    // ── Update ────────────────────────────────────────────────────────────────
-
-    public void setCurrentFile(MediaFile file, List<Tag> topTags, List<Tag> recentTags) {
+    public void setCurrentFile(MediaFile file, List<Tag> topTags,
+                                List<Tag> recentTags) {
         this.currentFile = file;
         buildRow(row1, topTags,    "▲ ");
         buildRow(row2, recentTags, "⟳ ");
@@ -93,7 +86,6 @@ public class QuickTagPanel {
             return;
         }
 
-        // Row label
         TextView label = new TextView(context);
         label.setText(prefix);
         label.setTextColor(0xFF666666);
@@ -120,27 +112,24 @@ public class QuickTagPanel {
             btn.setLayoutParams(lp);
 
             btn.setOnClickListener(v -> {
-    if (currentFile == null) return;
-    boolean nowApplied = currentFile.hasTag(tag.getName());
-    if (listener != null) {
-        listener.onTagToggled(tag.getName(), !nowApplied);
-    }
-    // Update local file state immediately
-    if (!nowApplied) currentFile.addTag(tag.getName());
-    else             currentFile.removeTag(tag.getName());
-    btn.setBackgroundColor(!nowApplied ? 0xFFE94560 : 0xFF2A2A3E);
-    btn.setTextColor(!nowApplied ? 0xFF121212 : 0xFFFFFFFF);
-});
+                if (currentFile == null) return;
+                boolean nowApplied = currentFile.hasTag(tag.getName());
+                if (listener != null) {
+                    listener.onTagToggled(tag.getName(), !nowApplied);
+                }
+                // Update local file state immediately — fixes stale reference
+                if (!nowApplied) currentFile.addTag(tag.getName());
+                else             currentFile.removeTag(tag.getName());
+                // Toggle visual
+                btn.setBackgroundColor(!nowApplied ? 0xFFE94560 : 0xFF2A2A3E);
+                btn.setTextColor(!nowApplied ? 0xFF121212 : 0xFFFFFFFF);
+            });
 
             row.addView(btn);
         }
     }
 
-    // ── Visibility ────────────────────────────────────────────────────────────
-
-    public void show() {
-        panel.setVisibility(View.VISIBLE);
-    }
+    public void show() { panel.setVisibility(View.VISIBLE); }
 
     public void hide() {
         panel.setVisibility(View.GONE);
