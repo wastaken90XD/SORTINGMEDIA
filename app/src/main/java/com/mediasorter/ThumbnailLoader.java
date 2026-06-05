@@ -44,6 +44,8 @@ public class ThumbnailLoader {
         new LinkedHashMap<String, Bitmap>(16, 0.75f, true);
     private long currentBytes = 0;
 
+    private int maxCount = 100; // Default Thumbnail count.
+    
     // In-flight loads
     private final Map<String, Future<?>> inFlight = new LinkedHashMap<>();
 
@@ -79,6 +81,14 @@ public class ThumbnailLoader {
 
     public void setMaxMB(int mb) {
         setMaxBytes((long) mb * 1024 * 1024);
+    }
+
+    public int getMaxCount() {
+        return maxCount;
+    }
+
+    public void setMaxCount(int maxCount) {
+        this.maxCount = Math.max(10, maxCount);
     }
 
     // ── Load ──────────────────────────────────────────────────────────────────
