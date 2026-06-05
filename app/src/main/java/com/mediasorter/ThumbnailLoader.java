@@ -11,8 +11,10 @@ import android.widget.ImageView;
 import com.mediasorter.models.MediaFile;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -20,32 +22,35 @@ import java.util.concurrent.Future;
 
 public class ThumbnailLoader {
 
-    private static final String PREFS         = "thumb_prefs";
-    private static final String KEY_QUALITY   = "thumb_quality";
-    private static final String KEY_MAX_COUNT = "thumb_max_count";
+    private static final String PREFS           = "thumb_prefs";
+    private static final String KEY_QUALITY     = "thumb_quality";
+    private static final String KEY_MAX_BYTES   = "thumb_max_bytes";
 
     public static final int QUALITY_LOW    = 128;
     public static final int QUALITY_MEDIUM = 256;
     public static final int QUALITY_HIGH   = 512;
 
-    private final Context         context;
+    // Default max bitmap memory — 20MB
+    private static final long DEFAULT_MAX_BYTES = 20 * 1024 * 1024;
+
+    private final Context           context;
     private final SharedPreferences prefs;
-    private final CacheManager    diskCache;
-    private final Handler         mainHandler = new Handler(Looper.getMainLooper());
-    private       ExecutorService executor;
+    private final CacheManager      diskCache;
+    private final Handler           mainHandler = new Handler(Looper.getMainLooper());
+    private       ExecutorService   executor    = Executors.newFixedThreadPool(2);
 
-    // In-memory LRU bitmap cache
-    private Map<String, Bitmap> memCache;
+    // LRU bitmap cache with byte budget
+    private final LinkedHashMap<String, Bitmap> memCache =
+        new LinkedHashMap<String, Bitmap>(16, 0.75f, true);
+    private long currentBytes = 0;
 
-    // In-flight load tracking
-    private final Map<String, Future<?>> inFlight =
-        Collections.synchronizedMap(new LinkedHashMap<>());
+    // In-flight loads
+    private final Map<String, Future<?>> inFlight = new LinkedHashMap<>();
 
     public ThumbnailLoader(Context context) {
         this.context   = context;
         this.prefs     = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         this.diskCache = new CacheManager(context);
-        rebuildCache();
     }
 
     // ── Settings ──────────────────────────────────────────────────────────────
@@ -59,30 +64,21 @@ public class ThumbnailLoader {
         clearMemCache();
     }
 
-    public int getMaxCount() {
-        return prefs.getInt(KEY_MAX_COUNT, 50);
+    public long getMaxBytes() {
+        return prefs.getLong(KEY_MAX_BYTES, DEFAULT_MAX_BYTES);
     }
 
-    public void setMaxCount(int count) {
-        prefs.edit().putInt(KEY_MAX_COUNT, count).apply();
-        rebuildCache();
+    public void setMaxBytes(long bytes) {
+        prefs.edit().putLong(KEY_MAX_BYTES, bytes).apply();
+        evictToLimit();
     }
 
-    private void rebuildCache() {
-        cancelAll();
-        final int max = getMaxCount();
-        memCache = Collections.synchronizedMap(
-            new LinkedHashMap<String, Bitmap>(max, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<String, Bitmap> e) {
-                    return size() > max;
-                }
-            });
-        executor = Executors.newFixedThreadPool(2);
+    public int getMaxMB() {
+        return (int)(getMaxBytes() / (1024 * 1024));
     }
 
-    private void clearMemCache() {
-        memCache.clear();
+    public void setMaxMB(int mb) {
+        setMaxBytes((long) mb * 1024 * 1024);
     }
 
     // ── Load ──────────────────────────────────────────────────────────────────
@@ -91,11 +87,13 @@ public class ThumbnailLoader {
         String path = file.getPath();
         target.setTag(path);
 
-        // Memory cache hit
-        Bitmap cached = memCache.get(path);
-        if (cached != null) {
-            target.setImageBitmap(cached);
-            return;
+        // Memory hit
+        synchronized (memCache) {
+            Bitmap cached = memCache.get(path);
+            if (cached != null) {
+                target.setImageBitmap(cached);
+                return;
+            }
         }
 
         target.setImageBitmap(null);
@@ -104,8 +102,8 @@ public class ThumbnailLoader {
         cancel(path);
 
         Future<?> task = executor.submit(() -> {
-            Bitmap bmp = null;
-            int quality = getQuality();
+            Bitmap bmp     = null;
+            int    quality = getQuality();
 
             // Disk cache
             File thumbFile = diskCache.getThumbnailFile(path);
@@ -119,8 +117,7 @@ public class ThumbnailLoader {
                 if (bmp != null) saveToDisk(bmp, thumbFile);
             }
 
-            if (bmp != null) memCache.put(path, bmp);
-            diskCache.evictIfNeeded();
+            if (bmp != null) putInMemCache(path, bmp);
 
             final Bitmap finalBmp = bmp;
             mainHandler.post(() -> {
@@ -139,6 +136,73 @@ public class ThumbnailLoader {
         });
 
         inFlight.put(path, task);
+    }
+
+    // ── Memory cache ─────────────────────────────────────────────────────────
+
+    private void putInMemCache(String path, Bitmap bmp) {
+        long bmpBytes = bmp.getByteCount();
+        synchronized (memCache) {
+            // Remove existing entry if present
+            if (memCache.containsKey(path)) {
+                currentBytes -= memCache.get(path).getByteCount();
+                memCache.remove(path);
+            }
+            // Evict LRU entries until under limit
+            long limit = getMaxBytes();
+            while (currentBytes + bmpBytes > limit && !memCache.isEmpty()) {
+                Iterator<Map.Entry<String, Bitmap>> it =
+                    memCache.entrySet().iterator();
+                if (it.hasNext()) {
+                    Map.Entry<String, Bitmap> oldest = it.next();
+                    currentBytes -= oldest.getValue().getByteCount();
+                    it.remove();
+                }
+            }
+            memCache.put(path, bmp);
+            currentBytes += bmpBytes;
+        }
+    }
+
+    private void evictToLimit() {
+        synchronized (memCache) {
+            long limit = getMaxBytes();
+            Iterator<Map.Entry<String, Bitmap>> it =
+                memCache.entrySet().iterator();
+            while (currentBytes > limit && it.hasNext()) {
+                Map.Entry<String, Bitmap> entry = it.next();
+                currentBytes -= entry.getValue().getByteCount();
+                it.remove();
+            }
+        }
+    }
+
+    public void clearMemCache() {
+        synchronized (memCache) {
+            memCache.clear();
+            currentBytes = 0;
+        }
+    }
+
+    // Clear thumbnails for files outside current window
+    public void evictOutsideWindow(List<String> windowPaths) {
+        synchronized (memCache) {
+            List<String> toRemove = new ArrayList<>();
+            for (String path : memCache.keySet()) {
+                if (!windowPaths.contains(path)) {
+                    toRemove.add(path);
+                }
+            }
+            for (String path : toRemove) {
+                Bitmap bmp = memCache.remove(path);
+                if (bmp != null) currentBytes -= bmp.getByteCount();
+            }
+        }
+    }
+
+    public String getMemCacheSize() {
+        long mb = currentBytes / (1024 * 1024);
+        return mb + " MB / " + getMaxMB() + " MB";
     }
 
     // ── Cancel ────────────────────────────────────────────────────────────────
