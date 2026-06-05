@@ -14,6 +14,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.util.List;
+import android.content.SharedPreferences;
 
 public class SettingsActivity extends Activity {
 
@@ -115,6 +116,7 @@ public class SettingsActivity extends Activity {
             @Override public void onStopTrackingTouch(SeekBar sb) {}
         });
         root.addView(countSeek);
+        
         // ── Window size ───────────────────────────────────────────────────────
 
         root.addView(makeTitle("Memory Window"));
