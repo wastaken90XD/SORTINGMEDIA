@@ -115,7 +115,30 @@ public class SettingsActivity extends Activity {
             @Override public void onStopTrackingTouch(SeekBar sb) {}
         });
         root.addView(countSeek);
+        // ── Window size ───────────────────────────────────────────────────────
 
+        root.addView(makeTitle("Memory Window"));
+        root.addView(makeLabel("Files loaded in memory at once"));
+        SharedPreferences windowPrefs = getSharedPreferences("window_prefs", MODE_PRIVATE);
+        int currentWindow = windowPrefs.getInt("window_size", 20);
+        TextView windowLabel = makeLabel("Window size: " + currentWindow + " files");
+        root.addView(windowLabel);
+
+        SeekBar windowSeek = new SeekBar(this);
+        windowSeek.setMax(90);  // 10 to 100
+        windowSeek.setProgress(currentWindow - 10);
+        windowSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                int size = progress + 10;
+                windowPrefs.edit().putInt("window_size", size).apply();
+                windowLabel.setText("Window size: " + size + " files");
+            }
+            @Override public void onStartTrackingTouch(SeekBar sb) {}
+            @Override public void onStopTrackingTouch(SeekBar sb) {}
+        });
+        root.addView(windowSeek);
+        
         // ── Gestures ──────────────────────────────────────────────────────────
         root.addView(makeTitle("Gestures"));
         root.addView(makeGestureRow("Swipe Left",  gestureSettings.getLeft(),
