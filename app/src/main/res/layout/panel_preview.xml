@@ -1,155 +1,269 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="horizontal"
     android:background="#0F0F1A">
 
-    <ImageView
-        android:id="@+id/imagePreview"
-        android:layout_width="match_parent"
+    <!-- Main preview area -->
+    <FrameLayout
+        android:id="@+id/previewFrame"
+        android:layout_width="0dp"
         android:layout_height="match_parent"
-        android:scaleType="fitCenter"
-        android:visibility="gone"/>
+        android:layout_weight="1">
 
-    <VideoView
-        android:id="@+id/videoPreview"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:visibility="gone"/>
+        <ImageView
+            android:id="@+id/imagePreview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter"
+            android:visibility="gone"/>
 
-    <LinearLayout
-        android:id="@+id/unsupportedPreview"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:orientation="vertical"
-        android:gravity="center"
-        android:visibility="gone">
+        <VideoView
+            android:id="@+id/videoPreview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"/>
 
-        <TextView
-            android:id="@+id/unsupportedIcon"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="⚠"
-            android:textSize="48sp"
-            android:textColor="#888888"/>
-
-        <TextView
-            android:id="@+id/unsupportedText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="#888888"
-            android:textSize="14sp"
-            android:gravity="center"
-            android:layout_marginTop="8dp"/>
-
-    </LinearLayout>
-
-    <!-- Bottom overlay -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:orientation="vertical"
-        android:background="#CC0F0F1A">
-
-        <!-- File details -->
         <LinearLayout
-            android:id="@+id/fileDetailsBar"
+            android:id="@+id/unsupportedPreview"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/unsupportedIcon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⚠"
+                android:textSize="48sp"
+                android:textColor="#888888"/>
+
+            <TextView
+                android:id="@+id/unsupportedText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#888888"
+                android:textSize="14sp"
+                android:gravity="center"
+                android:layout_marginTop="8dp"/>
+
+        </LinearLayout>
+
+        <!-- Bottom overlay — file details + action bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:orientation="vertical"
+            android:background="#CC0F0F1A">
+
+            <!-- File details -->
+            <LinearLayout
+                android:id="@+id/fileDetailsBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="6dp">
+
+                <TextView
+                    android:id="@+id/detailFileName"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:singleLine="true"
+                    android:ellipsize="middle"/>
+
+                <TextView
+                    android:id="@+id/detailMeta"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="#AAAAAA"
+                    android:textSize="9sp"
+                    android:layout_marginTop="1dp"/>
+
+            </LinearLayout>
+
+            <!-- Action bar -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:orientation="horizontal"
+                android:background="#1A1A2E">
+
+                <Button
+                    android:id="@+id/btnSkip"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:text="SKIP"
+                    android:textSize="10sp"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#444466"/>
+
+                <Button
+                    android:id="@+id/btnFlag"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:text="FLAG"
+                    android:textSize="10sp"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#AA6600"/>
+
+                <Button
+                    android:id="@+id/btnDone"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:text="DONE"
+                    android:textSize="10sp"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#226622"/>
+
+                <Button
+                    android:id="@+id/btnPrev"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:text="◄"
+                    android:textSize="14sp"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#2A2A3E"/>
+
+                <Button
+                    android:id="@+id/btnNext"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:text="►"
+                    android:textSize="14sp"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#2A2A3E"/>
+
+                <TextView
+                    android:id="@+id/positionCounter"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:textColor="#AAAAAA"
+                    android:textSize="10sp"
+                    android:text="0 / 0"/>
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+    <!-- Side panel — D-pad + tag list -->
+    <LinearLayout
+        android:id="@+id/sidePanel"
+        android:layout_width="120dp"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="#1A1A2E"
+        android:padding="4dp">
+
+        <!-- List switcher -->
+        <Spinner
+            android:id="@+id/tagListSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:background="#2A2A3E"/>
+
+        <!-- D-pad -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="6dp">
+            android:gravity="center"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp">
 
-            <TextView
-                android:id="@+id/detailFileName"
-                android:layout_width="match_parent"
+            <!-- Up -->
+            <Button
+                android:id="@+id/dpadUp"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:text="▲"
+                android:textSize="14sp"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#E94560"
+                android:layout_gravity="center"/>
+
+            <!-- Middle row — Left, Center, Right -->
+            <LinearLayout
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:singleLine="true"
-                android:ellipsize="middle"/>
-
-            <TextView
-                android:id="@+id/detailMeta"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textColor="#AAAAAA"
-                android:textSize="9sp"
-                android:layout_marginTop="1dp"/>
-
-            <TextView
-                android:id="@+id/detailPath"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textColor="#555555"
-                android:textSize="8sp"
-                android:layout_marginTop="1dp"
-                android:singleLine="true"
-                android:ellipsize="start"/>
-
-        </LinearLayout>
-
-        <!-- Action buttons -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:orientation="horizontal"
-            android:background="#1A1A2E">
-
-            <Button
-                android:id="@+id/btnTags"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:text="TAGS"
-                android:textSize="10sp"
-                android:textColor="#FFFFFF"
-                android:backgroundTint="#E94560"/>
-
-            <Button
-                android:id="@+id/btnSkip"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:text="SKIP"
-                android:textSize="10sp"
-                android:textColor="#FFFFFF"
-                android:backgroundTint="#444466"/>
-
-            <Button
-                android:id="@+id/btnFlag"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:text="FLAG"
-                android:textSize="10sp"
-                android:textColor="#FFFFFF"
-                android:backgroundTint="#AA6600"/>
-
-            <Button
-                android:id="@+id/btnDone"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:text="DONE"
-                android:textSize="10sp"
-                android:textColor="#FFFFFF"
-                android:backgroundTint="#226622"/>
-
-            <TextView
-                android:id="@+id/positionCounter"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
+                android:orientation="horizontal"
                 android:gravity="center"
-                android:textColor="#AAAAAA"
-                android:textSize="10sp"
-                android:text="0 / 0"/>
+                android:layout_gravity="center">
+
+                <Button
+                    android:id="@+id/dpadLeft"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:text="◄"
+                    android:textSize="14sp"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#2A2A3E"/>
+
+                <Button
+                    android:id="@+id/dpadCenter"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:text="●"
+                    android:textSize="14sp"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#E94560"
+                    android:layout_marginStart="2dp"
+                    android:layout_marginEnd="2dp"/>
+
+                <Button
+                    android:id="@+id/dpadRight"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:text="►"
+                    android:textSize="14sp"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#2A2A3E"/>
+
+            </LinearLayout>
+
+            <!-- Down -->
+            <Button
+                android:id="@+id/dpadDown"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:text="▼"
+                android:textSize="14sp"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#E94560"
+                android:layout_gravity="center"/>
 
         </LinearLayout>
+
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#2A2A3E"
+            android:layout_marginBottom="4dp"/>
+
+        <!-- Tag list -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/sidePanelTagList"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"/>
 
     </LinearLayout>
 
-</FrameLayout>
+</LinearLayout>
