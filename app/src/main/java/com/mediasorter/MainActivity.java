@@ -605,7 +605,7 @@ public class MainActivity extends Activity
     public void onFileModified(String path) {
         mainHandler.post(() -> {
             cacheManager.invalidateThumbnail(path);
-            indexer.rescan(new java.io.File(path).getParent()));
+            indexer.rescan(new java.io.File(path).getParent());
         });
     }
 
