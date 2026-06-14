@@ -90,6 +90,10 @@ public class PreviewManager {
         setupButtons();
         setupSidePanel();
     }
+    
+    public SidePanelTagAdapter getSidePanelTagAdapter() {
+    return sidePanelAdapter;
+    }
 
     // ── Bind ──────────────────────────────────────────────────────────────────
 
