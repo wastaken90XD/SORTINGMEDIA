@@ -13,43 +13,66 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.MediaController;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.VideoView;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import com.mediasorter.adapters.SidePanelTagAdapter;
 import com.mediasorter.models.MediaFile;
+import com.mediasorter.models.TagList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class PreviewManager {
 
     public interface ActionListener {
-        void onTags();
         void onSkip();
         void onFlag();
         void onDone();
+        void onNext();
+        void onPrev();
+        void onDpadUp();
+        void onDpadDown();
+        void onDpadLeft();
+        void onDpadRight();
+        void onDpadCenter();
+        void onTagListChanged(int index);
     }
 
     private final Context         context;
     private final ExecutorService executor    = Executors.newSingleThreadExecutor();
     private final Handler         mainHandler = new Handler(Looper.getMainLooper());
 
-    private ImageView imagePreview;
-    private VideoView videoPreview;
-    private View      unsupportedPreview;
-    private TextView  detailFileName;
-    private TextView  detailMeta;
-    private TextView  detailPath;
-    private TextView  unsupportedText;
-    private TextView  positionCounter;
-    private Button    btnTags;
-    private Button    btnSkip;
-    private Button    btnFlag;
-    private Button    btnDone;
+    // Views
+    private ImageView   imagePreview;
+    private VideoView   videoPreview;
+    private View        unsupportedPreview;
+    private TextView    detailFileName;
+    private TextView    detailMeta;
+    private TextView    unsupportedText;
+    private TextView    positionCounter;
+    private Button      btnSkip;
+    private Button      btnFlag;
+    private Button      btnDone;
+    private Button      btnPrev;
+    private Button      btnNext;
+    private Button      dpadUp;
+    private Button      dpadDown;
+    private Button      dpadLeft;
+    private Button      dpadRight;
+    private Button      dpadCenter;
+    private Spinner     tagListSpinner;
+    private RecyclerView sidePanelTagList;
 
-    private ActionListener       actionListener;
-    private FileStatus           fileStatus;
-    private GestureDetector      swipeDetector;
+    private ActionListener      actionListener;
+    private FileStatus          fileStatus;
+    private GestureDetector     swipeDetector;
     private ScaleGestureDetector scaleDetector;
+    private SidePanelTagAdapter sidePanelAdapter;
 
+    // Zoom state
     private float scaleFactor = 1.0f;
     private float translateX  = 0f;
     private float translateY  = 0f;
@@ -64,19 +87,11 @@ public class PreviewManager {
         this.fileStatus = fileStatus;
         bindViews(previewRoot);
         setupZoom();
+        setupButtons();
+        setupSidePanel();
     }
 
-    public void setSwipeDetector(GestureDetector detector) {
-        this.swipeDetector = detector;
-    }
-
-    public void setActionListener(ActionListener l) {
-        this.actionListener = l;
-        btnTags.setOnClickListener(v -> { if (actionListener != null) actionListener.onTags(); });
-        btnSkip.setOnClickListener(v -> { if (actionListener != null) actionListener.onSkip(); });
-        btnFlag.setOnClickListener(v -> { if (actionListener != null) actionListener.onFlag(); });
-        btnDone.setOnClickListener(v -> { if (actionListener != null) actionListener.onDone(); });
-    }
+    // ── Bind ──────────────────────────────────────────────────────────────────
 
     private void bindViews(View root) {
         imagePreview       = root.findViewById(R.id.imagePreview);
@@ -84,14 +99,77 @@ public class PreviewManager {
         unsupportedPreview = root.findViewById(R.id.unsupportedPreview);
         detailFileName     = root.findViewById(R.id.detailFileName);
         detailMeta         = root.findViewById(R.id.detailMeta);
-        detailPath         = root.findViewById(R.id.detailPath);
         unsupportedText    = root.findViewById(R.id.unsupportedText);
         positionCounter    = root.findViewById(R.id.positionCounter);
-        btnTags            = root.findViewById(R.id.btnTags);
         btnSkip            = root.findViewById(R.id.btnSkip);
         btnFlag            = root.findViewById(R.id.btnFlag);
         btnDone            = root.findViewById(R.id.btnDone);
+        btnPrev            = root.findViewById(R.id.btnPrev);
+        btnNext            = root.findViewById(R.id.btnNext);
+        dpadUp             = root.findViewById(R.id.dpadUp);
+        dpadDown           = root.findViewById(R.id.dpadDown);
+        dpadLeft           = root.findViewById(R.id.dpadLeft);
+        dpadRight          = root.findViewById(R.id.dpadRight);
+        dpadCenter         = root.findViewById(R.id.dpadCenter);
+        tagListSpinner     = root.findViewById(R.id.tagListSpinner);
+        sidePanelTagList   = root.findViewById(R.id.sidePanelTagList);
     }
+
+    // ── Buttons ───────────────────────────────────────────────────────────────
+
+    private void setupButtons() {
+        btnSkip.setOnClickListener(v   -> { if (actionListener != null) actionListener.onSkip(); });
+        btnFlag.setOnClickListener(v   -> { if (actionListener != null) actionListener.onFlag(); });
+        btnDone.setOnClickListener(v   -> { if (actionListener != null) actionListener.onDone(); });
+        btnPrev.setOnClickListener(v   -> { if (actionListener != null) actionListener.onPrev(); });
+        btnNext.setOnClickListener(v   -> { if (actionListener != null) actionListener.onNext(); });
+        dpadUp.setOnClickListener(v    -> { if (actionListener != null) actionListener.onDpadUp(); });
+        dpadDown.setOnClickListener(v  -> { if (actionListener != null) actionListener.onDpadDown(); });
+        dpadLeft.setOnClickListener(v  -> { if (actionListener != null) actionListener.onDpadLeft(); });
+        dpadRight.setOnClickListener(v -> { if (actionListener != null) actionListener.onDpadRight(); });
+        dpadCenter.setOnClickListener(v-> { if (actionListener != null) actionListener.onDpadCenter(); });
+    }
+
+    // ── Side panel ────────────────────────────────────────────────────────────
+
+    private void setupSidePanel() {
+        sidePanelAdapter = new SidePanelTagAdapter();
+        sidePanelTagList.setLayoutManager(new LinearLayoutManager(context));
+        sidePanelTagList.setAdapter(sidePanelAdapter);
+    }
+
+    public void setSidePanelTags(List<String> tags, List<String> appliedTags) {
+        sidePanelAdapter.setTags(tags, appliedTags);
+    }
+
+    public void setTagListSpinner(android.widget.ArrayAdapter<String> adapter,
+                                   int selectedIndex) {
+        tagListSpinner.setAdapter(adapter);
+        tagListSpinner.setSelection(selectedIndex);
+        tagListSpinner.setOnItemSelectedListener(
+            new android.widget.AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(android.widget.AdapterView<?> parent,
+                        View view, int position, long id) {
+                    if (actionListener != null) {
+                        actionListener.onTagListChanged(position);
+                    }
+                }
+                @Override
+                public void onNothingSelected(android.widget.AdapterView<?> p) {}
+            });
+    }
+
+    public void updateDpadLabels(String up, String down, String left,
+                                  String right, String center) {
+        dpadUp.setText(up.isEmpty()     ? "▲" : "▲\n" + up);
+        dpadDown.setText(down.isEmpty() ? "▼" : "▼\n" + down);
+        dpadLeft.setText(left.isEmpty() ? "◄" : "◄\n" + left);
+        dpadRight.setText(right.isEmpty()? "►" : "►\n" + right);
+        dpadCenter.setText(center.isEmpty()? "●" : "●\n" + center);
+    }
+
+    // ── Zoom ──────────────────────────────────────────────────────────────────
 
     private void setupZoom() {
         scaleDetector = new ScaleGestureDetector(context,
@@ -99,7 +177,8 @@ public class PreviewManager {
                 @Override
                 public boolean onScale(ScaleGestureDetector detector) {
                     scaleFactor *= detector.getScaleFactor();
-                    scaleFactor  = Math.max(MIN_ZOOM, Math.min(scaleFactor, MAX_ZOOM));
+                    scaleFactor  = Math.max(MIN_ZOOM,
+                        Math.min(scaleFactor, MAX_ZOOM));
                     applyMatrix();
                     return true;
                 }
@@ -124,9 +203,8 @@ public class PreviewManager {
                     lastTouchY = event.getY();
                     break;
                 case MotionEvent.ACTION_UP:
-                    if (scaleFactor <= MIN_ZOOM) {
-                        resetZoom();
-                    }
+                    // Double tap to reset
+                    if (scaleFactor <= MIN_ZOOM) resetZoom();
                     break;
             }
             return true;
@@ -143,7 +221,7 @@ public class PreviewManager {
     }
 
     private void resetZoom() {
-        scaleFactor = 1.0f;
+        scaleFactor = MIN_ZOOM;
         translateX  = 0f;
         translateY  = 0f;
         if (imagePreview != null) {
@@ -151,7 +229,11 @@ public class PreviewManager {
         }
     }
 
-    // ── Load ─────────────────────────────────────────────────────────────────
+    public void setSwipeDetector(GestureDetector d) { this.swipeDetector = d; }
+
+    public void setActionListener(ActionListener l) { this.actionListener = l; }
+
+    // ── Load ──────────────────────────────────────────────────────────────────
 
     public void load(MediaFile file) {
         stopMedia();
@@ -169,7 +251,7 @@ public class PreviewManager {
         switch (file.getType()) {
             case IMAGE: loadImage(file); break;
             case VIDEO: loadVideo(file); break;
-            default:    showUnsupported("Unsupported file type"); break;
+            default:    showUnsupported("Unsupported"); break;
         }
     }
 
@@ -186,15 +268,17 @@ public class PreviewManager {
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeFile(file.getPath(), opts);
-            opts.inSampleSize       = calculateSampleSize(opts, 1920, 1080);
+            opts.inSampleSize       = calcSampleSize(opts, 1920, 1080);
             opts.inJustDecodeBounds = false;
             Bitmap bmp = BitmapFactory.decodeFile(file.getPath(), opts);
 
             mainHandler.post(() -> {
                 if (bmp != null) {
                     imagePreview.setVisibility(View.VISIBLE);
+                    // FIT_CENTER first to show full image
                     imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
                     imagePreview.setImageBitmap(bmp);
+                    // Switch to matrix after layout for zoom support
                     imagePreview.post(() -> {
                         imagePreview.setScaleType(ImageView.ScaleType.MATRIX);
                         Matrix m = new Matrix(imagePreview.getImageMatrix());
@@ -207,48 +291,55 @@ public class PreviewManager {
         });
     }
 
-    private int calculateSampleSize(BitmapFactory.Options opts, int reqW, int reqH) {
+    private int calcSampleSize(BitmapFactory.Options opts, int reqW, int reqH) {
         int inW = opts.outWidth;
         int inH = opts.outHeight;
-        int sampleSize = 1;
+        int s   = 1;
         if (inH > reqH || inW > reqW) {
-            int halfH = inH / 2;
-            int halfW = inW / 2;
-            while ((halfH / sampleSize) >= reqH && (halfW / sampleSize) >= reqW) {
-                sampleSize *= 2;
-            }
+            int hH = inH / 2, hW = inW / 2;
+            while ((hH / s) >= reqH && (hW / s) >= reqW) s *= 2;
         }
-        return sampleSize;
+        return s;
     }
 
     // ── Video ─────────────────────────────────────────────────────────────────
 
     private void loadVideo(MediaFile file) {
-        videoPreview.setVisibility(View.VISIBLE);
-        MediaController mc = new MediaController(context);
-        mc.setAnchorView(videoPreview);
-        videoPreview.setMediaController(mc);
-        videoPreview.setVideoURI(android.net.Uri.parse(file.getPath()));
-        videoPreview.setOnPreparedListener(mp -> {
-            mp.setLooping(false);
-            videoPreview.start();
-            mc.show(3000);
+        mainHandler.post(() -> {
+            videoPreview.setVisibility(View.VISIBLE);
+
+            MediaController mc = new MediaController(context);
+            mc.setAnchorView(videoPreview);
+            videoPreview.setMediaController(mc);
+            videoPreview.setVideoURI(
+                android.net.Uri.parse(file.getPath()));
+
+            videoPreview.setOnPreparedListener(mp -> {
+                mp.setLooping(false);
+                // Keep controls always visible
+                mc.show(0);
+                videoPreview.start();
+            });
+
+            videoPreview.setOnErrorListener((mp, what, extra) -> {
+                showUnsupported(CodecChecker.getUnsupportedReason(file));
+                return true;
+            });
+
+            videoPreview.setOnCompletionListener(mp -> mc.show(0));
+
+            videoPreview.requestFocus();
         });
-        videoPreview.setOnErrorListener((mp, what, extra) -> {
-            showUnsupported(CodecChecker.getUnsupportedReason(file));
-            return true;
-        });
-        videoPreview.requestFocus();
     }
 
     // ── Details ───────────────────────────────────────────────────────────────
 
     private void updateDetails(MediaFile file) {
         detailFileName.setText(file.getName());
-        detailMeta.setText(file.getFormattedSize()
-            + "  •  " + file.getType().name()
+        detailMeta.setText(
+            file.getFormattedSize()
+            + "  •  " + file.getType().name().toLowerCase()
             + "  •  " + file.getTags().size() + " tags");
-        detailPath.setText(file.getPath());
     }
 
     private void updateButtonStates(MediaFile file) {
@@ -282,7 +373,6 @@ public class PreviewManager {
 
     public void stopMedia() {
         if (videoPreview != null) videoPreview.stopPlayback();
-        mainHandler.removeCallbacksAndMessages(null);
     }
 
     public void release() {
