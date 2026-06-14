@@ -11,6 +11,7 @@ import android.text.TextWatcher;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -19,39 +20,39 @@ import android.widget.TextView;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import com.mediasorter.adapters.MediaAdapter;
+import com.mediasorter.adapters.SidePanelTagAdapter;
 import com.mediasorter.adapters.TagAdapter;
 import com.mediasorter.models.Group;
 import com.mediasorter.models.MediaFile;
+import com.mediasorter.models.TagList;
 import java.util.ArrayList;
 import java.util.List;
 
 public class MainActivity extends Activity
         implements FolderWatcher.Listener, MediaIndexer.IndexListener {
 
-    private MediaIndexer        indexer;
-    private TagManager          tagManager;
-    private FolderManager       folderManager;
-    private FolderWatcher       folderWatcher;
-    private SearchManager       searchManager;
-    private GroupManager        groupManager;
-    private CacheManager        cacheManager;
-    private PreviewManager      previewManager;
-    private ThumbnailLoader     thumbnailLoader;
-    private SortManager         sortManager;
-    private FileStatus          fileStatus;
-    private FilterManager       filterManager;
-    private GestureSettings     gestureSettings;
-    private WindowManager       windowManager;
+    private MediaIndexer    indexer;
+    private TagManager      tagManager;
+    private TagListManager  tagListManager;
+    private FolderManager   folderManager;
+    private FolderWatcher   folderWatcher;
+    private SearchManager   searchManager;
+    private GroupManager    groupManager;
+    private CacheManager    cacheManager;
+    private PreviewManager  previewManager;
+    private ThumbnailLoader thumbnailLoader;
+    private SortManager     sortManager;
+    private FileStatus      fileStatus;
+    private FilterManager   filterManager;
+    private GestureSettings gestureSettings;
+    private WindowManager   windowManager;
 
-    private MediaAdapter  mediaAdapter;
-    private TagAdapter    tagAdapter;
-    private QuickTagPanel quickTagPanel;
+    private MediaAdapter mediaAdapter;
+    private TagAdapter   tagAdapter;
 
-    // Full sorted/filtered list — never held as bitmaps, just paths
     private List<MediaFile> fullList     = new ArrayList<>();
-    // Current window — only these in memory
     private List<MediaFile> currentFiles = new ArrayList<>();
-    private int             currentIndex = -1; // absolute index in fullList
+    private int             currentIndex = -1;
 
     private boolean refreshPending = false;
 
@@ -98,6 +99,7 @@ public class MainActivity extends Activity
     private void initManagers() {
         indexer         = new MediaIndexer();
         tagManager      = new TagManager(this);
+        tagListManager  = new TagListManager(this);
         folderManager   = new FolderManager(this);
         folderWatcher   = new FolderWatcher(this);
         searchManager   = new SearchManager();
@@ -136,21 +138,35 @@ public class MainActivity extends Activity
         previewManager = new PreviewManager(this, previewContainer, fileStatus);
 
         previewManager.setActionListener(new PreviewManager.ActionListener() {
-            @Override public void onTags() { quickTagPanel.show(); }
-            @Override public void onSkip() { handleSkip(); }
-            @Override public void onFlag() { handleFlag(); }
-            @Override public void onDone() { handleDone(); }
-        });
-
-        quickTagPanel = new QuickTagPanel(this, previewContainer);
-        quickTagPanel.setListener(new QuickTagPanel.Listener() {
-            @Override
-            public void onTagToggled(String tagName, boolean applied) {
-                applyTagToCurrentFile(tagName, applied);
+            @Override public void onSkip()   { handleSkip(); }
+            @Override public void onFlag()   { handleFlag(); }
+            @Override public void onDone()   { handleDone(); }
+            @Override public void onNext()   { navigateNext(); }
+            @Override public void onPrev()   { navigatePrev(); }
+            @Override public void onDpadUp()     { executeDpad(gestureSettings.getDpadUp(),
+                gestureSettings.getDpadUpTag()); }
+            @Override public void onDpadDown()   { executeDpad(gestureSettings.getDpadDown(),
+                gestureSettings.getDpadDownTag()); }
+            @Override public void onDpadLeft()   { executeDpad(gestureSettings.getDpadLeft(),
+                gestureSettings.getDpadLeftTag()); }
+            @Override public void onDpadRight()  { executeDpad(gestureSettings.getDpadRight(),
+                gestureSettings.getDpadRightTag()); }
+            @Override public void onDpadCenter() { executeDpad(gestureSettings.getDpadCenter(),
+                gestureSettings.getDpadCenterTag()); }
+            @Override public void onTagListChanged(int index) {
+                tagListManager.setActiveIndex(index);
+                refreshSidePanel();
             }
-            @Override public void onDismiss() {}
         });
 
+        // Side panel tag list click
+        previewManager.getSidePanelAdapter().setListener((tagName, applied) ->
+            applyTagToCurrentFile(tagName, applied));
+
+        // Tag list spinner
+        refreshTagListSpinner();
+
+        // Swipe gesture
         GestureDetector gestureDetector = new GestureDetector(this,
             new GestureDetector.SimpleOnGestureListener() {
                 @Override
@@ -161,16 +177,22 @@ public class MainActivity extends Activity
                     float dy = e2.getY() - e1.getY();
                     if (Math.abs(dx) > Math.abs(dy)) {
                         if (Math.abs(dx) > 100) {
-                            executeGesture(dx < 0
+                            executeSwipe(dx < 0
                                 ? gestureSettings.getLeft()
-                                : gestureSettings.getRight());
+                                : gestureSettings.getRight(),
+                                dx < 0
+                                ? gestureSettings.getLeftTag()
+                                : gestureSettings.getRightTag());
                             return true;
                         }
                     } else {
                         if (Math.abs(dy) > 100) {
-                            executeGesture(dy < 0
+                            executeSwipe(dy < 0
                                 ? gestureSettings.getUp()
-                                : gestureSettings.getDown());
+                                : gestureSettings.getDown(),
+                                dy < 0
+                                ? gestureSettings.getUpTag()
+                                : gestureSettings.getDownTag());
                             return true;
                         }
                     }
@@ -238,6 +260,36 @@ public class MainActivity extends Activity
         tagAdapter.setTags(tagManager.getAllTags());
     }
 
+    // ── Tag list spinner ──────────────────────────────────────────────────────
+
+    private void refreshTagListSpinner() {
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item,
+            tagListManager.getListNames());
+        adapter.setDropDownViewResource(
+            android.R.layout.simple_spinner_dropdown_item);
+        previewManager.setTagListSpinner(adapter,
+            tagListManager.getActiveIndex());
+    }
+
+    private void refreshSidePanel() {
+        if (currentIndex < 0 || currentIndex >= fullList.size()) return;
+        MediaFile file     = fullList.get(currentIndex);
+        TagList   active   = tagListManager.getActiveList();
+        List<String> tags  = active.getTags();
+        previewManager.setSidePanelTags(tags, file.getTags());
+        updateDpadLabels();
+    }
+
+    private void updateDpadLabels() {
+        String up     = gestureSettings.getDpadUpTag();
+        String down   = gestureSettings.getDpadDownTag();
+        String left   = gestureSettings.getDpadLeftTag();
+        String right  = gestureSettings.getDpadRightTag();
+        String center = gestureSettings.getDpadCenterTag();
+        previewManager.updateDpadLabels(up, down, left, right, center);
+    }
+
     // ── Refresh ───────────────────────────────────────────────────────────────
 
     private void scheduleRefresh() {
@@ -250,7 +302,6 @@ public class MainActivity extends Activity
         refreshPending = false;
 
         String query = searchBar.getText().toString().trim();
-
         List<MediaFile> base = indexer.getIndex();
 
         if (!query.isEmpty()) {
@@ -268,7 +319,6 @@ public class MainActivity extends Activity
         fullList = flattened;
         windowManager.setFullIndex(fullList);
 
-        // Center window on current index if valid
         if (currentIndex >= 0 && currentIndex < fullList.size()) {
             windowManager.centerOn(currentIndex);
         }
@@ -277,12 +327,11 @@ public class MainActivity extends Activity
         updateProgress();
     }
 
-    // ── Window management ─────────────────────────────────────────────────────
+    // ── Window ────────────────────────────────────────────────────────────────
 
     private void updateWindow() {
         currentFiles = windowManager.getWindow();
 
-        // Evict thumbnails outside window
         List<String> windowPaths = new ArrayList<>();
         for (MediaFile f : currentFiles) windowPaths.add(f.getPath());
         thumbnailLoader.evictOutsideWindow(windowPaths);
@@ -315,17 +364,32 @@ public class MainActivity extends Activity
         }
     }
 
-    // ── Gesture ───────────────────────────────────────────────────────────────
+    // ── Gesture execution ─────────────────────────────────────────────────────
 
-    private void executeGesture(GestureSettings.GestureAction action) {
+    private void executeSwipe(GestureSettings.GestureAction action, String tag) {
+        if (action == GestureSettings.GestureAction.APPLY_TAG && !tag.isEmpty()) {
+            applyTagToCurrentFile(tag, true);
+        } else {
+            executeAction(action);
+        }
+    }
+
+    private void executeDpad(GestureSettings.GestureAction action, String tag) {
+        if (action == GestureSettings.GestureAction.APPLY_TAG && !tag.isEmpty()) {
+            applyTagToCurrentFile(tag, true);
+        } else {
+            executeAction(action);
+        }
+    }
+
+    private void executeAction(GestureSettings.GestureAction action) {
         switch (action) {
-            case NEXT_FILE:    navigateNext();       break;
-            case PREV_FILE:    navigatePrev();       break;
-            case QUICK_TAGS:   quickTagPanel.show(); break;
-            case SKIP:         handleSkip();         break;
-            case FLAG:         handleFlag();         break;
-            case DONE:         handleDone();         break;
-            case FILTER_CYCLE: cycleFilter();        break;
+            case NEXT_FILE:    navigateNext();  break;
+            case PREV_FILE:    navigatePrev();  break;
+            case SKIP:         handleSkip();    break;
+            case FLAG:         handleFlag();    break;
+            case DONE:         handleDone();    break;
+            case FILTER_CYCLE: cycleFilter();   break;
             case NOTHING:      break;
         }
     }
@@ -375,9 +439,7 @@ public class MainActivity extends Activity
         mediaAdapter.updateFile(file);
         tagAdapter.setCurrentFile(file);
         tagAdapter.setTags(tagManager.getAllTags());
-        quickTagPanel.setCurrentFile(file,
-            tagManager.getTopTags(5),
-            tagManager.getRecentTags(5));
+        refreshSidePanel();
         updateProgress();
     }
 
@@ -408,16 +470,8 @@ public class MainActivity extends Activity
         previewManager.setPosition(absoluteIndex + 1, fullList.size());
         tagAdapter.setCurrentFile(file);
         tagAdapter.setTags(tagManager.getAllTags());
-
-        // Highlight in window
-        int windowIndex = windowManager.toWindow(absoluteIndex);
-        if (windowIndex >= 0 && windowIndex < currentFiles.size()) {
-            mediaAdapter.setSelected(file.getPath());
-        }
-
-        quickTagPanel.setCurrentFile(file,
-            tagManager.getTopTags(5),
-            tagManager.getRecentTags(5));
+        mediaAdapter.setSelected(file.getPath());
+        refreshSidePanel();
     }
 
     private void onFileSelected(MediaFile file) {
@@ -551,16 +605,14 @@ public class MainActivity extends Activity
     public void onFileModified(String path) {
         mainHandler.post(() -> {
             cacheManager.invalidateThumbnail(path);
-            indexer.rescan(new java.io.File(path).getParent());
+            indexer.rescan(new java.io.File(path).getParent()));
         });
     }
 
     // ── MediaIndexer ──────────────────────────────────────────────────────────
 
     @Override
-    public void onFileFound(MediaFile file) {
-        // Do nothing per file — wait for page
-    }
+    public void onFileFound(MediaFile file) {}
 
     @Override
     public void onPageLoaded(List<MediaFile> page) {
