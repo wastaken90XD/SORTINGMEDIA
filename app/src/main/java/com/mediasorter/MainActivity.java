@@ -16,7 +16,8 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.PopupMenu;
-import android.widget.TextView;
+import android.widget.TextView
+import android.widget.LinearLayout;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import com.mediasorter.adapters.MediaAdapter;
@@ -27,10 +28,13 @@ import com.mediasorter.models.MediaFile;
 import com.mediasorter.models.TagList;
 import java.util.ArrayList;
 import java.util.List;
+import com.mediasorter.BatchRenameManager;
+
 
 public class MainActivity extends Activity
         implements FolderWatcher.Listener, MediaIndexer.IndexListener {
 
+    private BatchRenameManager batchRenameManager = new BatchRenameManager();            
     private MediaIndexer    indexer;
     private TagManager      tagManager;
     private TagListManager  tagListManager;
@@ -120,10 +124,21 @@ public class MainActivity extends Activity
     }
 
     private void initAdapters() {
-        mediaAdapter = new MediaAdapter(thumbnailLoader, this::onFileSelected);
-        tagAdapter   = new TagAdapter(this::onTagToggled);
-    }
+    mediaAdapter = new MediaAdapter(thumbnailLoader, this::onFileSelected);
+    tagAdapter   = new TagAdapter(this::onTagToggled);
 
+    mediaAdapter.setSelectionListener(count -> {
+        mainHandler.post(() -> {
+            if (count > 0) {
+                btnScan.setText("Rename " + count);
+                btnScan.setOnClickListener(v -> showBatchRenameDialog());
+            } else {
+                btnScan.setText("SCAN");
+                btnScan.setOnClickListener(v -> startScan());
+            }
+        });
+    });
+}
     private void initViews() {
         RecyclerView fileBrowser = findViewById(R.id.fileBrowser);
         fileBrowser.setLayoutManager(new LinearLayoutManager(this));
@@ -481,6 +496,188 @@ public class MainActivity extends Activity
         shiftWindowIfNeeded(currentIndex);
         loadFileAtIndex(currentIndex);
     }
+
+    private void showBatchRenameDialog() {
+    List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
+    if (selectedFiles.isEmpty()) return;
+
+    LinearLayout layout = new LinearLayout(this);
+    layout.setOrientation(LinearLayout.VERTICAL);
+    layout.setPadding(32, 16, 32, 16);
+
+    // Separator
+    TextView sepLabel = new TextView(this);
+    sepLabel.setText("Separator:");
+    sepLabel.setTextColor(0xFFCCCCCC);
+    layout.addView(sepLabel);
+
+    String[] sepOptions = {"Underscore (_)", "Dash (-)", "Space ( )", "None"};
+    android.widget.Spinner sepSpinner = new android.widget.Spinner(this);
+    android.widget.ArrayAdapter<String> sepAdapter = new android.widget.ArrayAdapter<>(
+        this, android.R.layout.simple_spinner_item, sepOptions);
+    sepAdapter.setDropDownViewResource(
+        android.R.layout.simple_spinner_dropdown_item);
+    sepSpinner.setAdapter(sepAdapter);
+    layout.addView(sepSpinner);
+
+    // Order
+    TextView ordLabel = new TextView(this);
+    ordLabel.setText("Order:");
+    ordLabel.setTextColor(0xFFCCCCCC);
+    layout.addView(ordLabel);
+
+    String[] ordOptions = {"Tags Only", "Original + Tags", "Tags + Original"};
+    android.widget.Spinner ordSpinner = new android.widget.Spinner(this);
+    android.widget.ArrayAdapter<String> ordAdapter = new android.widget.ArrayAdapter<>(
+        this, android.R.layout.simple_spinner_item, ordOptions);
+    ordAdapter.setDropDownViewResource(
+        android.R.layout.simple_spinner_dropdown_item);
+    ordSpinner.setAdapter(ordAdapter);
+    layout.addView(ordSpinner);
+
+    // Case
+    TextView caseLabel = new TextView(this);
+    caseLabel.setText("Case:");
+    caseLabel.setTextColor(0xFFCCCCCC);
+    layout.addView(caseLabel);
+
+    String[] caseOptions = {"As-is", "Lowercase", "Uppercase"};
+    android.widget.Spinner caseSpinner = new android.widget.Spinner(this);
+    android.widget.ArrayAdapter<String> caseAdapter = new android.widget.ArrayAdapter<>(
+        this, android.R.layout.simple_spinner_item, caseOptions);
+    caseAdapter.setDropDownViewResource(
+        android.R.layout.simple_spinner_dropdown_item);
+    caseSpinner.setAdapter(caseAdapter);
+    layout.addView(caseSpinner);
+
+    // Preview
+    TextView previewLabel = new TextView(this);
+    previewLabel.setText("Preview:");
+    previewLabel.setTextColor(0xFFCCCCCC);
+    layout.addView(previewLabel);
+
+    TextView previewText = new TextView(this);
+    previewText.setTextColor(0xFF888888);
+    previewText.setTextSize(10f);
+    layout.addView(previewText);
+
+    // Update preview on spinner change
+    android.widget.AdapterView.OnItemSelectedListener previewUpdater =
+        new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> p,
+                    View v, int pos, long id) {
+                updateRenamePreview(batchRenameManager, selectedFiles,
+                    sepSpinner, ordSpinner, caseSpinner, previewText);
+            }
+            @Override
+            public void onNothingSelected(android.widget.AdapterView<?> p) {}
+        };
+
+    sepSpinner.setOnItemSelectedListener(previewUpdater);
+    ordSpinner.setOnItemSelectedListener(previewUpdater);
+    caseSpinner.setOnItemSelectedListener(previewUpdater);
+
+    android.widget.ScrollView sv = new android.widget.ScrollView(this);
+    sv.addView(layout);
+
+    new AlertDialog.Builder(this)
+        .setTitle("Batch Rename " + selectedFiles.size() + " files")
+        .setView(sv)
+        .setPositiveButton("Rename", (d, w) -> {
+            applyBatchRename(batchRenameManager, selectedFiles,
+                sepSpinner, ordSpinner, caseSpinner);
+        })
+        .setNegativeButton("Cancel", null)
+        .setNeutralButton("Undo", (d, w) -> {
+            if (batchRenameManager.canUndo()) {
+                BatchRenameManager.RenameResult result = batchRenameManager.undo();
+                android.widget.Toast.makeText(this,
+                    "Undone: " + result.succeeded + " files",
+                    android.widget.Toast.LENGTH_SHORT).show();
+                mediaAdapter.exitSelectMode();
+                scheduleRefresh();
+            }
+        })
+        .show();
+}
+
+private void updateRenamePreview(BatchRenameManager mgr,
+        List<MediaFile> files,
+        android.widget.Spinner sep,
+        android.widget.Spinner ord,
+        android.widget.Spinner cas,
+        TextView previewText) {
+
+    mgr.setSeparator(sepFromPos(sep.getSelectedItemPosition()));
+    mgr.setOrder(ordFromPos(ord.getSelectedItemPosition()));
+    mgr.setCaseMode(caseFromPos(cas.getSelectedItemPosition()));
+
+    List<BatchRenameManager.RenamePreview> previews = mgr.preview(files);
+    StringBuilder sb = new StringBuilder();
+    int shown = Math.min(previews.size(), 5);
+    for (int i = 0; i < shown; i++) {
+        BatchRenameManager.RenamePreview p = previews.get(i);
+        sb.append(p.originalName)
+          .append(" → ")
+          .append(p.newName);
+        if (p.hasConflict) sb.append(" ⚠ conflict");
+        sb.append("\n");
+    }
+    if (previews.size() > 5) {
+        sb.append("... and ").append(previews.size() - 5).append(" more");
+    }
+    previewText.setText(sb.toString());
+}
+
+private void applyBatchRename(BatchRenameManager mgr,
+        List<MediaFile> files,
+        android.widget.Spinner sep,
+        android.widget.Spinner ord,
+        android.widget.Spinner cas) {
+
+    mgr.setSeparator(sepFromPos(sep.getSelectedItemPosition()));
+    mgr.setOrder(ordFromPos(ord.getSelectedItemPosition()));
+    mgr.setCaseMode(caseFromPos(cas.getSelectedItemPosition()));
+
+    List<BatchRenameManager.RenamePreview> previews = mgr.preview(files);
+    BatchRenameManager.RenameResult result = mgr.apply(previews);
+
+    android.widget.Toast.makeText(this,
+        "Renamed: " + result.succeeded
+        + (result.failed > 0 ? "  Failed: " + result.failed : ""),
+        android.widget.Toast.LENGTH_SHORT).show();
+
+    mediaAdapter.exitSelectMode();
+    btnScan.setText("SCAN");
+    btnScan.setOnClickListener(v -> startScan());
+    scheduleRefresh();
+}
+
+private BatchRenameManager.Separator sepFromPos(int pos) {
+    switch (pos) {
+        case 1:  return BatchRenameManager.Separator.DASH;
+        case 2:  return BatchRenameManager.Separator.SPACE;
+        case 3:  return BatchRenameManager.Separator.NONE;
+        default: return BatchRenameManager.Separator.UNDERSCORE;
+    }
+}
+
+private BatchRenameManager.Order ordFromPos(int pos) {
+    switch (pos) {
+        case 1:  return BatchRenameManager.Order.ORIGINAL_THEN_TAGS;
+        case 2:  return BatchRenameManager.Order.TAGS_THEN_ORIGINAL;
+        default: return BatchRenameManager.Order.TAGS_ONLY;
+    }
+}
+
+private BatchRenameManager.Case caseFromPos(int pos) {
+    switch (pos) {
+        case 1:  return BatchRenameManager.Case.LOWERCASE;
+        case 2:  return BatchRenameManager.Case.UPPERCASE;
+        default: return BatchRenameManager.Case.AS_IS;
+    }
+}            
 
     // ── Sort / Filter / Group ─────────────────────────────────────────────────
 
