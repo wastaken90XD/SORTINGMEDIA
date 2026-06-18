@@ -123,15 +123,26 @@ public class MainActivity extends Activity
             .getInt("window_size", 20);
     }
 
-    private void initAdapters() {
+private void initAdapters() {
     mediaAdapter = new MediaAdapter(thumbnailLoader, this::onFileSelected);
     tagAdapter   = new TagAdapter(this::onTagToggled);
 
     mediaAdapter.setSelectionListener(count -> {
         mainHandler.post(() -> {
             if (count > 0) {
-                btnScan.setText("Rename " + count);
-                btnScan.setOnClickListener(v -> showBatchRenameDialog());
+                btnScan.setText(count + " selected");
+                btnScan.setOnClickListener(v -> {
+                    new AlertDialog.Builder(this)
+                        .setTitle("Batch action")
+                        .setItems(
+                            new String[]{"Tag selected", "Rename selected", "Cancel"},
+                            (d, which) -> {
+                                if (which == 0)      showBatchTagDialog();
+                                else if (which == 1) showBatchRenameDialog();
+                                else                 mediaAdapter.exitSelectMode();
+                            })
+                        .show();
+                });
             } else {
                 btnScan.setText("SCAN");
                 btnScan.setOnClickListener(v -> startScan());
