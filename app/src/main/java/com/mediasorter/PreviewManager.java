@@ -10,8 +10,10 @@ import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.MediaController;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -20,7 +22,6 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import com.mediasorter.adapters.SidePanelTagAdapter;
 import com.mediasorter.models.MediaFile;
-import com.mediasorter.models.TagList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -46,31 +47,35 @@ public class PreviewManager {
     private final Handler         mainHandler = new Handler(Looper.getMainLooper());
 
     // Views
-    private ImageView   imagePreview;
-    private VideoView   videoPreview;
-    private View        unsupportedPreview;
-    private TextView    detailFileName;
-    private TextView    detailMeta;
-    private TextView    unsupportedText;
-    private TextView    positionCounter;
-    private Button      btnSkip;
-    private Button      btnFlag;
-    private Button      btnDone;
-    private Button      btnPrev;
-    private Button      btnNext;
-    private Button      dpadUp;
-    private Button      dpadDown;
-    private Button      dpadLeft;
-    private Button      dpadRight;
-    private Button      dpadCenter;
-    private Spinner     tagListSpinner;
+    private ImageView    imagePreview;
+    private VideoView    videoPreview;
+    private View         unsupportedPreview;
+    private TextView     detailFileName;
+    private TextView     detailMeta;
+    private TextView     unsupportedText;
+    private TextView     positionCounter;
+    private Button       btnSkip;
+    private Button       btnFlag;
+    private Button       btnDone;
+    private Button       btnPrev;
+    private Button       btnNext;
+    private Button       btnTogglePanel;
+    private Button       dpadUp;
+    private Button       dpadDown;
+    private Button       dpadLeft;
+    private Button       dpadRight;
+    private Button       dpadCenter;
+    private LinearLayout tagSidePanel;
+    private Spinner      tagListSpinner;
     private RecyclerView sidePanelTagList;
 
-    private ActionListener      actionListener;
-    private FileStatus          fileStatus;
-    private GestureDetector     swipeDetector;
+    private ActionListener       actionListener;
+    private FileStatus           fileStatus;
+    private GestureDetector      swipeDetector;
     private ScaleGestureDetector scaleDetector;
-    private SidePanelTagAdapter sidePanelAdapter;
+    private SidePanelTagAdapter  sidePanelAdapter;
+
+    private boolean panelVisible = false;
 
     // Zoom state
     private float scaleFactor = 1.0f;
@@ -90,10 +95,6 @@ public class PreviewManager {
         setupButtons();
         setupSidePanel();
     }
-    
-    public SidePanelTagAdapter getSidePanelTagAdapter() {
-    return sidePanelAdapter;
-    }
 
     // ── Bind ──────────────────────────────────────────────────────────────────
 
@@ -110,11 +111,13 @@ public class PreviewManager {
         btnDone            = root.findViewById(R.id.btnDone);
         btnPrev            = root.findViewById(R.id.btnPrev);
         btnNext            = root.findViewById(R.id.btnNext);
+        btnTogglePanel     = root.findViewById(R.id.btnTogglePanel);
         dpadUp             = root.findViewById(R.id.dpadUp);
         dpadDown           = root.findViewById(R.id.dpadDown);
         dpadLeft           = root.findViewById(R.id.dpadLeft);
         dpadRight          = root.findViewById(R.id.dpadRight);
         dpadCenter         = root.findViewById(R.id.dpadCenter);
+        tagSidePanel       = root.findViewById(R.id.tagSidePanel);
         tagListSpinner     = root.findViewById(R.id.tagListSpinner);
         sidePanelTagList   = root.findViewById(R.id.sidePanelTagList);
     }
@@ -122,16 +125,26 @@ public class PreviewManager {
     // ── Buttons ───────────────────────────────────────────────────────────────
 
     private void setupButtons() {
-        btnSkip.setOnClickListener(v   -> { if (actionListener != null) actionListener.onSkip(); });
-        btnFlag.setOnClickListener(v   -> { if (actionListener != null) actionListener.onFlag(); });
-        btnDone.setOnClickListener(v   -> { if (actionListener != null) actionListener.onDone(); });
-        btnPrev.setOnClickListener(v   -> { if (actionListener != null) actionListener.onPrev(); });
-        btnNext.setOnClickListener(v   -> { if (actionListener != null) actionListener.onNext(); });
-        dpadUp.setOnClickListener(v    -> { if (actionListener != null) actionListener.onDpadUp(); });
-        dpadDown.setOnClickListener(v  -> { if (actionListener != null) actionListener.onDpadDown(); });
-        dpadLeft.setOnClickListener(v  -> { if (actionListener != null) actionListener.onDpadLeft(); });
-        dpadRight.setOnClickListener(v -> { if (actionListener != null) actionListener.onDpadRight(); });
-        dpadCenter.setOnClickListener(v-> { if (actionListener != null) actionListener.onDpadCenter(); });
+        btnSkip.setOnClickListener(v    -> { if (actionListener != null) actionListener.onSkip(); });
+        btnFlag.setOnClickListener(v    -> { if (actionListener != null) actionListener.onFlag(); });
+        btnDone.setOnClickListener(v    -> { if (actionListener != null) actionListener.onDone(); });
+        btnPrev.setOnClickListener(v    -> { if (actionListener != null) actionListener.onPrev(); });
+        btnNext.setOnClickListener(v    -> { if (actionListener != null) actionListener.onNext(); });
+        dpadUp.setOnClickListener(v     -> { if (actionListener != null) actionListener.onDpadUp(); });
+        dpadDown.setOnClickListener(v   -> { if (actionListener != null) actionListener.onDpadDown(); });
+        dpadLeft.setOnClickListener(v   -> { if (actionListener != null) actionListener.onDpadLeft(); });
+        dpadRight.setOnClickListener(v  -> { if (actionListener != null) actionListener.onDpadRight(); });
+        dpadCenter.setOnClickListener(v -> { if (actionListener != null) actionListener.onDpadCenter(); });
+
+        btnTogglePanel.setOnClickListener(v -> togglePanel());
+    }
+
+    // ── Panel toggle ──────────────────────────────────────────────────────────
+
+    private void togglePanel() {
+        panelVisible = !panelVisible;
+        tagSidePanel.setVisibility(panelVisible ? View.VISIBLE : View.GONE);
+        btnTogglePanel.setText(panelVisible ? "✕" : "≡");
     }
 
     // ── Side panel ────────────────────────────────────────────────────────────
@@ -142,12 +155,15 @@ public class PreviewManager {
         sidePanelTagList.setAdapter(sidePanelAdapter);
     }
 
+    public SidePanelTagAdapter getSidePanelAdapter() {
+        return sidePanelAdapter;
+    }
+
     public void setSidePanelTags(List<String> tags, List<String> appliedTags) {
         sidePanelAdapter.setTags(tags, appliedTags);
     }
 
-    public void setTagListSpinner(android.widget.ArrayAdapter<String> adapter,
-                                   int selectedIndex) {
+    public void setTagListSpinner(ArrayAdapter<String> adapter, int selectedIndex) {
         tagListSpinner.setAdapter(adapter);
         tagListSpinner.setSelection(selectedIndex);
         tagListSpinner.setOnItemSelectedListener(
@@ -166,11 +182,15 @@ public class PreviewManager {
 
     public void updateDpadLabels(String up, String down, String left,
                                   String right, String center) {
-        dpadUp.setText(up.isEmpty()     ? "▲" : "▲\n" + up);
-        dpadDown.setText(down.isEmpty() ? "▼" : "▼\n" + down);
-        dpadLeft.setText(left.isEmpty() ? "◄" : "◄\n" + left);
-        dpadRight.setText(right.isEmpty()? "►" : "►\n" + right);
-        dpadCenter.setText(center.isEmpty()? "●" : "●\n" + center);
+        dpadUp.setText(up.isEmpty()      ? "▲" : "▲\n" + truncate(up));
+        dpadDown.setText(down.isEmpty()  ? "▼" : "▼\n" + truncate(down));
+        dpadLeft.setText(left.isEmpty()  ? "◄" : "◄\n" + truncate(left));
+        dpadRight.setText(right.isEmpty()? "►" : "►\n" + truncate(right));
+        dpadCenter.setText(center.isEmpty()? "●" : "●\n" + truncate(center));
+    }
+
+    private String truncate(String s) {
+        return s.length() > 6 ? s.substring(0, 6) + "…" : s;
     }
 
     // ── Zoom ──────────────────────────────────────────────────────────────────
@@ -207,7 +227,6 @@ public class PreviewManager {
                     lastTouchY = event.getY();
                     break;
                 case MotionEvent.ACTION_UP:
-                    // Double tap to reset
                     if (scaleFactor <= MIN_ZOOM) resetZoom();
                     break;
             }
@@ -234,7 +253,6 @@ public class PreviewManager {
     }
 
     public void setSwipeDetector(GestureDetector d) { this.swipeDetector = d; }
-
     public void setActionListener(ActionListener l) { this.actionListener = l; }
 
     // ── Load ──────────────────────────────────────────────────────────────────
@@ -279,10 +297,8 @@ public class PreviewManager {
             mainHandler.post(() -> {
                 if (bmp != null) {
                     imagePreview.setVisibility(View.VISIBLE);
-                    // FIT_CENTER first to show full image
                     imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
                     imagePreview.setImageBitmap(bmp);
-                    // Switch to matrix after layout for zoom support
                     imagePreview.post(() -> {
                         imagePreview.setScaleType(ImageView.ScaleType.MATRIX);
                         Matrix m = new Matrix(imagePreview.getImageMatrix());
@@ -311,27 +327,21 @@ public class PreviewManager {
     private void loadVideo(MediaFile file) {
         mainHandler.post(() -> {
             videoPreview.setVisibility(View.VISIBLE);
-
             MediaController mc = new MediaController(context);
             mc.setAnchorView(videoPreview);
             videoPreview.setMediaController(mc);
             videoPreview.setVideoURI(
                 android.net.Uri.parse(file.getPath()));
-
             videoPreview.setOnPreparedListener(mp -> {
                 mp.setLooping(false);
-                // Keep controls always visible
                 mc.show(0);
                 videoPreview.start();
             });
-
             videoPreview.setOnErrorListener((mp, what, extra) -> {
                 showUnsupported(CodecChecker.getUnsupportedReason(file));
                 return true;
             });
-
             videoPreview.setOnCompletionListener(mp -> mc.show(0));
-
             videoPreview.requestFocus();
         });
     }
