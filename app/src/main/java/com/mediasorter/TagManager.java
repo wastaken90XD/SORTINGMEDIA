@@ -20,14 +20,27 @@ public class TagManager {
     private static final int    MAX_RECENT = 10;
 
     private final TagDatabase        db;
-    private final ExecutorService    executor  = Executors.newSingleThreadExecutor();
-    private final Map<String, Tag>   tagMap    = new HashMap<>();
+    private final ExecutorService    executor   = Executors.newSingleThreadExecutor();
+    private final Map<String, Tag>   tagMap     = new HashMap<>();
     private final LinkedList<String> recentTags;
     private final SharedPreferences  prefs;
 
-    // Tag cache — maps filePath → list of tag names
-    // Survives list rebuilds so tags don't disappear on refresh
-    private final Map<String, List<String>> tagCache = new HashMap<>();
+    // Last applied tag per file path — for undo on second gesture
+    private final Map<String, String> lastApplied = new HashMap<>();
+
+    // Listener for tag list changes
+    public interface TagChangeListener {
+        void onTagsChanged();
+    }
+    private TagChangeListener tagChangeListener;
+
+    public void setTagChangeListener(TagChangeListener l) {
+        this.tagChangeListener = l;
+    }
+
+    private void notifyTagsChanged() {
+        if (tagChangeListener != null) tagChangeListener.onTagsChanged();
+    }
 
     public TagManager(Context context) {
         this.db         = TagDatabase.getInstance(context);
@@ -76,38 +89,19 @@ public class TagManager {
         saveRecentTags();
     }
 
-    // ── Tag cache ─────────────────────────────────────────────────────────────
-
-    public void cacheFileTags(String path, List<String> tags) {
-        tagCache.put(path, new ArrayList<>(tags));
-    }
-
-    public List<String> getCachedTags(String path) {
-        List<String> cached = tagCache.get(path);
-        return cached != null ? new ArrayList<>(cached) : new ArrayList<>();
-    }
-
-    // Restore tags from cache to file objects — call before every refresh
-    public void restoreTagsToFiles(List<MediaFile> files) {
-        for (MediaFile f : files) {
-            List<String> cached = tagCache.get(f.getPath());
-            if (cached != null && !cached.isEmpty()) {
-                for (String tag : cached) {
-                    if (!f.hasTag(tag)) f.addTag(tag);
-                }
-            }
-        }
-    }
-
     // ── Create ────────────────────────────────────────────────────────────────
 
     public void createTag(String name) {
         String trimmed = name.trim();
         if (trimmed.isEmpty()) return;
         executor.submit(() -> {
-            Tag tag = new Tag(trimmed);
-            db.tagDao().insert(tag);
-            synchronized (tagMap) { tagMap.put(trimmed, tag); }
+            synchronized (tagMap) {
+                if (tagMap.containsKey(trimmed)) return;
+                Tag tag = new Tag(trimmed);
+                db.tagDao().insert(tag);
+                tagMap.put(trimmed, tag);
+            }
+            notifyTagsChanged();
         });
     }
 
@@ -117,9 +111,7 @@ public class TagManager {
         if (file.hasTag(tagName)) return;
         file.addTag(tagName);
         addToRecent(tagName);
-
-        // Update cache immediately — before background thread runs
-        cacheFileTags(file.getPath(), file.getTags());
+        lastApplied.put(file.getPath(), tagName);
 
         executor.submit(() -> {
             synchronized (tagMap) {
@@ -133,6 +125,7 @@ public class TagManager {
                 db.tagDao().update(tag);
             }
             MetadataWriter.writeTags(file.getPath(), file.getTags());
+            notifyTagsChanged();
         });
     }
 
@@ -141,9 +134,6 @@ public class TagManager {
     public void removeTag(MediaFile file, String tagName) {
         if (!file.hasTag(tagName)) return;
         file.removeTag(tagName);
-
-        // Update cache immediately
-        cacheFileTags(file.getPath(), file.getTags());
 
         executor.submit(() -> {
             synchronized (tagMap) {
@@ -154,12 +144,38 @@ public class TagManager {
                 }
             }
             MetadataWriter.writeTags(file.getPath(), file.getTags());
+            notifyTagsChanged();
         });
     }
+
+    // ── Undo last applied tag ─────────────────────────────────────────────────
+
+    public boolean undoLastTag(MediaFile file) {
+        String last = lastApplied.get(file.getPath());
+        if (last == null || !file.hasTag(last)) return false;
+        removeTag(file, last);
+        lastApplied.remove(file.getPath());
+        return true;
+    }
+
+    // ── Toggle ────────────────────────────────────────────────────────────────
 
     public void toggleTag(MediaFile file, String tagName) {
         if (file.hasTag(tagName)) removeTag(file, tagName);
         else                      applyTag(file, tagName);
+    }
+
+    // ── Toggle with undo — second call removes last applied ───────────────────
+
+    public void applyOrUndo(MediaFile file, String tagName) {
+        String last = lastApplied.get(file.getPath());
+        if (last != null && last.equals(tagName) && file.hasTag(tagName)) {
+            // Second press — undo
+            removeTag(file, tagName);
+            lastApplied.remove(file.getPath());
+        } else {
+            applyTag(file, tagName);
+        }
     }
 
     // ── Delete ────────────────────────────────────────────────────────────────
@@ -170,8 +186,26 @@ public class TagManager {
                 Tag tag = tagMap.remove(name);
                 if (tag != null) db.tagDao().delete(tag);
             }
+            notifyTagsChanged();
         });
-        tagCache.forEach((path, tags) -> tags.remove(name));
+    }
+
+    // ── Import tags from index ────────────────────────────────────────────────
+
+    // Auto-populate tagMap from tags already written to files
+    public void importTagsFromFiles(List<String> tagNames) {
+        executor.submit(() -> {
+            synchronized (tagMap) {
+                for (String name : tagNames) {
+                    if (!tagMap.containsKey(name)) {
+                        Tag tag = new Tag(name);
+                        db.tagDao().insert(tag);
+                        tagMap.put(name, tag);
+                    }
+                }
+            }
+            notifyTagsChanged();
+        });
     }
 
     // ── Query ─────────────────────────────────────────────────────────────────
