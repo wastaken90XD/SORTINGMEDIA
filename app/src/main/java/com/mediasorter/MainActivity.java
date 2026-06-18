@@ -175,7 +175,7 @@ public class MainActivity extends Activity
         });
 
         // Side panel tag list click
-        previewManager.getSidePanelTagAdapter().setListener((tagName, applied) ->
+        previewManager.getSidePanelAdapter().setListener((tagName, applied) ->
             applyTagToCurrentFile(tagName, applied));
 
         // Tag list spinner
