@@ -507,7 +507,47 @@ private void initAdapters() {
         shiftWindowIfNeeded(currentIndex);
         loadFileAtIndex(currentIndex);
     }
+    private void showBatchTagDialog() {
+    List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
+    if (selectedFiles.isEmpty()) return;
 
+    List<com.mediasorter.models.Tag> allTags = tagManager.getAllTags();
+    if (allTags.isEmpty()) {
+        android.widget.Toast.makeText(this,
+            "No tags created yet",
+            android.widget.Toast.LENGTH_SHORT).show();
+        return;
+    }
+
+    String[]  tagNames = new String[allTags.size()];
+    boolean[] checked  = new boolean[allTags.size()];
+    for (int i = 0; i < allTags.size(); i++) {
+        tagNames[i] = allTags.get(i).getName();
+    }
+
+    new AlertDialog.Builder(this)
+        .setTitle("Tag " + selectedFiles.size() + " files")
+        .setMultiChoiceItems(tagNames, checked, (d, which, isChecked) -> {
+            checked[which] = isChecked;
+        })
+        .setPositiveButton("Apply", (d, w) -> {
+            for (MediaFile file : selectedFiles) {
+                for (int i = 0; i < tagNames.length; i++) {
+                    if (checked[i]) tagManager.applyTag(file, tagNames[i]);
+                }
+                mediaAdapter.updateFile(file);
+            }
+            mediaAdapter.exitSelectMode();
+            btnScan.setText("SCAN");
+            btnScan.setOnClickListener(v -> startScan());
+            scheduleRefresh();
+            android.widget.Toast.makeText(this,
+                "Tagged " + selectedFiles.size() + " files",
+                android.widget.Toast.LENGTH_SHORT).show();
+        })
+        .setNegativeButton("Cancel", null)
+        .show();
+}             
     private void showBatchRenameDialog() {
     List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
     if (selectedFiles.isEmpty()) return;
