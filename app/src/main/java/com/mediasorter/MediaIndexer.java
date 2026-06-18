@@ -43,6 +43,8 @@ public class MediaIndexer {
     public void setListener(IndexListener l) { this.listener = l; }
     public boolean isScanning()              { return scanning; }
 
+    // ── Full scan ─────────────────────────────────────────────────────────────
+
     public void scanFolder(String folderPath) {
         if (scanning) return;
         scanning = true;
@@ -95,6 +97,8 @@ public class MediaIndexer {
         });
     }
 
+    // ── Rescan ────────────────────────────────────────────────────────────────
+
     public void rescan(String folderPath) {
         if (scanning) return;
 
@@ -133,6 +137,7 @@ public class MediaIndexer {
                 }
             }
 
+            // Deletions
             List<String> toRemove = new ArrayList<>();
             synchronized (index) {
                 for (MediaFile mf : index) {
@@ -150,6 +155,8 @@ public class MediaIndexer {
         });
     }
 
+    // ── Full reset ────────────────────────────────────────────────────────────
+
     public void fullReset(List<String> folders) {
         synchronized (index) { index.clear(); }
         manifest.clear();
@@ -157,11 +164,25 @@ public class MediaIndexer {
         for (String folder : folders) scanFolder(folder);
     }
 
+    // ── Delete file from disk + index ─────────────────────────────────────────
+
+    public boolean deleteFile(String path) {
+        File f = new File(path);
+        boolean deleted = f.exists() && f.delete();
+        if (deleted) {
+            removeFromIndex(path);
+            if (listener != null) listener.onFileRemoved(path);
+        }
+        return deleted;
+    }
+
+    // ── Build ─────────────────────────────────────────────────────────────────
+
     private MediaFile buildLight(File f) {
         MediaFile mf = new MediaFile(f.getAbsolutePath(), f.length());
         mf.setDateAdded(f.lastModified());
 
-        // Read existing XMP tags from file metadata
+        // Read existing XMP tags from file
         List<String> existingTags = XmpReader.readTags(f.getAbsolutePath());
         for (String tag : existingTags) mf.addTag(tag);
 
@@ -169,6 +190,8 @@ public class MediaIndexer {
             new ManifestEntry(f.getAbsolutePath(), f.length(), null));
         return mf;
     }
+
+    // ── Index helpers ─────────────────────────────────────────────────────────
 
     private void addToIndex(MediaFile mf) {
         synchronized (index) { index.add(mf); }
@@ -191,6 +214,20 @@ public class MediaIndexer {
             index.removeIf(mf -> mf.getPath().equals(path));
         }
         manifest.remove(path);
+    }
+
+    // ── Get all unique tags from index ────────────────────────────────────────
+
+    public List<String> getAllTagsFromIndex() {
+        List<String> result = new ArrayList<>();
+        synchronized (index) {
+            for (MediaFile mf : index) {
+                for (String tag : mf.getTags()) {
+                    if (!result.contains(tag)) result.add(tag);
+                }
+            }
+        }
+        return result;
     }
 
     public List<MediaFile> getIndex() {
