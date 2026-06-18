@@ -101,22 +101,27 @@ public class MainActivity extends Activity
     // ── Init ──────────────────────────────────────────────────────────────────
 
     private void initManagers() {
-        indexer         = new MediaIndexer();
-        tagManager      = new TagManager(this);
-        tagListManager  = new TagListManager(this);
-        folderManager   = new FolderManager(this);
-        folderWatcher   = new FolderWatcher(this);
-        searchManager   = new SearchManager();
-        groupManager    = new GroupManager();
-        cacheManager    = new CacheManager(this);
-        thumbnailLoader = new ThumbnailLoader(this);
-        sortManager     = new SortManager();
-        fileStatus      = new FileStatus(this);
-        filterManager   = new FilterManager(fileStatus);
-        gestureSettings = new GestureSettings(this);
-        windowManager   = new WindowManager(getWindowSize());
-        indexer.setListener(this);
-    }
+    indexer         = new MediaIndexer();
+    tagManager      = new TagManager(this);
+    tagListManager  = new TagListManager(this);
+    folderManager   = new FolderManager(this);
+    folderWatcher   = new FolderWatcher(this);
+    searchManager   = new SearchManager();
+    groupManager    = new GroupManager();
+    cacheManager    = new CacheManager(this);
+    thumbnailLoader = new ThumbnailLoader(this);
+    sortManager     = new SortManager();
+    fileStatus      = new FileStatus(this);
+    filterManager   = new FilterManager(fileStatus);
+    gestureSettings = new GestureSettings(this);
+    windowManager   = new WindowManager(getWindowSize());
+    indexer.setListener(this);
+
+    // Auto-refresh tag list on any change
+    tagManager.setTagChangeListener(() ->
+        mainHandler.post(() ->
+            tagAdapter.setTags(tagManager.getAllTags())));
+}
 
     private int getWindowSize() {
         return getSharedPreferences("window_prefs", MODE_PRIVATE)
@@ -283,6 +288,11 @@ private void initAdapters() {
         findViewById(R.id.btnSettings).setOnClickListener(v ->
             startActivity(new Intent(this, SettingsActivity.class)));
 
+        Button btnDelete = findViewById(R.id.btnDelete);
+if (btnDelete != null) {
+    btnDelete.setOnClickListener(v -> deleteCurrentFile());
+}
+
         tagAdapter.setTags(tagManager.getAllTags());
     }
 
@@ -393,20 +403,32 @@ private void initAdapters() {
     // ── Gesture execution ─────────────────────────────────────────────────────
 
     private void executeSwipe(GestureSettings.GestureAction action, String tag) {
-        if (action == GestureSettings.GestureAction.APPLY_TAG && !tag.isEmpty()) {
-            applyTagToCurrentFile(tag, true);
-        } else {
-            executeAction(action);
-        }
+    if (action == GestureSettings.GestureAction.APPLY_TAG && !tag.isEmpty()) {
+        if (currentIndex < 0 || currentIndex >= fullList.size()) return;
+        MediaFile file = fullList.get(currentIndex);
+        tagManager.applyOrUndo(file, tag);
+        fullList.set(currentIndex, file);
+        mediaAdapter.updateFile(file);
+        refreshSidePanel();
+        updateProgress();
+    } else {
+        executeAction(action);
     }
+}
 
     private void executeDpad(GestureSettings.GestureAction action, String tag) {
-        if (action == GestureSettings.GestureAction.APPLY_TAG && !tag.isEmpty()) {
-            applyTagToCurrentFile(tag, true);
-        } else {
-            executeAction(action);
-        }
+    if (action == GestureSettings.GestureAction.APPLY_TAG && !tag.isEmpty()) {
+        if (currentIndex < 0 || currentIndex >= fullList.size()) return;
+        MediaFile file = fullList.get(currentIndex);
+        tagManager.applyOrUndo(file, tag);
+        fullList.set(currentIndex, file);
+        mediaAdapter.updateFile(file);
+        refreshSidePanel();
+        updateProgress();
+    } else {
+        executeAction(action);
     }
+}
 
     private void executeAction(GestureSettings.GestureAction action) {
         switch (action) {
@@ -832,6 +854,33 @@ private BatchRenameManager.Case caseFromPos(int pos) {
             .show();
     }
 
+    private void deleteCurrentFile() {
+    if (currentIndex < 0 || currentIndex >= fullList.size()) return;
+    MediaFile file = fullList.get(currentIndex);
+
+    new AlertDialog.Builder(this)
+        .setTitle("Delete file?")
+        .setMessage(file.getName())
+        .setPositiveButton("Delete", (d, w) -> {
+            boolean deleted = indexer.deleteFile(file.getPath());
+            if (deleted) {
+                fullList.removeIf(f -> f.getPath().equals(file.getPath()));
+                mediaAdapter.removeFile(file.getPath());
+                thumbnailLoader.cancel(file.getPath());
+                if (currentIndex >= fullList.size()) {
+                    currentIndex = fullList.size() - 1;
+                }
+                if (currentIndex >= 0) loadFileAtIndex(currentIndex);
+                updateProgress();
+                Toast.makeText(this, "Deleted", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Could not delete", Toast.LENGTH_SHORT).show();
+            }
+        })
+        .setNegativeButton("Cancel", null)
+        .show();
+}
+                
     // ── FolderWatcher ─────────────────────────────────────────────────────────
 
     @Override
@@ -869,12 +918,19 @@ private BatchRenameManager.Case caseFromPos(int pos) {
 
     @Override
     public void onScanComplete(List<MediaFile> allFiles) {
-        mainHandler.post(() -> {
-            btnScan.setEnabled(true);
-            btnScan.setText("SCAN");
-            executeRefresh();
-        });
-    }
+    mainHandler.post(() -> {
+        btnScan.setEnabled(true);
+        btnScan.setText("SCAN");
+
+        // Import all tags found in scanned files into TagManager
+        List<String> allTagsFromFiles = indexer.getAllTagsFromIndex();
+        if (!allTagsFromFiles.isEmpty()) {
+            tagManager.importTagsFromFiles(allTagsFromFiles);
+        }
+
+        executeRefresh();
+    });
+}
 
     @Override
     public void onFileChanged(MediaFile file) {
