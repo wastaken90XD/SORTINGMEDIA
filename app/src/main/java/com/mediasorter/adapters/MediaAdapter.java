@@ -26,15 +26,13 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         void onSelectionChanged(int count);
     }
 
-    private List<MediaFile>          files        = new ArrayList<>();
-    private OnFileClickListener      listener;
+    private List<MediaFile>            files     = new ArrayList<>();
+    private OnFileClickListener        listener;
     private OnSelectionChangedListener selectionListener;
-    private ThumbnailLoader          loader;
-    private String                   selectedPath = null;
-
-    // Multi-select state
-    private boolean      selectMode = false;
-    private Set<String>  selected   = new HashSet<>();
+    private ThumbnailLoader            loader;
+    private String                     selectedPath = null;
+    private boolean                    selectMode   = false;
+    private final Set<String>          selected     = new HashSet<>();
 
     public MediaAdapter(ThumbnailLoader loader, OnFileClickListener listener) {
         this.loader   = loader;
@@ -105,7 +103,8 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         if (selectionListener != null) selectionListener.onSelectionChanged(0);
     }
 
-    public boolean isSelectMode() { return selectMode; }
+    public boolean isSelectMode()          { return selectMode; }
+    public int     getSelectedCount()      { return selected.size(); }
 
     public List<MediaFile> getSelectedFiles() {
         List<MediaFile> result = new ArrayList<>();
@@ -115,23 +114,22 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         return result;
     }
 
-    public int getSelectedCount() { return selected.size(); }
-
     public void selectAll() {
         for (MediaFile f : files) selected.add(f.getPath());
         notifyDataSetChanged();
         if (selectionListener != null) selectionListener.onSelectionChanged(selected.size());
     }
 
-    public void deselectAll() {
-        selected.clear();
-        notifyDataSetChanged();
-        if (selectionListener != null) selectionListener.onSelectionChanged(0);
-    }
-
-    private void toggleSelection(String path) {
-        if (selected.contains(path)) selected.remove(path);
-        else                         selected.add(path);
+    private void toggleSelection(String path, ViewHolder holder) {
+        if (selected.contains(path)) {
+            selected.remove(path);
+            holder.itemView.setBackgroundColor(0x00000000);
+            holder.checkBox.setChecked(false);
+        } else {
+            selected.add(path);
+            holder.itemView.setBackgroundColor(0xFF2A2A6E);
+            holder.checkBox.setChecked(true);
+        }
         if (selectionListener != null) selectionListener.onSelectionChanged(selected.size());
     }
 
@@ -148,7 +146,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         MediaFile file    = files.get(position);
-        boolean   isSelct = selected.contains(file.getPath());
+        boolean   isSel   = selected.contains(file.getPath());
 
         holder.fileName.setText(file.getName());
         holder.fileDetails.setText(
@@ -164,26 +162,21 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
             holder.fileTags.setTextColor(0xFFE94560);
         }
 
-        // Selection highlight
         if (selectMode) {
-            holder.itemView.setBackgroundColor(
-                isSelct ? 0xFF2A2A6E : 0x00000000);
             holder.checkBox.setVisibility(View.VISIBLE);
-            holder.checkBox.setChecked(isSelct);
+            holder.checkBox.setChecked(isSel);
+            holder.itemView.setBackgroundColor(isSel ? 0xFF2A2A6E : 0x00000000);
         } else {
+            holder.checkBox.setVisibility(View.GONE);
             holder.itemView.setBackgroundColor(
                 file.getPath().equals(selectedPath) ? 0xFF1A1A4E : 0x00000000);
-            holder.checkBox.setVisibility(View.GONE);
         }
 
         loader.load(file, holder.thumbnail);
 
         holder.itemView.setOnClickListener(v -> {
             if (selectMode) {
-                toggleSelection(file.getPath());
-                holder.checkBox.setChecked(selected.contains(file.getPath()));
-                holder.itemView.setBackgroundColor(
-                    selected.contains(file.getPath()) ? 0xFF2A2A6E : 0x00000000);
+                toggleSelection(file.getPath(), holder);
             } else {
                 setSelected(file.getPath());
                 if (listener != null) listener.onFileClick(file);
@@ -193,10 +186,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         holder.itemView.setOnLongClickListener(v -> {
             if (!selectMode) {
                 enterSelectMode();
-                toggleSelection(file.getPath());
-                holder.checkBox.setVisibility(View.VISIBLE);
-                holder.checkBox.setChecked(true);
-                holder.itemView.setBackgroundColor(0xFF2A2A6E);
+                toggleSelection(file.getPath(), holder);
             }
             return true;
         });
