@@ -6,57 +6,90 @@ import java.util.List;
 
 public class SearchManager {
 
-    public enum Mode { NAME, TAG, BOTH }
-
     private List<MediaFile> fullList = new ArrayList<>();
-    private Mode            mode     = Mode.BOTH;
 
     public void setFullList(List<MediaFile> files) {
         this.fullList = files;
     }
 
-    public void setMode(Mode mode) {
-        this.mode = mode;
-    }
+    // ── Search ────────────────────────────────────────────────────────────────
 
-    // AND logic — file must match ALL query tokens
     public List<MediaFile> search(String query) {
-        if (query == null || query.trim().isEmpty()) return new ArrayList<>(fullList);
-
-        String[]        tokens  = query.trim().toLowerCase().split("\\s+");
-        List<MediaFile> results = new ArrayList<>();
-
-        for (MediaFile file : fullList) {
-            if (matchesAll(file, tokens)) results.add(file);
+        if (query == null || query.trim().isEmpty()) {
+            return new ArrayList<>(fullList);
         }
 
-        return results;
+        String[] terms = query.toLowerCase().trim().split("\\s+");
+        List<MediaFile> result = new ArrayList<>();
+
+        for (MediaFile f : fullList) {
+            if (matchesAll(f, terms)) result.add(f);
+        }
+
+        return result;
     }
 
-    private boolean matchesAll(MediaFile file, String[] tokens) {
-        for (String token : tokens) {
-            if (!matchesToken(file, token)) return false;
+    // All terms must match — AND logic
+    private boolean matchesAll(MediaFile f, String[] terms) {
+        for (String term : terms) {
+            if (!matchesTerm(f, term)) return false;
         }
         return true;
     }
 
-    private boolean matchesToken(MediaFile file, String token) {
-        switch (mode) {
-            case NAME:
-                return file.getName().toLowerCase().contains(token);
-            case TAG:
-                return hasMatchingTag(file, token);
-            case BOTH:
-            default:
-                return file.getName().toLowerCase().contains(token)
-                    || hasMatchingTag(file, token);
+    private boolean matchesTerm(MediaFile f, String term) {
+        // Filename
+        if (f.getName().toLowerCase().contains(term)) return true;
+
+        // Tags
+        for (String tag : f.getTags()) {
+            if (tag.toLowerCase().contains(term)) return true;
         }
+
+        // Type filter — e.g. "type:image" or "type:video"
+        if (term.startsWith("type:")) {
+            String type = term.substring(5);
+            return f.getType().name().toLowerCase().contains(type);
+        }
+
+        // Extension filter — e.g. "ext:jpg"
+        if (term.startsWith("ext:")) {
+            String ext = term.substring(4);
+            return f.getName().toLowerCase().endsWith("." + ext);
+        }
+
+        // Size filter — e.g. "size:>1mb" or "size:<500kb"
+        if (term.startsWith("size:")) {
+            return matchesSize(f, term.substring(5));
+        }
+
+        // Tagged/untagged filter
+        if (term.equals("tagged"))   return !f.getTags().isEmpty();
+        if (term.equals("untagged")) return f.getTags().isEmpty();
+
+        return false;
     }
 
-    private boolean hasMatchingTag(MediaFile file, String token) {
-        for (String tag : file.getTags()) {
-            if (tag.toLowerCase().contains(token)) return true;
-        }
+    private boolean matchesSize(MediaFile f, String sizeExpr) {
+        try {
+            boolean gt = sizeExpr.startsWith(">");
+            boolean lt = sizeExpr.startsWith("<");
+            String  val = sizeExpr.substring(1).toLowerCase();
+
+            long bytes = parseSize(val);
+            if (gt) return f.getSize() > bytes;
+            if (lt) return f.getSize() < bytes;
+        } catch (Exception ignored) {}
         return false;
+    }
+
+    private long parseSize(String val) {
+        if (val.endsWith("mb")) return Long.parseLong(
+            val.replace("mb", "").trim()) * 1024 * 1024;
+        if (val.endsWith("kb")) return Long.parseLong(
+            val.replace("kb", "").trim()) * 1024;
+        if (val.endsWith("gb")) return Long.parseLong(
+            val.replace("gb", "").trim()) * 1024 * 1024 * 1024;
+        return Long.parseLong(val.trim());
     }
 }
