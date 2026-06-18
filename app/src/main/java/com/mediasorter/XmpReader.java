@@ -14,169 +14,92 @@ public class XmpReader {
 
     private static final String TAG = "XmpReader";
 
-    private static final byte[] XMP_MAGIC =
-        "http://ns.adobe.com/xap/1.0/\0".getBytes(StandardCharsets.UTF_8);
-
     private static final Pattern TAG_PATTERN =
-        Pattern.compile("<rdf:li>([^<]+)</rdf:li>");
+        Pattern.compile("<rdf:li[^>]*>([^<]+)</rdf:li>");
 
     // ── Public API ────────────────────────────────────────────────────────────
 
     public static List<String> readTags(String filePath) {
+        if (filePath == null || filePath.isEmpty()) return new ArrayList<>();
         try {
             String lower = filePath.toLowerCase();
             if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
-                return readJpegTags(filePath);
+                return readJpeg(filePath);
             } else if (lower.endsWith(".png")) {
-                return readPngTags(filePath);
+                return readGeneric(filePath, false);
             } else if (lower.endsWith(".mp4") || lower.endsWith(".mov")) {
-                return readMp4Tags(filePath);
+                return readGeneric(filePath, true);
             }
         } catch (Exception e) {
-            Log.w(TAG, "Failed to read tags from: " + filePath + " " + e.getMessage());
+            Log.w(TAG, "Failed: " + filePath + " " + e.getMessage());
         }
         return new ArrayList<>();
     }
 
     // ── JPEG ──────────────────────────────────────────────────────────────────
 
-    private static List<String> readJpegTags(String filePath) throws Exception {
+    private static List<String> readJpeg(String filePath) throws Exception {
         RandomAccessFile raf = new RandomAccessFile(filePath, "r");
-        byte[] data = new byte[(int) Math.min(raf.length(), 65536)];
+
+        // Read first 128KB — XMP is always near start in JPEG
+        int readSize = (int) Math.min(raf.length(), 131072);
+        byte[] data  = new byte[readSize];
         raf.readFully(data);
         raf.close();
 
-        // Find XMP APP1 marker
-        for (int i = 0; i < data.length - XMP_MAGIC.length - 4; i++) {
-            if (data[i] == (byte)0xFF && data[i+1] == (byte)0xE1) {
-                // Check for XMP magic
-                int offset = i + 4;
-                if (offset + XMP_MAGIC.length < data.length) {
-                    boolean match = true;
-                    for (int j = 0; j < XMP_MAGIC.length; j++) {
-                        if (data[offset + j] != XMP_MAGIC[j]) {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (match) {
-                        int xmpStart = offset + XMP_MAGIC.length;
-                        int segLen   = ((data[i+2] & 0xFF) << 8) | (data[i+3] & 0xFF);
-                        int xmpEnd   = Math.min(i + 2 + segLen, data.length);
-                        String xmp   = new String(data, xmpStart,
-                            xmpEnd - xmpStart, StandardCharsets.UTF_8);
-                        return extractTagsFromXmp(xmp);
-                    }
-                }
-            }
+        // Validate JPEG
+        if (data.length < 2
+                || (data[0] & 0xFF) != 0xFF
+                || (data[1] & 0xFF) != 0xD8) {
+            return new ArrayList<>();
         }
-        return new ArrayList<>();
+
+        // Search for XMP magic bytes
+        String content = new String(data, StandardCharsets.ISO_8859_1);
+        return extractFromContent(content);
     }
 
-    // ── PNG ───────────────────────────────────────────────────────────────────
+    // ── PNG / MP4 — generic search ────────────────────────────────────────────
 
-    private static final byte[] PNG_ITXT_KEYWORD =
-        "XML:com.adobe.xmp".getBytes(StandardCharsets.UTF_8);
+    private static List<String> readGeneric(String filePath,
+                                             boolean fromEnd) throws Exception {
+        File f        = new File(filePath);
+        long fileSize = f.length();
+        if (fileSize == 0) return new ArrayList<>();
 
-    private static List<String> readPngTags(String filePath) throws Exception {
-        FileInputStream fis = new FileInputStream(filePath);
-        byte[] data = new byte[fis.available()];
-        fis.read(data);
-        fis.close();
+        int readSize = (int) Math.min(fileSize, 524288); // 512KB
+        byte[] data  = new byte[readSize];
 
-        if (data.length < 8) return new ArrayList<>();
-
-        int pos = 8; // skip PNG signature
-        while (pos < data.length - 12) {
-            int chunkLen  = readInt(data, pos);
-            if (chunkLen < 0 || pos + 12 + chunkLen > data.length) break;
-
-            byte[] type = new byte[]{data[pos+4], data[pos+5], data[pos+6], data[pos+7]};
-            String typeStr = new String(type, StandardCharsets.US_ASCII);
-
-            if (typeStr.equals("iTXt")) {
-                int dataStart = pos + 8;
-                // Check keyword
-                if (dataStart + PNG_ITXT_KEYWORD.length < data.length) {
-                    boolean match = true;
-                    for (int i = 0; i < PNG_ITXT_KEYWORD.length; i++) {
-                        if (data[dataStart + i] != PNG_ITXT_KEYWORD[i]) {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (match) {
-                        // Skip keyword + null + flags (4 bytes) + null lang + null translated
-                        int xmpStart = dataStart + PNG_ITXT_KEYWORD.length + 1 + 4;
-                        // Skip two null-terminated strings (lang tag, translated keyword)
-                        while (xmpStart < data.length && data[xmpStart] != 0) xmpStart++;
-                        xmpStart++; // skip null
-                        while (xmpStart < data.length && data[xmpStart] != 0) xmpStart++;
-                        xmpStart++; // skip null
-
-                        int xmpEnd = pos + 8 + chunkLen;
-                        if (xmpStart < xmpEnd && xmpEnd <= data.length) {
-                            String xmp = new String(data, xmpStart,
-                                xmpEnd - xmpStart, StandardCharsets.UTF_8);
-                            return extractTagsFromXmp(xmp);
-                        }
-                    }
-                }
-            }
-
-            pos += 12 + chunkLen;
+        RandomAccessFile raf = new RandomAccessFile(filePath, "r");
+        if (fromEnd) {
+            // MP4 — XMP appended at end
+            raf.seek(Math.max(0, fileSize - readSize));
         }
-        return new ArrayList<>();
+        raf.readFully(data);
+        raf.close();
+
+        String content = new String(data, StandardCharsets.ISO_8859_1);
+        return extractFromContent(content);
     }
 
-    // ── MP4 ───────────────────────────────────────────────────────────────────
+    // ── XMP extraction ────────────────────────────────────────────────────────
 
-    private static final byte[] MP4_XMP_UUID = {
-        (byte)0xBE, (byte)0x7A, (byte)0xCF, (byte)0xCB,
-        (byte)0x97, (byte)0xA9, (byte)0x42, (byte)0xE8,
-        (byte)0x9C, (byte)0x71, (byte)0x99, (byte)0x94,
-        (byte)0x91, (byte)0xE3, (byte)0xAF, (byte)0xAC
-    };
-
-    private static List<String> readMp4Tags(String filePath) throws Exception {
-        FileInputStream fis = new FileInputStream(filePath);
-        // Only read first 512KB — XMP is usually near the start
-        byte[] data = new byte[(int) Math.min(new File(filePath).length(), 524288)];
-        fis.read(data);
-        fis.close();
-
-        int pos = 0;
-        while (pos < data.length - 8) {
-            int size = readInt(data, pos);
-            if (size < 8 || pos + size > data.length) break;
-
-            // Check for uuid atom
-            if (data[pos+4] == 0x75 && data[pos+5] == 0x75
-                    && data[pos+6] == 0x69 && data[pos+7] == 0x64
-                    && pos + 24 <= data.length) {
-                boolean match = true;
-                for (int i = 0; i < MP4_XMP_UUID.length; i++) {
-                    if (data[pos + 8 + i] != MP4_XMP_UUID[i]) {
-                        match = false;
-                        break;
-                    }
-                }
-                if (match) {
-                    int xmpStart = pos + 24;
-                    int xmpEnd   = pos + size;
-                    if (xmpEnd <= data.length) {
-                        String xmp = new String(data, xmpStart,
-                            xmpEnd - xmpStart, StandardCharsets.UTF_8);
-                        return extractTagsFromXmp(xmp);
-                    }
-                }
-            }
-            pos += size;
+    private static List<String> extractFromContent(String content) {
+        // Find XMP packet
+        int xmpStart = content.indexOf("<?xpacket begin");
+        if (xmpStart < 0) {
+            // Try finding dc:subject directly without full xpacket
+            xmpStart = content.indexOf("<dc:subject>");
+            if (xmpStart < 0) return new ArrayList<>();
         }
-        return new ArrayList<>();
-    }
 
-    // ── XMP parser ────────────────────────────────────────────────────────────
+        int xmpEnd = content.indexOf("<?xpacket end", xmpStart);
+        String xmp = xmpEnd > xmpStart
+            ? content.substring(xmpStart, xmpEnd + 30)
+            : content.substring(xmpStart);
+
+        return extractTagsFromXmp(xmp);
+    }
 
     private static List<String> extractTagsFromXmp(String xmp) {
         List<String> tags = new ArrayList<>();
@@ -196,14 +119,5 @@ public class XmpReader {
         }
 
         return tags;
-    }
-
-    // ── Helper ────────────────────────────────────────────────────────────────
-
-    private static int readInt(byte[] data, int offset) {
-        return ((data[offset]   & 0xFF) << 24)
-             | ((data[offset+1] & 0xFF) << 16)
-             | ((data[offset+2] & 0xFF) << 8)
-             |  (data[offset+3] & 0xFF);
     }
 }
