@@ -149,38 +149,21 @@ public class SettingsActivity extends Activity {
         });
         root.addView(windowSeek);
 
-        // ── Swipe gestures ────────────────────────────────────────────────────
+        
+        // ── Swipe gestures ────────────────────────────────────────────────────────
         root.addView(makeTitle("Swipe Gestures"));
-        root.addView(makeGestureRow("Swipe Left",
-            gestureSettings.getLeft(), gestureSettings.getLeftTag(),
-            (a, t) -> { gestureSettings.setLeft(a); gestureSettings.setLeftTag(t); }));
-        root.addView(makeGestureRow("Swipe Right",
-            gestureSettings.getRight(), gestureSettings.getRightTag(),
-            (a, t) -> { gestureSettings.setRight(a); gestureSettings.setRightTag(t); }));
-        root.addView(makeGestureRow("Swipe Up",
-            gestureSettings.getUp(), gestureSettings.getUpTag(),
-            (a, t) -> { gestureSettings.setUp(a); gestureSettings.setUpTag(t); }));
-        root.addView(makeGestureRow("Swipe Down",
-            gestureSettings.getDown(), gestureSettings.getDownTag(),
-            (a, t) -> { gestureSettings.setDown(a); gestureSettings.setDownTag(t); }));
+        root.addView(makeMultiGestureRow("Swipe Left",  gestureSettings.getLeft(),  gestureSettings::setLeft));
+        root.addView(makeMultiGestureRow("Swipe Right", gestureSettings.getRight(), gestureSettings::setRight));
+        root.addView(makeMultiGestureRow("Swipe Up",    gestureSettings.getUp(),    gestureSettings::setUp));
+        root.addView(makeMultiGestureRow("Swipe Down",  gestureSettings.getDown(),  gestureSettings::setDown));
 
-        // ── D-pad gestures ────────────────────────────────────────────────────
+        // ── D-pad gestures ────────────────────────────────────────────────────────
         root.addView(makeTitle("D-Pad Gestures"));
-        root.addView(makeGestureRow("D-Pad Up",
-            gestureSettings.getDpadUp(), gestureSettings.getDpadUpTag(),
-            (a, t) -> { gestureSettings.setDpadUp(a); gestureSettings.setDpadUpTag(t); }));
-        root.addView(makeGestureRow("D-Pad Down",
-            gestureSettings.getDpadDown(), gestureSettings.getDpadDownTag(),
-            (a, t) -> { gestureSettings.setDpadDown(a); gestureSettings.setDpadDownTag(t); }));
-        root.addView(makeGestureRow("D-Pad Left",
-            gestureSettings.getDpadLeft(), gestureSettings.getDpadLeftTag(),
-            (a, t) -> { gestureSettings.setDpadLeft(a); gestureSettings.setDpadLeftTag(t); }));
-        root.addView(makeGestureRow("D-Pad Right",
-            gestureSettings.getDpadRight(), gestureSettings.getDpadRightTag(),
-            (a, t) -> { gestureSettings.setDpadRight(a); gestureSettings.setDpadRightTag(t); }));
-        root.addView(makeGestureRow("D-Pad Center",
-            gestureSettings.getDpadCenter(), gestureSettings.getDpadCenterTag(),
-            (a, t) -> { gestureSettings.setDpadCenter(a); gestureSettings.setDpadCenterTag(t); }));
+        root.addView(makeMultiGestureRow("D-Pad Up",     gestureSettings.getDpadUp(),     gestureSettings::setDpadUp));
+        root.addView(makeMultiGestureRow("D-Pad Down",   gestureSettings.getDpadDown(),   gestureSettings::setDpadDown));
+        root.addView(makeMultiGestureRow("D-Pad Left",   gestureSettings.getDpadLeft(),   gestureSettings::setDpadLeft));
+        root.addView(makeMultiGestureRow("D-Pad Right",  gestureSettings.getDpadRight(),  gestureSettings::setDpadRight));
+        root.addView(makeMultiGestureRow("D-Pad Center", gestureSettings.getDpadCenter(), gestureSettings::setDpadCenter));
 
         // ── Tag lists ─────────────────────────────────────────────────────────
         root.addView(makeTitle("Tag Lists"));
