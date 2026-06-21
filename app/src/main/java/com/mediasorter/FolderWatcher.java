@@ -74,4 +74,11 @@ public class FolderWatcher {
     public boolean isWatching(String folderPath) {
         return watchers.containsKey(folderPath);
     }
+    public void pauseAll() {
+    for (FileObserver o : watchers.values()) o.stopWatching();
+}
+
+    public void resumeAll() {
+    for (FileObserver o : watchers.values()) o.startWatching();
+}
 }
