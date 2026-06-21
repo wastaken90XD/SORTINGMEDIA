@@ -29,7 +29,7 @@
             android:layout_width="0dp"
             android:layout_height="36dp"
             android:layout_weight="1"
-            android:hint="Search…"
+            android:hint="Search… (type:image, ext:jpg, size:>1mb, tagged)"
             android:textColorHint="#888888"
             android:textColor="#FFFFFF"
             android:background="#2A2A3E"
@@ -95,7 +95,7 @@
             android:text="⚙"
             android:textSize="14sp"
             android:layout_marginStart="4dp"/>
-        
+
         <Button
             android:id="@+id/btnDelete"
             android:layout_width="wrap_content"
@@ -103,6 +103,15 @@
             android:text="🗑"
             android:textSize="14sp"
             android:backgroundTint="#AA2222"
+            android:layout_marginStart="4dp"/>
+
+        <Button
+            android:id="@+id/btnToggleTagPanel"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="🏷"
+            android:textSize="14sp"
+            android:backgroundTint="#2A2A3E"
             android:layout_marginStart="4dp"/>
 
     </LinearLayout>
@@ -138,6 +147,7 @@
             android:layout_height="match_parent"
             android:background="#2A2A3E"/>
 
+        <!-- Tag panel — hidden by default, toggled by btnToggleTagPanel -->
         <LinearLayout
             android:id="@+id/tagPanel"
             android:layout_width="0dp"
@@ -145,7 +155,8 @@
             android:layout_weight="2"
             android:orientation="vertical"
             android:background="#161626"
-            android:padding="8dp">
+            android:padding="8dp"
+            android:visibility="gone">
 
             <TextView
                 android:layout_width="match_parent"
