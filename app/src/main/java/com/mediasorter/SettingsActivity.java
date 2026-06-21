@@ -17,6 +17,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 import com.mediasorter.models.TagList;
 import java.util.List;
+import com.mediasorter.GestureSettings;
+import java.util.ArrayList;
+import java.util.List;
 
 public class SettingsActivity extends Activity {
 
@@ -355,6 +358,217 @@ public class SettingsActivity extends Activity {
             0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         spinner.setLayoutParams(spinLp);
         row.addView(spinner);
+
+        interface MultiGestureCallback {
+    void set(List<GestureSettings.GestureStep> steps);
+}
+
+private LinearLayout makeMultiGestureRow(String label,
+        List<GestureSettings.GestureStep> current,
+        MultiGestureCallback callback) {
+
+    LinearLayout col = new LinearLayout(this);
+    col.setOrientation(LinearLayout.VERTICAL);
+    LinearLayout.LayoutParams colLp = new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT,
+        LinearLayout.LayoutParams.WRAP_CONTENT);
+    colLp.bottomMargin = 16;
+    col.setLayoutParams(colLp);
+    col.setBackgroundColor(0xFF1A1A2E);
+    col.setPadding(8, 8, 8, 8);
+
+    // Label + summary
+    TextView lbl = makeLabel(label + ": " + gestureSettings.getSummary(current));
+    col.addView(lbl);
+
+    // Steps list
+    LinearLayout stepsList = new LinearLayout(this);
+    stepsList.setOrientation(LinearLayout.VERTICAL);
+    col.addView(stepsList);
+
+    // Working copy
+    List<GestureSettings.GestureStep> steps =
+        new ArrayList<>(current);
+
+    // Render existing steps
+    renderSteps(stepsList, steps, lbl, label, callback);
+
+    // Add step button
+    Button btnAdd = makeSmallButton("+ Add Step");
+    btnAdd.setOnClickListener(v -> {
+        steps.add(new GestureSettings.GestureStep(
+            GestureSettings.GestureAction.NOTHING, ""));
+        callback.set(steps);
+        renderSteps(stepsList, steps, lbl, label, callback);
+    });
+    col.addView(btnAdd);
+
+    return col;
+}
+
+private void renderSteps(LinearLayout container,
+        List<GestureSettings.GestureStep> steps,
+        TextView summaryLabel,
+        String gestureLabel,
+        MultiGestureCallback callback) {
+
+    container.removeAllViews();
+
+    List<com.mediasorter.models.Tag> allTags = tagManager.getAllTags();
+    String[] tagNames = new String[allTags.size() + 1];
+    tagNames[0] = "(no tag)";
+    for (int i = 0; i < allTags.size(); i++) {
+        tagNames[i + 1] = allTags.get(i).getName();
+    }
+
+    for (int i = 0; i < steps.size(); i++) {
+        final int idx = i;
+        GestureSettings.GestureStep step = steps.get(i);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.bottomMargin = 4;
+        row.setLayoutParams(rowLp);
+
+        // Action spinner
+        Spinner actionSpin = new Spinner(this);
+        String[] actionLabels = gestureSettings.getAllLabels();
+        ArrayAdapter<String> actionAdapter = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, actionLabels);
+        actionAdapter.setDropDownViewResource(
+            android.R.layout.simple_spinner_dropdown_item);
+        actionSpin.setAdapter(actionAdapter);
+
+        // Set current action
+        String currentLabel = gestureSettings.getLabel(step.action);
+        for (int j = 0; j < actionLabels.length; j++) {
+            if (actionLabels[j].equals(currentLabel)) {
+                actionSpin.setSelection(j);
+                break;
+            }
+        }
+
+        LinearLayout.LayoutParams spinLp = new LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        actionSpin.setLayoutParams(spinLp);
+        row.addView(actionSpin);
+
+        // Tag search + spinner — only shown for APPLY_TAG
+        EditText tagSearch = new EditText(this);
+        tagSearch.setHint("Search tag…");
+        tagSearch.setTextColor(0xFFFFFFFF);
+        tagSearch.setHintTextColor(0xFF666666);
+        tagSearch.setBackground(null);
+        tagSearch.setTextSize(11f);
+
+        Spinner tagSpin = new Spinner(this);
+        final ArrayAdapter<String>[] tagAdapterRef = new ArrayAdapter[1];
+        tagAdapterRef[0] = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, tagNames);
+        tagAdapterRef[0].setDropDownViewResource(
+            android.R.layout.simple_spinner_dropdown_item);
+        tagSpin.setAdapter(tagAdapterRef[0]);
+
+        // Set current tag
+        if (!step.tag.isEmpty()) {
+            for (int j = 1; j < tagNames.length; j++) {
+                if (tagNames[j].equals(step.tag)) {
+                    tagSpin.setSelection(j);
+                    break;
+                }
+            }
+        }
+
+        boolean isApplyTag = step.action == GestureSettings.GestureAction.APPLY_TAG;
+        tagSearch.setVisibility(isApplyTag ? View.VISIBLE : View.GONE);
+        tagSpin.setVisibility(isApplyTag ? View.VISIBLE : View.GONE);
+
+        LinearLayout.LayoutParams tagLp = new LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        tagLp.setMarginStart(4);
+        tagSearch.setLayoutParams(tagLp);
+        tagSpin.setLayoutParams(tagLp);
+        row.addView(tagSearch);
+        row.addView(tagSpin);
+
+        // Tag search filter
+        tagSearch.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+            @Override public void afterTextChanged(android.text.Editable s) {}
+            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                String query = s.toString().toLowerCase();
+                List<String> filtered = new ArrayList<>();
+                filtered.add("(no tag)");
+                for (com.mediasorter.models.Tag t : allTags) {
+                    if (t.getName().toLowerCase().contains(query)) {
+                        filtered.add(t.getName());
+                    }
+                }
+                ArrayAdapter<String> fa = new ArrayAdapter<>(SettingsActivity.this,
+                    android.R.layout.simple_spinner_item,
+                    filtered.toArray(new String[0]));
+                fa.setDropDownViewResource(
+                    android.R.layout.simple_spinner_dropdown_item);
+                tagSpin.setAdapter(fa);
+            }
+        });
+
+        // Remove step button
+        Button btnRemove = makeSmallButton("✕");
+        btnRemove.setOnClickListener(v -> {
+            steps.remove(idx);
+            callback.set(steps);
+            summaryLabel.setText(gestureLabel + ": "
+                + gestureSettings.getSummary(steps));
+            renderSteps(container, steps, summaryLabel, gestureLabel, callback);
+        });
+        row.addView(btnRemove);
+
+        // Wire action spinner
+        actionSpin.setOnItemSelectedListener(
+            new android.widget.AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(android.widget.AdapterView<?> p,
+                        View v, int pos, long id) {
+                    GestureSettings.GestureAction action =
+                        gestureSettings.fromLabel(actionLabels[pos]);
+                    boolean show = action == GestureSettings.GestureAction.APPLY_TAG;
+                    tagSearch.setVisibility(show ? View.VISIBLE : View.GONE);
+                    tagSpin.setVisibility(show ? View.VISIBLE : View.GONE);
+                    steps.get(idx).action = action;
+                    callback.set(steps);
+                    summaryLabel.setText(gestureLabel + ": "
+                        + gestureSettings.getSummary(steps));
+                }
+                @Override
+                public void onNothingSelected(android.widget.AdapterView<?> p) {}
+            });
+
+        // Wire tag spinner
+        tagSpin.setOnItemSelectedListener(
+            new android.widget.AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(android.widget.AdapterView<?> p,
+                        View v, int pos, long id) {
+                    String tag = pos > 0
+                        ? p.getItemAtPosition(pos).toString()
+                        : "";
+                    steps.get(idx).tag = tag;
+                    callback.set(steps);
+                    summaryLabel.setText(gestureLabel + ": "
+                        + gestureSettings.getSummary(steps));
+                }
+                @Override
+                public void onNothingSelected(android.widget.AdapterView<?> p) {}
+            });
+
+        container.addView(row);
+    }
+}
 
         // Tag spinner — only shown when APPLY_TAG selected
         Spinner tagSpinner = new Spinner(this);
