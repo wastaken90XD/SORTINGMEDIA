@@ -170,27 +170,21 @@ private void initAdapters() {
         previewManager = new PreviewManager(this, previewContainer, fileStatus);
 
         previewManager.setActionListener(new PreviewManager.ActionListener() {
-            @Override public void onSkip()   { handleSkip(); }
-            @Override public void onFlag()   { handleFlag(); }
-            @Override public void onDone()   { handleDone(); }
-            @Override public void onNext()   { navigateNext(); }
-            @Override public void onPrev()   { navigatePrev(); }
-            @Override public void onDpadUp()     { executeDpad(gestureSettings.getDpadUp(),
-                gestureSettings.getDpadUpTag()); }
-            @Override public void onDpadDown()   { executeDpad(gestureSettings.getDpadDown(),
-                gestureSettings.getDpadDownTag()); }
-            @Override public void onDpadLeft()   { executeDpad(gestureSettings.getDpadLeft(),
-                gestureSettings.getDpadLeftTag()); }
-            @Override public void onDpadRight()  { executeDpad(gestureSettings.getDpadRight(),
-                gestureSettings.getDpadRightTag()); }
-            @Override public void onDpadCenter() { executeDpad(gestureSettings.getDpadCenter(),
-                gestureSettings.getDpadCenterTag()); }
-            @Override public void onTagListChanged(int index) {
-                tagListManager.setActiveIndex(index);
-                refreshSidePanel();
-            }
-        });
-
+    @Override public void onSkip()   { handleSkip(); }
+    @Override public void onFlag()   { handleFlag(); }
+    @Override public void onDone()   { handleDone(); }
+    @Override public void onNext()   { navigateNext(); }
+    @Override public void onPrev()   { navigatePrev(); }
+    @Override public void onDpadUp()     { executeDpad(gestureSettings.getDpadUp()); }
+    @Override public void onDpadDown()   { executeDpad(gestureSettings.getDpadDown()); }
+    @Override public void onDpadLeft()   { executeDpad(gestureSettings.getDpadLeft()); }
+    @Override public void onDpadRight()  { executeDpad(gestureSettings.getDpadRight()); }
+    @Override public void onDpadCenter() { executeDpad(gestureSettings.getDpadCenter()); }
+    @Override public void onTagListChanged(int index) {
+        tagListManager.setActiveIndex(index);
+        refreshSidePanel();
+    }
+});
         // Side panel tag list click
         previewManager.getSidePanelAdapter().setListener((tagName, applied) ->
             applyTagToCurrentFile(tagName, applied));
@@ -200,37 +194,31 @@ private void initAdapters() {
 
         // Swipe gesture
         GestureDetector gestureDetector = new GestureDetector(this,
-            new GestureDetector.SimpleOnGestureListener() {
-                @Override
-                public boolean onFling(MotionEvent e1, MotionEvent e2,
-                                       float vX, float vY) {
-                    if (e1 == null || e2 == null) return false;
-                    float dx = e2.getX() - e1.getX();
-                    float dy = e2.getY() - e1.getY();
-                    if (Math.abs(dx) > Math.abs(dy)) {
-                        if (Math.abs(dx) > 100) {
-                            executeSwipe(dx < 0
-                                ? gestureSettings.getLeft()
-                                : gestureSettings.getRight(),
-                                dx < 0
-                                ? gestureSettings.getLeftTag()
-                                : gestureSettings.getRightTag());
-                            return true;
-                        }
-                    } else {
-                        if (Math.abs(dy) > 100) {
-                            executeSwipe(dy < 0
-                                ? gestureSettings.getUp()
-                                : gestureSettings.getDown(),
-                                dy < 0
-                                ? gestureSettings.getUpTag()
-                                : gestureSettings.getDownTag());
-                            return true;
-                        }
-                    }
-                    return false;
+        new GestureDetector.SimpleOnGestureListener() {
+        @Override
+        public boolean onFling(MotionEvent e1, MotionEvent e2,
+                               float vX, float vY) {
+            if (e1 == null || e2 == null) return false;
+            float dx = e2.getX() - e1.getX();
+            float dy = e2.getY() - e1.getY();
+            if (Math.abs(dx) > Math.abs(dy)) {
+                if (Math.abs(dx) > 100) {
+                    executeSwipe(dx < 0
+                        ? gestureSettings.getLeft()
+                        : gestureSettings.getRight());
+                    return true;
                 }
-            });
+            } else {
+                if (Math.abs(dy) > 100) {
+                    executeSwipe(dy < 0
+                        ? gestureSettings.getUp()
+                        : gestureSettings.getDown());
+                    return true;
+                }
+            }
+            return false;
+        }
+    });
 
         previewManager.setSwipeDetector(gestureDetector);
 
@@ -403,31 +391,37 @@ if (btnDelete != null) {
 
     // ── Gesture execution ─────────────────────────────────────────────────────
 
-    private void executeSwipe(GestureSettings.GestureAction action, String tag) {
-    if (action == GestureSettings.GestureAction.APPLY_TAG && !tag.isEmpty()) {
-        if (currentIndex < 0 || currentIndex >= fullList.size()) return;
-        MediaFile file = fullList.get(currentIndex);
-        tagManager.applyOrUndo(file, tag);
-        fullList.set(currentIndex, file);
-        mediaAdapter.updateFile(file);
-        refreshSidePanel();
-        updateProgress();
-    } else {
-        executeAction(action);
+    private void executeSwipe(List<GestureSettings.GestureStep> steps) {
+    for (GestureSettings.GestureStep step : steps) {
+        if (step.action == GestureSettings.GestureAction.APPLY_TAG
+                && !step.tag.isEmpty()) {
+            if (currentIndex < 0 || currentIndex >= fullList.size()) continue;
+            MediaFile file = fullList.get(currentIndex);
+            tagManager.applyOrUndo(file, step.tag);
+            fullList.set(currentIndex, file);
+            mediaAdapter.updateFile(file);
+            refreshSidePanel();
+            updateProgress();
+        } else {
+            executeAction(step.action);
+        }
     }
 }
-
-    private void executeDpad(GestureSettings.GestureAction action, String tag) {
-    if (action == GestureSettings.GestureAction.APPLY_TAG && !tag.isEmpty()) {
-        if (currentIndex < 0 || currentIndex >= fullList.size()) return;
-        MediaFile file = fullList.get(currentIndex);
-        tagManager.applyOrUndo(file, tag);
-        fullList.set(currentIndex, file);
-        mediaAdapter.updateFile(file);
-        refreshSidePanel();
-        updateProgress();
-    } else {
-        executeAction(action);
+                
+    private void executeDpad(List<GestureSettings.GestureStep> steps) {
+    for (GestureSettings.GestureStep step : steps) {
+        if (step.action == GestureSettings.GestureAction.APPLY_TAG
+                && !step.tag.isEmpty()) {
+            if (currentIndex < 0 || currentIndex >= fullList.size()) continue;
+            MediaFile file = fullList.get(currentIndex);
+            tagManager.applyOrUndo(file, step.tag);
+            fullList.set(currentIndex, file);
+            mediaAdapter.updateFile(file);
+            refreshSidePanel();
+            updateProgress();
+        } else {
+            executeAction(step.action);
+        }
     }
 }
 
