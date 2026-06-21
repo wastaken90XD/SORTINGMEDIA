@@ -29,6 +29,7 @@ import com.mediasorter.models.TagList;
 import java.util.ArrayList;
 import java.util.List;
 import com.mediasorter.BatchRenameManager;
+import android.widget.Toast;
 
 
 public class MainActivity extends Activity
