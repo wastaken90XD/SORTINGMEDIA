@@ -307,13 +307,14 @@ if (btnDelete != null) {
     }
 
     private void updateDpadLabels() {
-        String up     = gestureSettings.getDpadUpTag();
-        String down   = gestureSettings.getDpadDownTag();
-        String left   = gestureSettings.getDpadLeftTag();
-        String right  = gestureSettings.getDpadRightTag();
-        String center = gestureSettings.getDpadCenterTag();
-        previewManager.updateDpadLabels(up, down, left, right, center);
-    }
+    previewManager.updateDpadLabels(
+        gestureSettings.getSummary(gestureSettings.getDpadUp()),
+        gestureSettings.getSummary(gestureSettings.getDpadDown()),
+        gestureSettings.getSummary(gestureSettings.getDpadLeft()),
+        gestureSettings.getSummary(gestureSettings.getDpadRight()),
+        gestureSettings.getSummary(gestureSettings.getDpadCenter())
+    );
+}
 
     // ── Refresh ───────────────────────────────────────────────────────────────
 
