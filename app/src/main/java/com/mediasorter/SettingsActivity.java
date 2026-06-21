@@ -6,6 +6,11 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -15,9 +20,8 @@ import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
+import com.mediasorter.models.Tag;
 import com.mediasorter.models.TagList;
-import java.util.List;
-import com.mediasorter.GestureSettings;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -66,16 +70,11 @@ public class SettingsActivity extends Activity {
         SeekBar limitSeek = new SeekBar(this);
         limitSeek.setMax(500);
         limitSeek.setProgress(cacheManager.getLimitMB());
-        limitSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
-                int mb = Math.max(10, progress);
-                cacheManager.setLimitMB(mb);
-                limitLabel.setText("Cache limit: " + mb + " MB");
-            }
-            @Override public void onStartTrackingTouch(SeekBar sb) {}
-            @Override public void onStopTrackingTouch(SeekBar sb) {}
-        });
+        limitSeek.setOnSeekBarChangeListener(simple((progress) -> {
+            int mb = Math.max(10, progress);
+            cacheManager.setLimitMB(mb);
+            limitLabel.setText("Cache limit: " + mb + " MB");
+        }));
         root.addView(limitSeek);
 
         Button btnClear = makeButton("Clear Cache");
@@ -96,16 +95,11 @@ public class SettingsActivity extends Activity {
         SeekBar qualitySeek = new SeekBar(this);
         qualitySeek.setMax(2);
         qualitySeek.setProgress(qualityIndex(thumbnailLoader.getQuality()));
-        qualitySeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
-                int size = qualityFromIndex(progress);
-                thumbnailLoader.setQuality(size);
-                qualityLabel.setText("Quality: " + qualityName(size));
-            }
-            @Override public void onStartTrackingTouch(SeekBar sb) {}
-            @Override public void onStopTrackingTouch(SeekBar sb) {}
-        });
+        qualitySeek.setOnSeekBarChangeListener(simple((progress) -> {
+            int size = qualityFromIndex(progress);
+            thumbnailLoader.setQuality(size);
+            qualityLabel.setText("Quality: " + qualityName(size));
+        }));
         root.addView(qualitySeek);
 
         TextView memLabel = makeLabel(
@@ -115,16 +109,11 @@ public class SettingsActivity extends Activity {
         SeekBar memSeek = new SeekBar(this);
         memSeek.setMax(90);
         memSeek.setProgress(thumbnailLoader.getMaxMB() - 10);
-        memSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
-                int mb = progress + 10;
-                thumbnailLoader.setMaxMB(mb);
-                memLabel.setText("Max thumbnail memory: " + mb + " MB");
-            }
-            @Override public void onStartTrackingTouch(SeekBar sb) {}
-            @Override public void onStopTrackingTouch(SeekBar sb) {}
-        });
+        memSeek.setOnSeekBarChangeListener(simple((progress) -> {
+            int mb = progress + 10;
+            thumbnailLoader.setMaxMB(mb);
+            memLabel.setText("Max thumbnail memory: " + mb + " MB");
+        }));
         root.addView(memSeek);
 
         // ── Memory window ─────────────────────────────────────────────────────
@@ -140,33 +129,36 @@ public class SettingsActivity extends Activity {
         SeekBar windowSeek = new SeekBar(this);
         windowSeek.setMax(90);
         windowSeek.setProgress(currentWindow - 10);
-        windowSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
-                int size = progress + 10;
-                windowPrefs.edit().putInt("window_size", size).apply();
-                windowLabel.setText("Window size: " + size + " files");
-            }
-            @Override public void onStartTrackingTouch(SeekBar sb) {}
-            @Override public void onStopTrackingTouch(SeekBar sb) {}
-        });
+        windowSeek.setOnSeekBarChangeListener(simple((progress) -> {
+            int size = progress + 10;
+            windowPrefs.edit().putInt("window_size", size).apply();
+            windowLabel.setText("Window size: " + size + " files");
+        }));
         root.addView(windowSeek);
 
-        
-        // ── Swipe gestures ────────────────────────────────────────────────────────
+        // ── Swipe gestures ────────────────────────────────────────────────────
         root.addView(makeTitle("Swipe Gestures"));
-        root.addView(makeMultiGestureRow("Swipe Left",  gestureSettings.getLeft(),  gestureSettings::setLeft));
-        root.addView(makeMultiGestureRow("Swipe Right", gestureSettings.getRight(), gestureSettings::setRight));
-        root.addView(makeMultiGestureRow("Swipe Up",    gestureSettings.getUp(),    gestureSettings::setUp));
-        root.addView(makeMultiGestureRow("Swipe Down",  gestureSettings.getDown(),  gestureSettings::setDown));
+        root.addView(makeMultiGestureRow("Swipe Left",
+            gestureSettings.getLeft(),  gestureSettings::setLeft));
+        root.addView(makeMultiGestureRow("Swipe Right",
+            gestureSettings.getRight(), gestureSettings::setRight));
+        root.addView(makeMultiGestureRow("Swipe Up",
+            gestureSettings.getUp(),    gestureSettings::setUp));
+        root.addView(makeMultiGestureRow("Swipe Down",
+            gestureSettings.getDown(),  gestureSettings::setDown));
 
-        // ── D-pad gestures ────────────────────────────────────────────────────────
+        // ── D-pad gestures ────────────────────────────────────────────────────
         root.addView(makeTitle("D-Pad Gestures"));
-        root.addView(makeMultiGestureRow("D-Pad Up",     gestureSettings.getDpadUp(),     gestureSettings::setDpadUp));
-        root.addView(makeMultiGestureRow("D-Pad Down",   gestureSettings.getDpadDown(),   gestureSettings::setDpadDown));
-        root.addView(makeMultiGestureRow("D-Pad Left",   gestureSettings.getDpadLeft(),   gestureSettings::setDpadLeft));
-        root.addView(makeMultiGestureRow("D-Pad Right",  gestureSettings.getDpadRight(),  gestureSettings::setDpadRight));
-        root.addView(makeMultiGestureRow("D-Pad Center", gestureSettings.getDpadCenter(), gestureSettings::setDpadCenter));
+        root.addView(makeMultiGestureRow("D-Pad Up",
+            gestureSettings.getDpadUp(),     gestureSettings::setDpadUp));
+        root.addView(makeMultiGestureRow("D-Pad Down",
+            gestureSettings.getDpadDown(),   gestureSettings::setDpadDown));
+        root.addView(makeMultiGestureRow("D-Pad Left",
+            gestureSettings.getDpadLeft(),   gestureSettings::setDpadLeft));
+        root.addView(makeMultiGestureRow("D-Pad Right",
+            gestureSettings.getDpadRight(),  gestureSettings::setDpadRight));
+        root.addView(makeMultiGestureRow("D-Pad Center",
+            gestureSettings.getDpadCenter(), gestureSettings::setDpadCenter));
 
         // ── Tag lists ─────────────────────────────────────────────────────────
         root.addView(makeTitle("Tag Lists"));
@@ -186,10 +178,9 @@ public class SettingsActivity extends Activity {
             listRow.setLayoutParams(listLp);
             listRow.setPadding(8, 8, 8, 8);
 
-            // List name row
             LinearLayout nameRow = new LinearLayout(this);
             nameRow.setOrientation(LinearLayout.HORIZONTAL);
-            nameRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            nameRow.setGravity(Gravity.CENTER_VERTICAL);
 
             TextView listName = makeLabel(list.getName()
                 + (list.isDefault() ? " (Default)" : "")
@@ -198,12 +189,10 @@ public class SettingsActivity extends Activity {
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
             nameRow.addView(listName);
 
-            // Edit button
             Button btnEdit = makeSmallButton("Edit");
             btnEdit.setOnClickListener(v -> showEditListDialog(idx));
             nameRow.addView(btnEdit);
 
-            // Delete button (not for default)
             if (!list.isDefault()) {
                 Button btnDel = makeSmallButton("Delete");
                 btnDel.setOnClickListener(v -> {
@@ -215,10 +204,8 @@ public class SettingsActivity extends Activity {
 
             listRow.addView(nameRow);
 
-            // Tags preview
             if (!list.getTags().isEmpty()) {
-                TextView tagsPreview = makeLabel(
-                    String.join(", ", list.getTags()));
+                TextView tagsPreview = makeLabel(String.join(", ", list.getTags()));
                 tagsPreview.setTextColor(0xFF888888);
                 tagsPreview.setTextSize(10f);
                 listRow.addView(tagsPreview);
@@ -231,6 +218,14 @@ public class SettingsActivity extends Activity {
         btnNewList.setOnClickListener(v -> showNewListDialog());
         root.addView(btnNewList);
 
+        // Auto-populate from scanned files
+        Button btnAutoPopulate = makeButton("Auto-populate lists from scanned files");
+        btnAutoPopulate.setOnClickListener(v ->
+            Toast.makeText(this,
+                "Rescan files — tags auto-import on scan complete",
+                Toast.LENGTH_LONG).show());
+        root.addView(btnAutoPopulate);
+
         // ── Folders ───────────────────────────────────────────────────────────
         root.addView(makeTitle("Watched Folders"));
 
@@ -241,7 +236,7 @@ public class SettingsActivity extends Activity {
             for (String folder : folders) {
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
 
                 TextView lbl = makeLabel(folder);
                 lbl.setLayoutParams(new LinearLayout.LayoutParams(
@@ -312,228 +307,171 @@ public class SettingsActivity extends Activity {
         setContentView(scroll);
     }
 
-    // ── Gesture row ───────────────────────────────────────────────────────────
+    // ── Multi-gesture row ─────────────────────────────────────────────────────
 
-    interface GestureCallback {
-        void set(GestureSettings.GestureAction action, String tag);
+    interface MultiGestureCallback {
+        void set(List<GestureSettings.GestureStep> steps);
     }
 
-    private LinearLayout makeGestureRow(String label,
-            GestureSettings.GestureAction current,
-            String currentTag,
-            GestureCallback callback) {
+    private LinearLayout makeMultiGestureRow(String label,
+            List<GestureSettings.GestureStep> current,
+            MultiGestureCallback callback) {
 
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams colLp = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT);
-        colLp.bottomMargin = 12;
+        colLp.bottomMargin = 16;
         col.setLayoutParams(colLp);
+        col.setBackgroundColor(0xFF1A1A2E);
+        col.setPadding(8, 8, 8, 8);
 
-        col.addView(makeLabel(label));
+        TextView lbl = makeLabel(label + ": " + gestureSettings.getSummary(current));
+        col.addView(lbl);
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        LinearLayout stepsList = new LinearLayout(this);
+        stepsList.setOrientation(LinearLayout.VERTICAL);
+        col.addView(stepsList);
 
-        // Action spinner
-        Spinner spinner = new Spinner(this);
-        String[] labels = gestureSettings.getAllLabels();
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
-            android.R.layout.simple_spinner_item, labels);
-        adapter.setDropDownViewResource(
-            android.R.layout.simple_spinner_dropdown_item);
-        spinner.setAdapter(adapter);
-
-        String currentLabel = gestureSettings.getLabel(current);
-        for (int i = 0; i < labels.length; i++) {
-            if (labels[i].equals(currentLabel)) {
-                spinner.setSelection(i);
-                break;
-            }
-        }
-
-        LinearLayout.LayoutParams spinLp = new LinearLayout.LayoutParams(
-            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        spinner.setLayoutParams(spinLp);
-        row.addView(spinner);
-
-        interface MultiGestureCallback {
-    void set(List<GestureSettings.GestureStep> steps);
-}
-
-private LinearLayout makeMultiGestureRow(String label,
-        List<GestureSettings.GestureStep> current,
-        MultiGestureCallback callback) {
-
-    LinearLayout col = new LinearLayout(this);
-    col.setOrientation(LinearLayout.VERTICAL);
-    LinearLayout.LayoutParams colLp = new LinearLayout.LayoutParams(
-        LinearLayout.LayoutParams.MATCH_PARENT,
-        LinearLayout.LayoutParams.WRAP_CONTENT);
-    colLp.bottomMargin = 16;
-    col.setLayoutParams(colLp);
-    col.setBackgroundColor(0xFF1A1A2E);
-    col.setPadding(8, 8, 8, 8);
-
-    // Label + summary
-    TextView lbl = makeLabel(label + ": " + gestureSettings.getSummary(current));
-    col.addView(lbl);
-
-    // Steps list
-    LinearLayout stepsList = new LinearLayout(this);
-    stepsList.setOrientation(LinearLayout.VERTICAL);
-    col.addView(stepsList);
-
-    // Working copy
-    List<GestureSettings.GestureStep> steps =
-        new ArrayList<>(current);
-
-    // Render existing steps
-    renderSteps(stepsList, steps, lbl, label, callback);
-
-    // Add step button
-    Button btnAdd = makeSmallButton("+ Add Step");
-    btnAdd.setOnClickListener(v -> {
-        steps.add(new GestureSettings.GestureStep(
-            GestureSettings.GestureAction.NOTHING, ""));
-        callback.set(steps);
+        List<GestureSettings.GestureStep> steps = new ArrayList<>(current);
         renderSteps(stepsList, steps, lbl, label, callback);
-    });
-    col.addView(btnAdd);
 
-    return col;
-}
+        Button btnAdd = makeSmallButton("+ Add Step");
+        btnAdd.setOnClickListener(v -> {
+            steps.add(new GestureSettings.GestureStep(
+                GestureSettings.GestureAction.NOTHING, ""));
+            callback.set(steps);
+            renderSteps(stepsList, steps, lbl, label, callback);
+        });
+        col.addView(btnAdd);
 
-private void renderSteps(LinearLayout container,
-        List<GestureSettings.GestureStep> steps,
-        TextView summaryLabel,
-        String gestureLabel,
-        MultiGestureCallback callback) {
-
-    container.removeAllViews();
-
-    List<com.mediasorter.models.Tag> allTags = tagManager.getAllTags();
-    String[] tagNames = new String[allTags.size() + 1];
-    tagNames[0] = "(no tag)";
-    for (int i = 0; i < allTags.size(); i++) {
-        tagNames[i + 1] = allTags.get(i).getName();
+        return col;
     }
 
-    for (int i = 0; i < steps.size(); i++) {
-        final int idx = i;
-        GestureSettings.GestureStep step = steps.get(i);
+    private void renderSteps(LinearLayout container,
+            List<GestureSettings.GestureStep> steps,
+            TextView summaryLabel,
+            String gestureLabel,
+            MultiGestureCallback callback) {
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT);
-        rowLp.bottomMargin = 4;
-        row.setLayoutParams(rowLp);
+        container.removeAllViews();
 
-        // Action spinner
-        Spinner actionSpin = new Spinner(this);
-        String[] actionLabels = gestureSettings.getAllLabels();
-        ArrayAdapter<String> actionAdapter = new ArrayAdapter<>(this,
-            android.R.layout.simple_spinner_item, actionLabels);
-        actionAdapter.setDropDownViewResource(
-            android.R.layout.simple_spinner_dropdown_item);
-        actionSpin.setAdapter(actionAdapter);
-
-        // Set current action
-        String currentLabel = gestureSettings.getLabel(step.action);
-        for (int j = 0; j < actionLabels.length; j++) {
-            if (actionLabels[j].equals(currentLabel)) {
-                actionSpin.setSelection(j);
-                break;
-            }
+        List<Tag> allTags = tagManager.getAllTags();
+        String[]  allTagNames = new String[allTags.size() + 1];
+        allTagNames[0] = "(no tag)";
+        for (int i = 0; i < allTags.size(); i++) {
+            allTagNames[i + 1] = allTags.get(i).getName();
         }
 
-        LinearLayout.LayoutParams spinLp = new LinearLayout.LayoutParams(
-            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        actionSpin.setLayoutParams(spinLp);
-        row.addView(actionSpin);
+        for (int i = 0; i < steps.size(); i++) {
+            final int idx = i;
+            GestureSettings.GestureStep step = steps.get(i);
 
-        // Tag search + spinner — only shown for APPLY_TAG
-        EditText tagSearch = new EditText(this);
-        tagSearch.setHint("Search tag…");
-        tagSearch.setTextColor(0xFFFFFFFF);
-        tagSearch.setHintTextColor(0xFF666666);
-        tagSearch.setBackground(null);
-        tagSearch.setTextSize(11f);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+            rowLp.bottomMargin = 4;
+            row.setLayoutParams(rowLp);
 
-        Spinner tagSpin = new Spinner(this);
-        final ArrayAdapter<String>[] tagAdapterRef = new ArrayAdapter[1];
-        tagAdapterRef[0] = new ArrayAdapter<>(this,
-            android.R.layout.simple_spinner_item, tagNames);
-        tagAdapterRef[0].setDropDownViewResource(
-            android.R.layout.simple_spinner_dropdown_item);
-        tagSpin.setAdapter(tagAdapterRef[0]);
+            // Action spinner
+            Spinner actionSpin = new Spinner(this);
+            String[] actionLabels = gestureSettings.getAllLabels();
+            ArrayAdapter<String> actionAd = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, actionLabels);
+            actionAd.setDropDownViewResource(
+                android.R.layout.simple_spinner_dropdown_item);
+            actionSpin.setAdapter(actionAd);
 
-        // Set current tag
-        if (!step.tag.isEmpty()) {
-            for (int j = 1; j < tagNames.length; j++) {
-                if (tagNames[j].equals(step.tag)) {
-                    tagSpin.setSelection(j);
+            String curLabel = gestureSettings.getLabel(step.action);
+            for (int j = 0; j < actionLabels.length; j++) {
+                if (actionLabels[j].equals(curLabel)) {
+                    actionSpin.setSelection(j);
                     break;
                 }
             }
-        }
 
-        boolean isApplyTag = step.action == GestureSettings.GestureAction.APPLY_TAG;
-        tagSearch.setVisibility(isApplyTag ? View.VISIBLE : View.GONE);
-        tagSpin.setVisibility(isApplyTag ? View.VISIBLE : View.GONE);
+            actionSpin.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            row.addView(actionSpin);
 
-        LinearLayout.LayoutParams tagLp = new LinearLayout.LayoutParams(
-            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        tagLp.setMarginStart(4);
-        tagSearch.setLayoutParams(tagLp);
-        tagSpin.setLayoutParams(tagLp);
-        row.addView(tagSearch);
-        row.addView(tagSpin);
+            // Tag search input
+            EditText tagSearch = new EditText(this);
+            tagSearch.setHint("Search tag…");
+            tagSearch.setTextColor(0xFFFFFFFF);
+            tagSearch.setHintTextColor(0xFF666666);
+            tagSearch.setTextSize(11f);
+            tagSearch.setSingleLine(true);
+            tagSearch.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        // Tag search filter
-        tagSearch.addTextChangedListener(new android.text.TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
-            @Override public void afterTextChanged(android.text.Editable s) {}
-            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
-                String query = s.toString().toLowerCase();
-                List<String> filtered = new ArrayList<>();
-                filtered.add("(no tag)");
-                for (com.mediasorter.models.Tag t : allTags) {
-                    if (t.getName().toLowerCase().contains(query)) {
-                        filtered.add(t.getName());
+            // Tag spinner
+            Spinner tagSpin = new Spinner(this);
+            ArrayAdapter<String> tagAd = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, allTagNames);
+            tagAd.setDropDownViewResource(
+                android.R.layout.simple_spinner_dropdown_item);
+            tagSpin.setAdapter(tagAd);
+            tagSpin.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+            // Set current tag
+            if (!step.tag.isEmpty()) {
+                for (int j = 1; j < allTagNames.length; j++) {
+                    if (allTagNames[j].equals(step.tag)) {
+                        tagSpin.setSelection(j);
+                        break;
                     }
                 }
-                ArrayAdapter<String> fa = new ArrayAdapter<>(SettingsActivity.this,
-                    android.R.layout.simple_spinner_item,
-                    filtered.toArray(new String[0]));
-                fa.setDropDownViewResource(
-                    android.R.layout.simple_spinner_dropdown_item);
-                tagSpin.setAdapter(fa);
             }
-        });
 
-        // Remove step button
-        Button btnRemove = makeSmallButton("✕");
-        btnRemove.setOnClickListener(v -> {
-            steps.remove(idx);
-            callback.set(steps);
-            summaryLabel.setText(gestureLabel + ": "
-                + gestureSettings.getSummary(steps));
-            renderSteps(container, steps, summaryLabel, gestureLabel, callback);
-        });
-        row.addView(btnRemove);
+            boolean isApply =
+                step.action == GestureSettings.GestureAction.APPLY_TAG;
+            tagSearch.setVisibility(isApply ? View.VISIBLE : View.GONE);
+            tagSpin.setVisibility(isApply ? View.VISIBLE : View.GONE);
 
-        // Wire action spinner
-        actionSpin.setOnItemSelectedListener(
-            new android.widget.AdapterView.OnItemSelectedListener() {
+            row.addView(tagSearch);
+            row.addView(tagSpin);
+
+            // Tag search filter
+            tagSearch.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+                @Override public void afterTextChanged(Editable s) {}
+                @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                    String q = s.toString().toLowerCase();
+                    List<String> filtered = new ArrayList<>();
+                    filtered.add("(no tag)");
+                    for (Tag t : allTags) {
+                        if (t.getName().toLowerCase().contains(q))
+                            filtered.add(t.getName());
+                    }
+                    ArrayAdapter<String> fa = new ArrayAdapter<>(SettingsActivity.this,
+                        android.R.layout.simple_spinner_item,
+                        filtered.toArray(new String[0]));
+                    fa.setDropDownViewResource(
+                        android.R.layout.simple_spinner_dropdown_item);
+                    tagSpin.setAdapter(fa);
+                }
+            });
+
+            // Remove button
+            Button btnRemove = makeSmallButton("✕");
+            btnRemove.setOnClickListener(v -> {
+                steps.remove(idx);
+                callback.set(steps);
+                summaryLabel.setText(gestureLabel + ": "
+                    + gestureSettings.getSummary(steps));
+                renderSteps(container, steps, summaryLabel, gestureLabel, callback);
+            });
+            row.addView(btnRemove);
+
+            // Action spinner listener
+            actionSpin.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
-                public void onItemSelected(android.widget.AdapterView<?> p,
-                        View v, int pos, long id) {
+                public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
                     GestureSettings.GestureAction action =
                         gestureSettings.fromLabel(actionLabels[pos]);
                     boolean show = action == GestureSettings.GestureAction.APPLY_TAG;
@@ -544,105 +482,24 @@ private void renderSteps(LinearLayout container,
                     summaryLabel.setText(gestureLabel + ": "
                         + gestureSettings.getSummary(steps));
                 }
-                @Override
-                public void onNothingSelected(android.widget.AdapterView<?> p) {}
+                @Override public void onNothingSelected(AdapterView<?> p) {}
             });
 
-        // Wire tag spinner
-        tagSpin.setOnItemSelectedListener(
-            new android.widget.AdapterView.OnItemSelectedListener() {
+            // Tag spinner listener
+            tagSpin.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
-                public void onItemSelected(android.widget.AdapterView<?> p,
-                        View v, int pos, long id) {
-                    String tag = pos > 0
-                        ? p.getItemAtPosition(pos).toString()
-                        : "";
+                public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                    String tag = pos > 0 ? p.getItemAtPosition(pos).toString() : "";
                     steps.get(idx).tag = tag;
                     callback.set(steps);
                     summaryLabel.setText(gestureLabel + ": "
                         + gestureSettings.getSummary(steps));
                 }
-                @Override
-                public void onNothingSelected(android.widget.AdapterView<?> p) {}
+                @Override public void onNothingSelected(AdapterView<?> p) {}
             });
 
-        container.addView(row);
-    }
-}
-
-        // Tag spinner — only shown when APPLY_TAG selected
-        Spinner tagSpinner = new Spinner(this);
-        List<com.mediasorter.models.Tag> allTags = tagManager.getAllTags();
-        String[] tagNames = new String[allTags.size() + 1];
-        tagNames[0] = "(select tag)";
-        for (int i = 0; i < allTags.size(); i++) {
-            tagNames[i + 1] = allTags.get(i).getName();
+            container.addView(row);
         }
-        ArrayAdapter<String> tagAdapter = new ArrayAdapter<>(this,
-            android.R.layout.simple_spinner_item, tagNames);
-        tagAdapter.setDropDownViewResource(
-            android.R.layout.simple_spinner_dropdown_item);
-        tagSpinner.setAdapter(tagAdapter);
-
-        // Set current tag selection
-        if (!currentTag.isEmpty()) {
-            for (int i = 1; i < tagNames.length; i++) {
-                if (tagNames[i].equals(currentTag)) {
-                    tagSpinner.setSelection(i);
-                    break;
-                }
-            }
-        }
-
-        tagSpinner.setVisibility(
-            current == GestureSettings.GestureAction.APPLY_TAG
-                ? android.view.View.VISIBLE
-                : android.view.View.GONE);
-
-        LinearLayout.LayoutParams tagSpinLp = new LinearLayout.LayoutParams(
-            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        tagSpinLp.setMarginStart(8);
-        tagSpinner.setLayoutParams(tagSpinLp);
-        row.addView(tagSpinner);
-
-        // Wire up listeners
-        spinner.setOnItemSelectedListener(
-            new android.widget.AdapterView.OnItemSelectedListener() {
-                @Override
-                public void onItemSelected(android.widget.AdapterView<?> parent,
-                        android.view.View view, int position, long id) {
-                    GestureSettings.GestureAction action =
-                        gestureSettings.fromLabel(labels[position]);
-                    tagSpinner.setVisibility(
-                        action == GestureSettings.GestureAction.APPLY_TAG
-                            ? android.view.View.VISIBLE
-                            : android.view.View.GONE);
-                    String tag = tagSpinner.getSelectedItemPosition() > 0
-                        ? tagNames[tagSpinner.getSelectedItemPosition()]
-                        : "";
-                    callback.set(action, tag);
-                }
-                @Override
-                public void onNothingSelected(android.widget.AdapterView<?> p) {}
-            });
-
-        tagSpinner.setOnItemSelectedListener(
-            new android.widget.AdapterView.OnItemSelectedListener() {
-                @Override
-                public void onItemSelected(android.widget.AdapterView<?> parent,
-                        android.view.View view, int position, long id) {
-                    GestureSettings.GestureAction action =
-                        gestureSettings.fromLabel(
-                            labels[spinner.getSelectedItemPosition()]);
-                    String tag = position > 0 ? tagNames[position] : "";
-                    callback.set(action, tag);
-                }
-                @Override
-                public void onNothingSelected(android.widget.AdapterView<?> p) {}
-            });
-
-        col.addView(row);
-        return col;
     }
 
     // ── Tag list dialogs ──────────────────────────────────────────────────────
@@ -672,13 +529,11 @@ private void renderSteps(LinearLayout container,
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(32, 16, 32, 16);
 
-        // Name field
         EditText nameInput = new EditText(this);
         nameInput.setText(list.getName());
         layout.addView(makeLabel("List name:"));
         layout.addView(nameInput);
 
-        // Current tags
         layout.addView(makeLabel("Tags in list:"));
         LinearLayout tagRows = new LinearLayout(this);
         tagRows.setOrientation(LinearLayout.VERTICAL);
@@ -686,7 +541,7 @@ private void renderSteps(LinearLayout container,
         for (String tag : list.getTags()) {
             LinearLayout tagRow = new LinearLayout(this);
             tagRow.setOrientation(LinearLayout.HORIZONTAL);
-            tagRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            tagRow.setGravity(Gravity.CENTER_VERTICAL);
 
             TextView tagLbl = makeLabel(tag);
             tagLbl.setLayoutParams(new LinearLayout.LayoutParams(
@@ -703,28 +558,55 @@ private void renderSteps(LinearLayout container,
         }
         layout.addView(tagRows);
 
-        // Add tag from library
         layout.addView(makeLabel("Add tag from library:"));
-        List<com.mediasorter.models.Tag> allTags = tagManager.getAllTags();
+
+        // Searchable tag picker
+        EditText tagSearchInput = new EditText(this);
+        tagSearchInput.setHint("Search tags…");
+        tagSearchInput.setTextColor(0xFFFFFFFF);
+        tagSearchInput.setHintTextColor(0xFF666666);
+        layout.addView(tagSearchInput);
+
+        List<Tag> allTags = tagManager.getAllTags();
         String[] tagNames = new String[allTags.size()];
         for (int i = 0; i < allTags.size(); i++) {
             tagNames[i] = allTags.get(i).getName();
         }
 
         Spinner tagPicker = new Spinner(this);
-        ArrayAdapter<String> tagAdapter = new ArrayAdapter<>(this,
+        ArrayAdapter<String> tagAd = new ArrayAdapter<>(this,
             android.R.layout.simple_spinner_item, tagNames);
-        tagAdapter.setDropDownViewResource(
+        tagAd.setDropDownViewResource(
             android.R.layout.simple_spinner_dropdown_item);
-        tagPicker.setAdapter(tagAdapter);
+        tagPicker.setAdapter(tagAd);
         layout.addView(tagPicker);
+
+        tagSearchInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+            @Override public void afterTextChanged(Editable s) {}
+            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                String q = s.toString().toLowerCase();
+                List<String> filtered = new ArrayList<>();
+                for (Tag t : allTags) {
+                    if (t.getName().toLowerCase().contains(q))
+                        filtered.add(t.getName());
+                }
+                ArrayAdapter<String> fa = new ArrayAdapter<>(SettingsActivity.this,
+                    android.R.layout.simple_spinner_item,
+                    filtered.toArray(new String[0]));
+                fa.setDropDownViewResource(
+                    android.R.layout.simple_spinner_dropdown_item);
+                tagPicker.setAdapter(fa);
+            }
+        });
 
         Button btnAddToList = makeButton("Add Selected Tag");
         btnAddToList.setOnClickListener(v -> {
-            if (tagPicker.getSelectedItemPosition() >= 0) {
-                String selected = tagNames[tagPicker.getSelectedItemPosition()];
-                tagListManager.addTagToList(listIndex, selected);
-                Toast.makeText(this, selected + " added", Toast.LENGTH_SHORT).show();
+            if (tagPicker.getSelectedItemPosition() >= 0
+                    && tagPicker.getAdapter().getCount() > 0) {
+                String sel = tagPicker.getSelectedItem().toString();
+                tagListManager.addTagToList(listIndex, sel);
+                Toast.makeText(this, sel + " added", Toast.LENGTH_SHORT).show();
             }
         });
         layout.addView(btnAddToList);
@@ -737,9 +619,7 @@ private void renderSteps(LinearLayout container,
             .setView(sv)
             .setPositiveButton("Save", (d, w) -> {
                 String newName = nameInput.getText().toString().trim();
-                if (!newName.isEmpty()) {
-                    tagListManager.renameList(listIndex, newName);
-                }
+                if (!newName.isEmpty()) tagListManager.renameList(listIndex, newName);
                 recreate();
             })
             .setNegativeButton("Cancel", null)
@@ -764,6 +644,20 @@ private void renderSteps(LinearLayout container,
             })
             .setNegativeButton("Cancel", null)
             .show();
+    }
+
+    // ── SeekBar helper ────────────────────────────────────────────────────────
+
+    interface ProgressCallback { void onProgress(int progress); }
+
+    private SeekBar.OnSeekBarChangeListener simple(ProgressCallback cb) {
+        return new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int p, boolean u) {
+                cb.onProgress(p);
+            }
+            @Override public void onStartTrackingTouch(SeekBar sb) {}
+            @Override public void onStopTrackingTouch(SeekBar sb) {}
+        };
     }
 
     // ── Quality helpers ───────────────────────────────────────────────────────
