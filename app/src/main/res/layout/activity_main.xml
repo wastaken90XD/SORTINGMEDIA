@@ -88,31 +88,43 @@
             android:textSize="14sp"
             android:layout_marginStart="4dp"/>
 
-        <Button
-            android:id="@+id/btnSettings"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="⚙"
-            android:textSize="14sp"
-            android:layout_marginStart="4dp"/>
+        <!-- Replace btnDashboard -->
+<Button
+    android:id="@+id/btnDashboard"
+    android:layout_width="wrap_content"
+    android:layout_height="36dp"
+    android:text="Stats"
+    android:textSize="11sp"
+    android:layout_marginStart="4dp"/>
 
-        <Button
-            android:id="@+id/btnDelete"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="🗑"
-            android:textSize="14sp"
-            android:backgroundTint="#AA2222"
-            android:layout_marginStart="4dp"/>
+<!-- Replace btnSettings -->
+<Button
+    android:id="@+id/btnSettings"
+    android:layout_width="wrap_content"
+    android:layout_height="36dp"
+    android:text="Settings"
+    android:textSize="11sp"
+    android:layout_marginStart="4dp"/>
 
-        <Button
-            android:id="@+id/btnToggleTagPanel"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="🏷"
-            android:textSize="14sp"
-            android:backgroundTint="#2A2A3E"
-            android:layout_marginStart="4dp"/>
+<!-- Replace btnDelete -->
+<Button
+    android:id="@+id/btnDelete"
+    android:layout_width="wrap_content"
+    android:layout_height="36dp"
+    android:text="Delete"
+    android:textSize="11sp"
+    android:backgroundTint="#AA2222"
+    android:layout_marginStart="4dp"/>
+
+<!-- Replace btnToggleTagPanel -->
+<Button
+    android:id="@+id/btnToggleTagPanel"
+    android:layout_width="wrap_content"
+    android:layout_height="36dp"
+    android:text="Tags"
+    android:textSize="11sp"
+    android:backgroundTint="#2A2A3E"
+    android:layout_marginStart="4dp"/>
 
     </LinearLayout>
 
