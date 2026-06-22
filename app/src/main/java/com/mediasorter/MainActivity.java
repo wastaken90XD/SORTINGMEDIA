@@ -252,6 +252,20 @@ private void initAdapters() {
             input.setText("");
         });
 
+        Button btnToggleTagPanel = findViewById(R.id.btnToggleTagPanel);
+        LinearLayout tagPanel    = findViewById(R.id.tagPanel);
+        if (btnToggleTagPanel != null && tagPanel != null) {
+                tagPanel.setVisibility(View.GONE);
+                btnToggleTagPanel.setOnClickListener(v -> {
+        boolean visible = tagPanel.getVisibility() == View.VISIBLE;
+        tagPanel.setVisibility(visible ? View.GONE : View.VISIBLE);
+        btnToggleTagPanel.setText(visible ? "Tags" : "Tags ✓");
+        btnToggleTagPanel.setBackgroundTintList(
+            android.content.res.ColorStateList.valueOf(
+                visible ? 0xFF2A2A3E : 0xFFE94560));
+    });
+}
+
         btnSort = findViewById(R.id.btnSort);
         btnSort.setText(sortManager.getLabel());
         btnSort.setOnClickListener(v -> showSortMenu(v));
