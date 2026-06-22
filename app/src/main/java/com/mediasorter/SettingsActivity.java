@@ -438,24 +438,27 @@ public class SettingsActivity extends Activity {
 
             // Tag search filter
             tagSearch.addTextChangedListener(new TextWatcher() {
-                @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
-                @Override public void afterTextChanged(Editable s) {}
-                @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
-                    String q = s.toString().toLowerCase();
-                    List<String> filtered = new ArrayList<>();
-                    filtered.add("(no tag)");
-                    for (Tag t : allTags) {
-                        if (t.getName().toLowerCase().contains(q))
-                            filtered.add(t.getName());
-                    }
-                    ArrayAdapter<String> fa = new ArrayAdapter<>(SettingsActivity.this,
-                        android.R.layout.simple_spinner_item,
-                        filtered.toArray(new String[0]));
-                    fa.setDropDownViewResource(
-                        android.R.layout.simple_spinner_dropdown_item);
-                    tagSpin.setAdapter(fa);
-                }
-            });
+    @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+    @Override public void afterTextChanged(Editable s) {}
+    @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+        String q = s.toString().toLowerCase().trim();
+        List<String> filtered = new ArrayList<>();
+        filtered.add("(no tag)");
+        for (Tag t : allTags) {
+            if (q.isEmpty() || t.getName().toLowerCase().contains(q)) {
+                filtered.add(t.getName());
+            }
+        }
+        ArrayAdapter<String> fa = new ArrayAdapter<>(
+            SettingsActivity.this,
+            android.R.layout.simple_spinner_item,
+            filtered.toArray(new String[0]));
+        fa.setDropDownViewResource(
+            android.R.layout.simple_spinner_dropdown_item);
+        tagSpin.setAdapter(fa);
+        tagSpin.setVisibility(View.VISIBLE);
+    }
+});
 
             // Remove button
             Button btnRemove = makeSmallButton("✕");
