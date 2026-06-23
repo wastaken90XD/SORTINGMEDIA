@@ -31,6 +31,7 @@ import java.util.List;
 import com.mediasorter.BatchRenameManager;
 import android.widget.Toast;
 import com.mediasorter.ColorAnalyzer;
+import com.mediasorter.models.Tag;
 
 
 public class MainActivity extends Activity
