@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import com.mediasorter.BatchRenameManager;
 import android.widget.Toast;
+import com.mediasorter.ColorAnalyzer;
 
 
 public class MainActivity extends Activity
@@ -539,29 +540,25 @@ if (btnDelete != null) {
         shiftWindowIfNeeded(currentIndex);
         loadFileAtIndex(currentIndex);
     }
-    private void showBatchTagDialog() {
-    List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
-    if (selectedFiles.isEmpty()) return;
+                
+        private void showBatchTagDialog() {
+            List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
+            if (selectedFiles.isEmpty()) return;
 
-    List<com.mediasorter.models.Tag> allTags = tagManager.getAllTags();
+    List<Tag> allTags = tagManager.getAllTags();
     if (allTags.isEmpty()) {
-        android.widget.Toast.makeText(this,
-            "No tags created yet",
-            android.widget.Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "No tags yet", Toast.LENGTH_SHORT).show();
         return;
     }
 
     String[]  tagNames = new String[allTags.size()];
     boolean[] checked  = new boolean[allTags.size()];
-    for (int i = 0; i < allTags.size(); i++) {
-        tagNames[i] = allTags.get(i).getName();
-    }
+    for (int i = 0; i < allTags.size(); i++) tagNames[i] = allTags.get(i).getName();
 
     new AlertDialog.Builder(this)
         .setTitle("Tag " + selectedFiles.size() + " files")
-        .setMultiChoiceItems(tagNames, checked, (d, which, isChecked) -> {
-            checked[which] = isChecked;
-        })
+        .setMultiChoiceItems(tagNames, checked,
+            (d, which, isChecked) -> checked[which] = isChecked)
         .setPositiveButton("Apply", (d, w) -> {
             for (MediaFile file : selectedFiles) {
                 for (int i = 0; i < tagNames.length; i++) {
@@ -573,13 +570,12 @@ if (btnDelete != null) {
             btnScan.setText("SCAN");
             btnScan.setOnClickListener(v -> startScan());
             scheduleRefresh();
-            android.widget.Toast.makeText(this,
-                "Tagged " + selectedFiles.size() + " files",
-                android.widget.Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Tagged " + selectedFiles.size() + " files",
+                Toast.LENGTH_SHORT).show();
         })
         .setNegativeButton("Cancel", null)
         .show();
-}             
+}
     private void showBatchRenameDialog() {
     List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
     if (selectedFiles.isEmpty()) return;
@@ -682,6 +678,54 @@ if (btnDelete != null) {
                 scheduleRefresh();
             }
         })
+        .show();
+}
+
+private void showColorAnalysisDialog() {
+    List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
+    if (selectedFiles.isEmpty()) return;
+
+    String[] modes = {
+        "Tag with colors",
+        "Rename by color",
+        "Group similar",
+        "Tag + Rename",
+        "All three"
+    };
+
+    new AlertDialog.Builder(this)
+        .setTitle("Color analysis — " + selectedFiles.size() + " files")
+        .setItems(modes, (d, which) -> {
+            ColorAnalyzer.Mode mode;
+            switch (which) {
+                case 0:  mode = ColorAnalyzer.Mode.TAG;            break;
+                case 1:  mode = ColorAnalyzer.Mode.RENAME;         break;
+                case 2:  mode = ColorAnalyzer.Mode.GROUP;          break;
+                case 3:  mode = ColorAnalyzer.Mode.TAG_AND_RENAME; break;
+                default: mode = ColorAnalyzer.Mode.ALL;            break;
+            }
+            final ColorAnalyzer.Mode finalMode = mode;
+            folderWatcher.pauseAll();
+            new Thread(() -> {
+                List<ColorAnalyzer.Result> results =
+                    ColorAnalyzer.analyze(
+                        selectedFiles, 3, 20f,
+                        finalMode, tagManager, batchRenameManager);
+                mainHandler.post(() -> {
+                    folderWatcher.resumeAll();
+                    int ok = 0;
+                    for (ColorAnalyzer.Result r : results) if (r.success) ok++;
+                    mediaAdapter.exitSelectMode();
+                    btnScan.setText("SCAN");
+                    btnScan.setOnClickListener(v -> startScan());
+                    scheduleRefresh();
+                    Toast.makeText(this,
+                        "Analyzed " + ok + " / " + selectedFiles.size() + " files",
+                        Toast.LENGTH_SHORT).show();
+                });
+            }).start();
+        })
+        .setNegativeButton("Cancel", null)
         .show();
 }
 
