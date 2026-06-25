@@ -889,23 +889,23 @@ private BatchRenameManager.Case caseFromPos(int pos) {
     }
 
     private void showGroupMenu(View anchor) {
-        PopupMenu menu = new PopupMenu(this, anchor);
-        menu.getMenu().add("By File Type");
-        menu.getMenu().add("By Tag");
-        menu.getMenu().add("By Date");
-        menu.getMenu().add("By Folder");
-        menu.setOnMenuItemClickListener(item -> {
-            switch (item.getTitle().toString()) {
-                case "By File Type": groupManager.setGroupBy(Group.GroupBy.FILE_TYPE); break;
-                case "By Tag":       groupManager.setGroupBy(Group.GroupBy.TAG);       break;
-                case "By Date":      groupManager.setGroupBy(Group.GroupBy.DATE);      break;
-                case "By Folder":    groupManager.setGroupBy(Group.GroupBy.FOLDER);    break;
-            }
-            scheduleRefresh();
-            return true;
-        });
-        menu.show();
-    }
+    PopupMenu menu = new PopupMenu(this, anchor);
+    menu.getMenu().add("By File Type");
+    menu.getMenu().add("By Tag");
+    menu.getMenu().add("By Date");
+    menu.getMenu().add("By Folder");
+    menu.setOnMenuItemClickListener(item -> {
+        switch (item.getTitle().toString()) {
+            case "By File Type": groupManager.setGroupBy(Group.GroupBy.FILE_TYPE); break;
+            case "By Tag":       groupManager.setGroupBy(Group.GroupBy.TAG);       break;
+            case "By Date":      groupManager.setGroupBy(Group.GroupBy.DATE);      break;
+            case "By Folder":    groupManager.setGroupBy(Group.GroupBy.FOLDER);    break;
+        }
+        scheduleRefresh();
+        return true;
+    });
+    menu.show();
+}
 
     // ── Progress ──────────────────────────────────────────────────────────────
 
