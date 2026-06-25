@@ -101,6 +101,18 @@ public class MainActivity extends Activity
         thumbnailLoader.shutdown();
     }
 
+     @Override
+        public void onBackPressed() {
+        if (mediaAdapter.isSelectMode()) {
+        mediaAdapter.exitSelectMode();
+        btnScan.setText("SCAN");
+        btnScan.setOnClickListener(v -> startScan());
+    } else {
+        super.onBackPressed();
+    }
+}
+     
+
     // ── Init ──────────────────────────────────────────────────────────────────
 
     private void initManagers() {
@@ -136,27 +148,32 @@ private void initAdapters() {
     tagAdapter   = new TagAdapter(this::onTagToggled);
 
     mediaAdapter.setSelectionListener(count -> {
-        mainHandler.post(() -> {
-            if (count > 0) {
-                btnScan.setText(count + " selected");
-                btnScan.setOnClickListener(v -> {
-                    new AlertDialog.Builder(this)
-                        .setTitle("Batch action")
-                        .setItems(
-                            new String[]{"Tag selected", "Rename selected", "Cancel"},
-                            (d, which) -> {
-                                if (which == 0)      showBatchTagDialog();
-                                else if (which == 1) showBatchRenameDialog();
-                                else                 mediaAdapter.exitSelectMode();
-                            })
-                        .show();
-                });
-            } else {
-                btnScan.setText("SCAN");
-                btnScan.setOnClickListener(v -> startScan());
-            }
-        });
+    mainHandler.post(() -> {
+        if (count > 0) {
+            btnScan.setText(count + " selected");
+            btnScan.setOnClickListener(v ->
+                new AlertDialog.Builder(this)
+                    .setTitle("Batch action")
+                    .setItems(
+                        new String[]{
+                            "Tag selected",
+                            "Rename selected",
+                            "Analyze colors",
+                            "Cancel"
+                        },
+                        (d, which) -> {
+                            if (which == 0)      showBatchTagDialog();
+                            else if (which == 1) showBatchRenameDialog();
+                            else if (which == 2) showColorAnalysisDialog();
+                            else                 mediaAdapter.exitSelectMode();
+                        })
+                    .show());
+        } else {
+            btnScan.setText("SCAN");
+            btnScan.setOnClickListener(v -> startScan());
+        }
     });
+});
 }
     private void initViews() {
         RecyclerView fileBrowser = findViewById(R.id.fileBrowser);
@@ -341,33 +358,47 @@ if (btnDelete != null) {
     }
 
     private void executeRefresh() {
-        refreshPending = false;
+    refreshPending = false;
 
-        String query = searchBar.getText().toString().trim();
-        List<MediaFile> base = indexer.getIndex();
+    String query = searchBar != null
+        ? searchBar.getText().toString().trim()
+        : "";
 
-        if (!query.isEmpty()) {
-            searchManager.setFullList(base);
-            base = searchManager.search(query);
-        }
+    List<MediaFile> base = indexer.getIndex();
+    if (base == null) base = new ArrayList<>();
 
-        List<Group>     groups    = groupManager.group(base);
-        List<MediaFile> flattened = new ArrayList<>();
-        for (Group g : groups) flattened.addAll(g.getFiles());
-
-        flattened = filterManager.apply(flattened);
-        sortManager.sort(flattened);
-
-        fullList = flattened;
-        windowManager.setFullIndex(fullList);
-
-        if (currentIndex >= 0 && currentIndex < fullList.size()) {
-            windowManager.centerOn(currentIndex);
-        }
-
-        updateWindow();
-        updateProgress();
+    if (!query.isEmpty()) {
+        searchManager.setFullList(base);
+        base = searchManager.search(query);
     }
+
+    List<MediaFile> flattened = new ArrayList<>();
+    try {
+        List<Group> groups = groupManager.group(base);
+        if (groups != null) {
+            for (Group g : groups) {
+                if (g != null && g.getFiles() != null) {
+                    flattened.addAll(g.getFiles());
+                }
+            }
+        }
+    } catch (Exception e) {
+        flattened = new ArrayList<>(base);
+    }
+
+    flattened = filterManager.apply(flattened);
+    sortManager.sort(flattened);
+
+    fullList = flattened;
+    windowManager.setFullIndex(fullList);
+
+    if (currentIndex >= 0 && currentIndex < fullList.size()) {
+        windowManager.centerOn(currentIndex);
+    }
+
+    updateWindow();
+    updateProgress();
+}
 
     // ── Window ────────────────────────────────────────────────────────────────
 
@@ -938,29 +969,34 @@ private BatchRenameManager.Case caseFromPos(int pos) {
                 
     // ── FolderWatcher ─────────────────────────────────────────────────────────
 
-    @Override
-    public void onFileAdded(String path) {
-        mainHandler.post(() ->
-            indexer.rescan(new java.io.File(path).getParent()));
-    }
+@Override
+public void onFileAdded(String path) {
+    mainHandler.post(() -> {
+        if (!indexer.isScanning()) {
+            indexer.rescan(new java.io.File(path).getParent());
+        }
+    });
+}
 
-    @Override
-    public void onFileDeleted(String path) {
-        mainHandler.post(() -> {
-            fullList.removeIf(f -> f.getPath().equals(path));
-            mediaAdapter.removeFile(path);
-            updateProgress();
-        });
-    }
+@Override
+public void onFileDeleted(String path) {
+    mainHandler.post(() -> {
+        fullList.removeIf(f -> f.getPath().equals(path));
+        currentFiles.removeIf(f -> f.getPath().equals(path));
+        mediaAdapter.removeFile(path);
+        updateProgress();
+    });
+}
 
-    @Override
-    public void onFileModified(String path) {
-        mainHandler.post(() -> {
+@Override
+public void onFileModified(String path) {
+    mainHandler.post(() -> {
+        if (!indexer.isScanning()) {
             cacheManager.invalidateThumbnail(path);
             indexer.rescan(new java.io.File(path).getParent());
-        });
-    }
-
+        }
+    });
+}
     // ── MediaIndexer ──────────────────────────────────────────────────────────
 
     @Override
