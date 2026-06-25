@@ -120,6 +120,12 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         if (selectionListener != null) selectionListener.onSelectionChanged(selected.size());
     }
 
+    public void deselectAll() {
+        selected.clear();
+        notifyDataSetChanged();
+        if (selectionListener != null) selectionListener.onSelectionChanged(0);
+    }
+
     private void toggleSelection(String path, ViewHolder holder) {
         if (selected.contains(path)) {
             selected.remove(path);
