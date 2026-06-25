@@ -2,41 +2,23 @@ package com.mediasorter;
 
 import android.app.Activity;
 import android.os.Bundle;
-import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import com.github.mikephil.charting.charts.BarChart;
-import com.github.mikephil.charting.charts.LineChart;
-import com.github.mikephil.charting.charts.PieChart;
-import com.github.mikephil.charting.data.BarData;
-import com.github.mikephil.charting.data.BarDataSet;
-import com.github.mikephil.charting.data.BarEntry;
-import com.github.mikephil.charting.data.Entry;
-import com.github.mikephil.charting.data.LineData;
-import com.github.mikephil.charting.data.LineDataSet;
-import com.github.mikephil.charting.data.PieData;
-import com.github.mikephil.charting.data.PieDataSet;
-import com.github.mikephil.charting.data.PieEntry;
-import com.github.mikephil.charting.utils.ColorTemplate;
 import com.mediasorter.models.MediaFile;
 import com.mediasorter.models.Tag;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 public class DashboardActivity extends Activity {
 
     private MediaIndexer indexer;
     private TagManager   tagManager;
-    private CacheManager cacheManager;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        indexer      = new MediaIndexer();
-        tagManager   = new TagManager(this);
-        cacheManager = new CacheManager(this);
+        indexer    = new MediaIndexer();
+        tagManager = new TagManager(this);
         buildDashboard();
     }
 
@@ -44,200 +26,101 @@ public class DashboardActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(0xFF121212);
-        root.setPadding(24, 24, 24, 24);
+        root.setPadding(32, 32, 32, 32);
+
+        root.addView(makeTitle("Dashboard"));
 
         List<MediaFile> files = indexer.getIndex();
         List<Tag>       tags  = tagManager.getAllTags();
 
-        root.addView(makeTitle("Dashboard"));
+        // ── File stats ────────────────────────────────────────────────────────
+        root.addView(makeTitle("Files"));
 
-        root.addView(makeLabel(
-            "Cache: " + cacheManager.getFormattedCacheSize()
-            + " / " + cacheManager.getLimitMB() + " MB"
-            + (cacheManager.isAboveWarning() ? "  ⚠ Near limit" : "")
-        ));
+        int images = 0, videos = 0, unsupported = 0, tagged = 0;
+        long totalSize = 0;
+        for (MediaFile f : files) {
+            switch (f.getType()) {
+                case IMAGE: images++;       break;
+                case VIDEO: videos++;       break;
+                default:    unsupported++;  break;
+            }
+            if (!f.getTags().isEmpty()) tagged++;
+            totalSize += f.getSize();
+        }
 
-        root.addView(makeTitle("File Composition"));
-        root.addView(buildCompositionPie(files));
+        root.addView(makeLabel("Total files:       " + files.size()));
+        root.addView(makeLabel("Images:            " + images));
+        root.addView(makeLabel("Videos:            " + videos));
+        root.addView(makeLabel("Unsupported:       " + unsupported));
+        root.addView(makeLabel("Tagged:            " + tagged));
+        root.addView(makeLabel("Untagged:          " + (files.size() - tagged)));
+        root.addView(makeLabel("Total size:        " + formatSize(totalSize)));
 
-        root.addView(makeTitle("Tag Distribution"));
-        root.addView(buildTagBar(tags));
+        if (files.size() > 0) {
+            int pct = tagged * 100 / files.size();
+            root.addView(makeLabel("Progress:          " + pct + "%"));
 
-        root.addView(makeTitle("Tagging Progress"));
-        root.addView(buildProgressLine(files));
+            // Simple text progress bar
+            StringBuilder bar = new StringBuilder("[");
+            int filled = pct / 5;
+            for (int i = 0; i < 20; i++) bar.append(i < filled ? "█" : "░");
+            bar.append("]");
+            root.addView(makeLabel(bar.toString()));
+        }
 
-        root.addView(makeTitle("Tag Co-occurrence"));
-        root.addView(buildCoOccurrenceTable(tags, files));
+        // ── Tag stats ─────────────────────────────────────────────────────────
+        root.addView(makeTitle("Tags"));
+        root.addView(makeLabel("Total tags:        " + tags.size()));
 
-        root.addView(makeTitle("File Size Ranges"));
-        root.addView(buildSizeRangeBar(files));
+        if (!tags.isEmpty()) {
+            root.addView(makeLabel("Most used:"));
+            int shown = Math.min(10, tags.size());
+            for (int i = 0; i < shown; i++) {
+                Tag t = tags.get(i);
+                root.addView(makeLabel(
+                    "  " + (i + 1) + ". " + t.getName()
+                    + "  (" + t.getUsageCount() + " uses)"));
+            }
+        }
+
+        // ── File size breakdown ───────────────────────────────────────────────
+        root.addView(makeTitle("Size Breakdown"));
+        int under1mb = 0, under5mb = 0, under20mb = 0, over20mb = 0;
+        for (MediaFile f : files) {
+            long mb = f.getSize() / (1024 * 1024);
+            if      (mb < 1)  under1mb++;
+            else if (mb < 5)  under5mb++;
+            else if (mb < 20) under20mb++;
+            else              over20mb++;
+        }
+        root.addView(makeLabel("Under 1MB:         " + under1mb));
+        root.addView(makeLabel("1MB - 5MB:         " + under5mb));
+        root.addView(makeLabel("5MB - 20MB:        " + under20mb));
+        root.addView(makeLabel("Over 20MB:         " + over20mb));
+
+        // ── Back ──────────────────────────────────────────────────────────────
+        android.widget.Button btnBack = new android.widget.Button(this);
+        btnBack.setText("← Back");
+        btnBack.setTextColor(0xFFFFFFFF);
+        btnBack.setBackgroundColor(0xFF1A1A2E);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = 48;
+        btnBack.setLayoutParams(lp);
+        btnBack.setOnClickListener(v -> finish());
+        root.addView(btnBack);
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
         setContentView(scroll);
     }
 
-    private PieChart buildCompositionPie(List<MediaFile> files) {
-        int images = 0, videos = 0, other = 0;
-        for (MediaFile f : files) {
-            switch (f.getType()) {
-                case IMAGE: images++; break;
-                case VIDEO: videos++; break;
-                default:    other++;  break;
-            }
-        }
-
-        List<PieEntry> entries = new ArrayList<>();
-        if (images > 0) entries.add(new PieEntry(images, "Images"));
-        if (videos > 0) entries.add(new PieEntry(videos, "Videos"));
-        if (other  > 0) entries.add(new PieEntry(other,  "Other"));
-
-        PieDataSet dataSet = new PieDataSet(entries, "");
-        dataSet.setColors(ColorTemplate.MATERIAL_COLORS);
-        dataSet.setValueTextColor(0xFFFFFFFF);
-        dataSet.setValueTextSize(12f);
-
-        PieChart chart = new PieChart(this);
-        chart.setData(new PieData(dataSet));
-        chart.setBackgroundColor(0xFF1A1A2E);
-        chart.setHoleColor(0xFF121212);
-        chart.getLegend().setTextColor(0xFFFFFFFF);
-        chart.getDescription().setEnabled(false);
-        chart.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 400));
-        chart.invalidate();
-        return chart;
-    }
-
-    private BarChart buildTagBar(List<Tag> tags) {
-        List<BarEntry> entries = new ArrayList<>();
-        List<String>   labels  = new ArrayList<>();
-
-        List<Tag> top = tags.size() > 10 ? tags.subList(0, 10) : tags;
-        for (int i = 0; i < top.size(); i++) {
-            entries.add(new BarEntry(i, top.get(i).getUsageCount()));
-            labels.add(top.get(i).getName());
-        }
-
-        BarDataSet dataSet = new BarDataSet(entries, "Tag Usage");
-        dataSet.setColor(0xFFE94560);
-        dataSet.setValueTextColor(0xFFFFFFFF);
-
-        BarChart chart = new BarChart(this);
-        chart.setData(new BarData(dataSet));
-        chart.setBackgroundColor(0xFF1A1A2E);
-        chart.getXAxis().setTextColor(0xFFFFFFFF);
-        chart.getAxisLeft().setTextColor(0xFFFFFFFF);
-        chart.getAxisRight().setEnabled(false);
-        chart.getLegend().setTextColor(0xFFFFFFFF);
-        chart.getDescription().setEnabled(false);
-        chart.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 400));
-        chart.invalidate();
-        return chart;
-    }
-
-    private LineChart buildProgressLine(List<MediaFile> files) {
-        int total   = files.size();
-        int tagged  = 0;
-        for (MediaFile f : files) {
-            if (!f.getTags().isEmpty()) tagged++;
-        }
-        int untagged = total - tagged;
-
-        List<Entry> entries = new ArrayList<>();
-        entries.add(new Entry(0, 0));
-        entries.add(new Entry(1, tagged));
-        entries.add(new Entry(2, total));
-
-        LineDataSet dataSet = new LineDataSet(entries, "Tagged vs Total");
-        dataSet.setColor(0xFFE94560);
-        dataSet.setCircleColor(0xFFE94560);
-        dataSet.setValueTextColor(0xFFFFFFFF);
-        dataSet.setLineWidth(2f);
-
-        LineChart chart = new LineChart(this);
-        chart.setData(new LineData(dataSet));
-        chart.setBackgroundColor(0xFF1A1A2E);
-        chart.getXAxis().setTextColor(0xFFFFFFFF);
-        chart.getAxisLeft().setTextColor(0xFFFFFFFF);
-        chart.getAxisRight().setEnabled(false);
-        chart.getLegend().setTextColor(0xFFFFFFFF);
-        chart.getDescription().setEnabled(false);
-        chart.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 300));
-        chart.setNoDataText("Tagged: " + tagged + "  Untagged: " + untagged);
-        chart.invalidate();
-        return chart;
-    }
-
-    private View buildCoOccurrenceTable(List<Tag> tags, List<MediaFile> files) {
-        LinearLayout table = new LinearLayout(this);
-        table.setOrientation(LinearLayout.VERTICAL);
-        table.setBackgroundColor(0xFF1A1A2E);
-        table.setPadding(16, 16, 16, 16);
-
-        List<Tag> top = tags.size() > 5 ? tags.subList(0, 5) : tags;
-
-        for (Tag tag : top) {
-            Map<String, Integer> coMap =
-                tagManager.computeCoOccurrences(tag.getName(), files);
-
-            if (coMap.isEmpty()) continue;
-
-            TextView tagLabel = makeLabel("▸ " + tag.getName());
-            tagLabel.setTextColor(0xFFE94560);
-            table.addView(tagLabel);
-
-            for (Map.Entry<String, Integer> e : coMap.entrySet()) {
-                table.addView(makeLabel(
-                    "    " + e.getKey() + "  ×" + e.getValue()));
-            }
-        }
-
-        if (top.isEmpty()) {
-            table.addView(makeLabel("No tag data yet"));
-        }
-
-        return table;
-    }
-
-    private BarChart buildSizeRangeBar(List<MediaFile> files) {
-        int tiny   = 0;
-        int small  = 0;
-        int medium = 0;
-        int large  = 0;
-
-        for (MediaFile f : files) {
-            long mb = f.getSize() / (1024 * 1024);
-            if      (mb < 1)   tiny++;
-            else if (mb < 10)  small++;
-            else if (mb < 100) medium++;
-            else               large++;
-        }
-
-        List<BarEntry> entries = new ArrayList<>();
-        entries.add(new BarEntry(0, tiny));
-        entries.add(new BarEntry(1, small));
-        entries.add(new BarEntry(2, medium));
-        entries.add(new BarEntry(3, large));
-
-        BarDataSet dataSet = new BarDataSet(entries, "File Sizes");
-        dataSet.setColors(ColorTemplate.COLORFUL_COLORS);
-        dataSet.setValueTextColor(0xFFFFFFFF);
-
-        BarChart chart = new BarChart(this);
-        chart.setData(new BarData(dataSet));
-        chart.setBackgroundColor(0xFF1A1A2E);
-        chart.getXAxis().setTextColor(0xFFFFFFFF);
-        chart.getAxisLeft().setTextColor(0xFFFFFFFF);
-        chart.getAxisRight().setEnabled(false);
-        chart.getLegend().setTextColor(0xFFFFFFFF);
-        chart.getDescription().setEnabled(false);
-        chart.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 400));
-        chart.invalidate();
-        return chart;
+    private String formatSize(long bytes) {
+        if (bytes < 1024)             return bytes + " B";
+        if (bytes < 1024 * 1024)      return (bytes / 1024) + " KB";
+        if (bytes < 1024*1024*1024)   return (bytes / (1024*1024)) + " MB";
+        return (bytes / (1024*1024*1024)) + " GB";
     }
 
     private TextView makeTitle(String text) {
@@ -260,6 +143,7 @@ public class DashboardActivity extends Activity {
         tv.setText(text);
         tv.setTextColor(0xFFCCCCCC);
         tv.setTextSize(13f);
+        tv.setTypeface(android.graphics.Typeface.MONOSPACE);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT);
