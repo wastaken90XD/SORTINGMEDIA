@@ -136,6 +136,54 @@ public class MediaIndexer {
                     }
                 }
             }
+            
+            public void rescanClean(String folderPath) {
+        executor.submit(() -> {
+        File folder = new File(folderPath);
+        if (!folder.exists()) return;
+
+        File[] files = folder.listFiles();
+        if (files == null) return;
+
+        // Build set of files currently on disk
+        java.util.Set<String> onDisk = new java.util.HashSet<>();
+        for (File f : files) {
+            if (!f.isDirectory()) onDisk.add(f.getAbsolutePath());
+        }
+
+        // Remove ghost files — in index but not on disk
+        List<String> toRemove = new ArrayList<>();
+        synchronized (index) {
+            for (MediaFile mf : index) {
+                if (mf.getPath().startsWith(folderPath)
+                        && !onDisk.contains(mf.getPath())) {
+                    toRemove.add(mf.getPath());
+                }
+            }
+        }
+        for (String path : toRemove) {
+            removeFromIndex(path);
+            manifest.remove(path);
+            if (listener != null) listener.onFileRemoved(path);
+        }
+
+        // Add new files not yet in index
+        for (File f : files) {
+            if (f.isDirectory()) continue;
+            if (!manifest.containsKey(f.getAbsolutePath())) {
+                MediaFile mf = buildLight(f);
+                if (mf.getType() != MediaFile.Type.UNSUPPORTED) {
+                    addToIndex(mf);
+                    if (listener != null) listener.onFileFound(mf);
+                }
+            }
+        }
+
+        if (listener != null) {
+            listener.onScanComplete(new ArrayList<>(index));
+        }
+    });
+}
 
             // Deletions
             List<String> toRemove = new ArrayList<>();
