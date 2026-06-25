@@ -8,11 +8,11 @@ import java.util.List;
 
 public class TagListManager {
 
-    private static final String PREFS           = "tag_list_prefs";
-    private static final String KEY_LISTS       = "tag_lists";
-    private static final String KEY_ACTIVE      = "active_list";
-    private static final String KEY_COUNT       = "list_count";
-    private static final String DEFAULT_NAME    = "Default";
+    private static final String PREFS        = "tag_list_prefs";
+    private static final String KEY_LISTS    = "tag_lists";
+    private static final String KEY_ACTIVE   = "active_list";
+    private static final String KEY_COUNT    = "list_count";
+    private static final String DEFAULT_NAME = "Default";
 
     private final SharedPreferences prefs;
     private final List<TagList>     lists  = new ArrayList<>();
@@ -29,7 +29,6 @@ public class TagListManager {
         int count = prefs.getInt(KEY_COUNT, 0);
 
         if (count == 0) {
-            // First run — create default list
             TagList def = new TagList(DEFAULT_NAME);
             def.setDefault(true);
             lists.add(def);
@@ -39,16 +38,16 @@ public class TagListManager {
         }
 
         for (int i = 0; i < count; i++) {
-            String name    = prefs.getString(KEY_LISTS + "_name_" + i, DEFAULT_NAME);
-            String tagsCsv = prefs.getString(KEY_LISTS + "_tags_" + i, "");
-            boolean isDef  = prefs.getBoolean(KEY_LISTS + "_default_" + i, i == 0);
+            String  name    = prefs.getString(KEY_LISTS + "_name_" + i, DEFAULT_NAME);
+            String  tagsCsv = prefs.getString(KEY_LISTS + "_tags_" + i, "");
+            boolean isDef   = prefs.getBoolean(KEY_LISTS + "_default_" + i, i == 0);
 
             TagList list = new TagList(name);
             list.setDefault(isDef);
 
             if (!tagsCsv.isEmpty()) {
                 for (String t : tagsCsv.split(",")) {
-                    if (!t.isEmpty()) list.addTag(t.trim());
+                    if (!t.trim().isEmpty()) list.addTag(t.trim());
                 }
             }
             lists.add(list);
@@ -62,12 +61,11 @@ public class TagListManager {
         SharedPreferences.Editor ed = prefs.edit();
         ed.putInt(KEY_COUNT, lists.size());
         ed.putInt(KEY_ACTIVE, activeIndex);
-
         for (int i = 0; i < lists.size(); i++) {
             TagList list = lists.get(i);
-            ed.putString(KEY_LISTS + "_name_" + i, list.getName());
+            ed.putString(KEY_LISTS  + "_name_" + i,    list.getName());
             ed.putBoolean(KEY_LISTS + "_default_" + i, list.isDefault());
-            ed.putString(KEY_LISTS + "_tags_" + i,
+            ed.putString(KEY_LISTS  + "_tags_" + i,
                 String.join(",", list.getTags()));
         }
         ed.apply();
@@ -75,12 +73,9 @@ public class TagListManager {
 
     // ── Active list ───────────────────────────────────────────────────────────
 
-    public TagList getActiveList() {
-        if (lists.isEmpty()) return new TagList(DEFAULT_NAME);
-        return lists.get(activeIndex);
-    }
-
-    public int getActiveIndex() { return activeIndex; }
+    public TagList getActiveList()       { return lists.isEmpty()
+        ? new TagList(DEFAULT_NAME) : lists.get(activeIndex); }
+    public int     getActiveIndex()      { return activeIndex; }
 
     public void setActiveIndex(int index) {
         if (index >= 0 && index < lists.size()) {
@@ -102,14 +97,13 @@ public class TagListManager {
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
     public void createList(String name) {
-        TagList list = new TagList(name);
-        lists.add(list);
+        lists.add(new TagList(name));
         save();
     }
 
     public void deleteList(int index) {
         if (index < 0 || index >= lists.size()) return;
-        if (lists.get(index).isDefault()) return; // never delete default
+        if (lists.get(index).isDefault()) return;
         lists.remove(index);
         if (activeIndex >= lists.size()) activeIndex = lists.size() - 1;
         save();
@@ -139,6 +133,38 @@ public class TagListManager {
         save();
     }
 
+    // ── Bulk import from scanned tags ─────────────────────────────────────────
+
+    // Add all tags from index to active list — skips duplicates
+    public int bulkAddToActiveList(List<String> tags) {
+        if (lists.isEmpty()) return 0;
+        TagList active = lists.get(activeIndex);
+        int added = 0;
+        for (String tag : tags) {
+            if (!tag.isEmpty() && !active.containsTag(tag)) {
+                active.addTag(tag);
+                added++;
+            }
+        }
+        if (added > 0) save();
+        return added;
+    }
+
+    // Add all tags to a specific list
+    public int bulkAddToList(int index, List<String> tags) {
+        if (index < 0 || index >= lists.size()) return 0;
+        TagList list = lists.get(index);
+        int added = 0;
+        for (String tag : tags) {
+            if (!tag.isEmpty() && !list.containsTag(tag)) {
+                list.addTag(tag);
+                added++;
+            }
+        }
+        if (added > 0) save();
+        return added;
+    }
+
     // ── Query ─────────────────────────────────────────────────────────────────
 
     public List<TagList> getAllLists()  { return new ArrayList<>(lists); }
@@ -146,9 +172,7 @@ public class TagListManager {
 
     public String[] getListNames() {
         String[] names = new String[lists.size()];
-        for (int i = 0; i < lists.size(); i++) {
-            names[i] = lists.get(i).getName();
-        }
+        for (int i = 0; i < lists.size(); i++) names[i] = lists.get(i).getName();
         return names;
     }
 
