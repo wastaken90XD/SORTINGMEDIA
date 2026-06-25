@@ -4,8 +4,10 @@ import com.mediasorter.models.MediaFile;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -97,7 +99,7 @@ public class MediaIndexer {
         });
     }
 
-    // ── Rescan ────────────────────────────────────────────────────────────────
+    // ── Lightweight rescan ────────────────────────────────────────────────────
 
     public void rescan(String folderPath) {
         if (scanning) return;
@@ -136,56 +138,7 @@ public class MediaIndexer {
                     }
                 }
             }
-            
-            public void rescanClean(String folderPath) {
-        executor.submit(() -> {
-        File folder = new File(folderPath);
-        if (!folder.exists()) return;
 
-        File[] files = folder.listFiles();
-        if (files == null) return;
-
-        // Build set of files currently on disk
-        java.util.Set<String> onDisk = new java.util.HashSet<>();
-        for (File f : files) {
-            if (!f.isDirectory()) onDisk.add(f.getAbsolutePath());
-        }
-
-        // Remove ghost files — in index but not on disk
-        List<String> toRemove = new ArrayList<>();
-        synchronized (index) {
-            for (MediaFile mf : index) {
-                if (mf.getPath().startsWith(folderPath)
-                        && !onDisk.contains(mf.getPath())) {
-                    toRemove.add(mf.getPath());
-                }
-            }
-        }
-        for (String path : toRemove) {
-            removeFromIndex(path);
-            manifest.remove(path);
-            if (listener != null) listener.onFileRemoved(path);
-        }
-
-        // Add new files not yet in index
-        for (File f : files) {
-            if (f.isDirectory()) continue;
-            if (!manifest.containsKey(f.getAbsolutePath())) {
-                MediaFile mf = buildLight(f);
-                if (mf.getType() != MediaFile.Type.UNSUPPORTED) {
-                    addToIndex(mf);
-                    if (listener != null) listener.onFileFound(mf);
-                }
-            }
-        }
-
-        if (listener != null) {
-            listener.onScanComplete(new ArrayList<>(index));
-        }
-    });
-}
-
-            // Deletions
             List<String> toRemove = new ArrayList<>();
             synchronized (index) {
                 for (MediaFile mf : index) {
@@ -203,6 +156,56 @@ public class MediaIndexer {
         });
     }
 
+    // ── Clean rescan — removes ghost files ────────────────────────────────────
+
+    public void rescanClean(String folderPath) {
+        executor.submit(() -> {
+            File folder = new File(folderPath);
+            if (!folder.exists()) return;
+
+            File[] files = folder.listFiles();
+            if (files == null) return;
+
+            // Build set of files on disk
+            Set<String> onDisk = new HashSet<>();
+            for (File f : files) {
+                if (!f.isDirectory()) onDisk.add(f.getAbsolutePath());
+            }
+
+            // Remove ghosts
+            List<String> toRemove = new ArrayList<>();
+            synchronized (index) {
+                for (MediaFile mf : index) {
+                    if (mf.getPath().startsWith(folderPath)
+                            && !onDisk.contains(mf.getPath())) {
+                        toRemove.add(mf.getPath());
+                    }
+                }
+            }
+            for (String path : toRemove) {
+                removeFromIndex(path);
+                manifest.remove(path);
+                if (listener != null) listener.onFileRemoved(path);
+            }
+
+            // Add new files
+            for (File f : files) {
+                if (f.isDirectory()) continue;
+                if (!manifest.containsKey(f.getAbsolutePath())) {
+                    MediaFile mf = buildLight(f);
+                    if (mf.getType() != MediaFile.Type.UNSUPPORTED) {
+                        addToIndex(mf);
+                        if (listener != null) listener.onFileFound(mf);
+                    }
+                }
+            }
+
+            if (listener != null) {
+                listener.onScanComplete(new ArrayList<>(index));
+            }
+        });
+    }
+
     // ── Full reset ────────────────────────────────────────────────────────────
 
     public void fullReset(List<String> folders) {
@@ -212,7 +215,7 @@ public class MediaIndexer {
         for (String folder : folders) scanFolder(folder);
     }
 
-    // ── Delete file from disk + index ─────────────────────────────────────────
+    // ── Delete file ───────────────────────────────────────────────────────────
 
     public boolean deleteFile(String path) {
         File f = new File(path);
@@ -230,7 +233,6 @@ public class MediaIndexer {
         MediaFile mf = new MediaFile(f.getAbsolutePath(), f.length());
         mf.setDateAdded(f.lastModified());
 
-        // Read existing XMP tags from file
         List<String> existingTags = XmpReader.readTags(f.getAbsolutePath());
         for (String tag : existingTags) mf.addTag(tag);
 
@@ -263,8 +265,6 @@ public class MediaIndexer {
         }
         manifest.remove(path);
     }
-
-    // ── Get all unique tags from index ────────────────────────────────────────
 
     public List<String> getAllTagsFromIndex() {
         List<String> result = new ArrayList<>();
