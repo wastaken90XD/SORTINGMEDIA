@@ -144,9 +144,6 @@ public class MainActivity extends Activity
     }
 
 private void initAdapters() {
-    mediaAdapter = new MediaAdapter(thumbnailLoader, this::onFileSelected);
-    tagAdapter   = new TagAdapter(this::onTagToggled);
-
     mediaAdapter.setSelectionListener(count -> {
     mainHandler.post(() -> {
         if (count > 0) {
@@ -156,15 +153,21 @@ private void initAdapters() {
                     .setTitle("Batch action")
                     .setItems(
                         new String[]{
+                            "Select all",
+                            "Deselect all",
                             "Tag selected",
                             "Rename selected",
                             "Analyze colors",
+                            "Convert to JPEG",
                             "Cancel"
                         },
                         (d, which) -> {
-                            if (which == 0)      showBatchTagDialog();
-                            else if (which == 1) showBatchRenameDialog();
-                            else if (which == 2) showColorAnalysisDialog();
+                            if (which == 0)      mediaAdapter.selectAll();
+                            else if (which == 1) mediaAdapter.deselectAll();
+                            else if (which == 2) showBatchTagDialog();
+                            else if (which == 3) showBatchRenameDialog();
+                            else if (which == 4) showColorAnalysisDialog();
+                            else if (which == 5) showConvertDialog();
                             else                 mediaAdapter.exitSelectMode();
                         })
                     .show());
@@ -297,10 +300,11 @@ private void initAdapters() {
         btnScan.setOnClickListener(v -> startScan());
 
         findViewById(R.id.btnRescan).setOnClickListener(v -> {
-            for (String folder : folderManager.getFolders()) {
-                indexer.rescan(folder);
-            }
-        });
+    for (String folder : folderManager.getFolders()) {
+        indexer.rescanClean(folder);
+    }
+    Toast.makeText(this, "Rescanning…", Toast.LENGTH_SHORT).show();
+});
 
         findViewById(R.id.btnGroupBy).setOnClickListener(v -> showGroupMenu(v));
 
@@ -717,6 +721,28 @@ private void showColorAnalysisDialog() {
     List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
     if (selectedFiles.isEmpty()) return;
 
+    android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
+    layout.setOrientation(android.widget.LinearLayout.VERTICAL);
+    layout.setPadding(32, 16, 32, 16);
+
+    layout.addView(makeLabel("Number of colors per image (1-10):"));
+android.widget.EditText colorCountInput = new android.widget.EditText(this);
+colorCountInput.setText("3");
+colorCountInput.setTextColor(0xFFFFFFFF);
+colorCountInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+colorCountInput.setBackground(null);
+layout.addView(colorCountInput);
+
+layout.addView(makeLabel("Similarity threshold (1-100, lower = stricter):"));
+android.widget.EditText threshInput = new android.widget.EditText(this);
+threshInput.setText("20");
+threshInput.setTextColor(0xFFFFFFFF);
+threshInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | 
+    android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+threshInput.setBackground(null);
+layout.addView(threshInput);
+
+    layout.addView(makeLabel("Mode:"));
     String[] modes = {
         "Tag with colors",
         "Rename by color",
@@ -724,12 +750,29 @@ private void showColorAnalysisDialog() {
         "Tag + Rename",
         "All three"
     };
+    android.widget.Spinner modeSpin = makeSpinner(modes);
+    layout.addView(modeSpin);
+
+    android.widget.ScrollView sv = new android.widget.ScrollView(this);
+    sv.addView(layout);
 
     new AlertDialog.Builder(this)
         .setTitle("Color analysis — " + selectedFiles.size() + " files")
-        .setItems(modes, (d, which) -> {
+        .setView(sv)
+        .setPositiveButton("Analyze", (d, w) -> {
+            int topN;
+float threshold;
+try {
+    topN = Integer.parseInt(colorCountInput.getText().toString().trim());
+    topN = Math.max(1, Math.min(10, topN));
+} catch (Exception e) { topN = 3; }
+
+try {
+    threshold = Float.parseFloat(threshInput.getText().toString().trim());
+    threshold = Math.max(1f, Math.min(100f, threshold));
+} catch (Exception e) { threshold = 20f; }
             ColorAnalyzer.Mode mode;
-            switch (which) {
+            switch (modeSpin.getSelectedItemPosition()) {
                 case 0:  mode = ColorAnalyzer.Mode.TAG;            break;
                 case 1:  mode = ColorAnalyzer.Mode.RENAME;         break;
                 case 2:  mode = ColorAnalyzer.Mode.GROUP;          break;
@@ -737,12 +780,14 @@ private void showColorAnalysisDialog() {
                 default: mode = ColorAnalyzer.Mode.ALL;            break;
             }
             final ColorAnalyzer.Mode finalMode = mode;
+            final int finalTopN = topN;
+            final float finalThreshold = threshold;
+
             folderWatcher.pauseAll();
             new Thread(() -> {
                 List<ColorAnalyzer.Result> results =
-                    ColorAnalyzer.analyze(
-                        selectedFiles, 3, 20f,
-                        finalMode, tagManager, batchRenameManager);
+                    ColorAnalyzer.analyze(selectedFiles, finalTopN,
+                        finalThreshold, finalMode, tagManager, batchRenameManager);
                 mainHandler.post(() -> {
                     folderWatcher.resumeAll();
                     int ok = 0;
