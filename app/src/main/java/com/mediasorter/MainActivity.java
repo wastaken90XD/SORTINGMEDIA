@@ -158,7 +158,6 @@ private void initAdapters() {
                             "Tag selected",
                             "Rename selected",
                             "Analyze colors",
-                            "Convert to JPEG",
                             "Cancel"
                         },
                         (d, which) -> {
@@ -167,7 +166,6 @@ private void initAdapters() {
                             else if (which == 2) showBatchTagDialog();
                             else if (which == 3) showBatchRenameDialog();
                             else if (which == 4) showColorAnalysisDialog();
-                            else if (which == 5) showConvertDialog();
                             else                 mediaAdapter.exitSelectMode();
                         })
                     .show());
@@ -804,6 +802,24 @@ try {
         })
         .setNegativeButton("Cancel", null)
         .show();
+}
+
+private android.widget.TextView makeLabel(String text) {
+    android.widget.TextView tv = new android.widget.TextView(this);
+    tv.setText(text);
+    tv.setTextColor(0xFFCCCCCC);
+    tv.setTextSize(12f);
+    return tv;
+}
+
+private android.widget.Spinner makeSpinner(String[] options) {
+    android.widget.Spinner sp = new android.widget.Spinner(this);
+    android.widget.ArrayAdapter<String> ad = new android.widget.ArrayAdapter<>(
+        this, android.R.layout.simple_spinner_item, options);
+    ad.setDropDownViewResource(
+        android.R.layout.simple_spinner_dropdown_item);
+    sp.setAdapter(ad);
+    return sp;
 }
 
 private void updateRenamePreview(BatchRenameManager mgr,
