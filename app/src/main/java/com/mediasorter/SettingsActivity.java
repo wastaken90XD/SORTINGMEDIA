@@ -218,6 +218,19 @@ public class SettingsActivity extends Activity {
         btnNewList.setOnClickListener(v -> showNewListDialog());
         root.addView(btnNewList);
 
+        Button btnBulkActive = makeButton("Auto-fill active list from all tags");
+btnBulkActive.setOnClickListener(v -> {
+    List<Tag> allTags = tagManager.getAllTags();
+    List<String> tagNames = new ArrayList<>();
+    for (Tag t : allTags) tagNames.add(t.getName());
+    int added = tagListManager.bulkAddToActiveList(tagNames);
+    Toast.makeText(this,
+        added + " tags added to " + tagListManager.getActiveList().getName(),
+        Toast.LENGTH_SHORT).show();
+    recreate();
+});
+root.addView(btnBulkActive);
+
         // Auto-populate from scanned files
         Button btnAutoPopulate = makeButton("Auto-populate lists from scanned files");
         btnAutoPopulate.setOnClickListener(v ->
