@@ -12,18 +12,13 @@ import java.util.Map;
 
 public class GroupManager {
 
-    public enum GroupBy { FILE_TYPE, TAG, DATE, FOLDER }
+    private Group.GroupBy current = Group.GroupBy.FILE_TYPE;
 
-    private GroupBy current = GroupBy.FILE_TYPE;
-
-    public void setGroupBy(GroupBy g) { this.current = g; }
-    public GroupBy getCurrent()       { return current; }
+    public void setGroupBy(Group.GroupBy g) { this.current = g; }
+    public Group.GroupBy getCurrent()       { return current; }
 
     public List<Group> group(List<MediaFile> files) {
-        if (files == null || files.isEmpty()) {
-            return new ArrayList<>();
-        }
-
+        if (files == null || files.isEmpty()) return new ArrayList<>();
         try {
             switch (current) {
                 case FILE_TYPE: return groupByType(files);
@@ -33,9 +28,8 @@ public class GroupManager {
                 default:        return groupByType(files);
             }
         } catch (Exception e) {
-            // Fallback — return single group with all files
             List<Group> fallback = new ArrayList<>();
-            Group g = new Group("All");
+            Group g = new Group("All", Group.GroupBy.FILE_TYPE);
             for (MediaFile f : files) g.addFile(f);
             fallback.add(g);
             return fallback;
@@ -47,7 +41,8 @@ public class GroupManager {
         for (MediaFile f : files) {
             if (f == null) continue;
             String key = f.getType() != null ? f.getType().name() : "UNKNOWN";
-            if (!map.containsKey(key)) map.put(key, new Group(key));
+            if (!map.containsKey(key))
+                map.put(key, new Group(key, Group.GroupBy.FILE_TYPE));
             map.get(key).addFile(f);
         }
         return new ArrayList<>(map.values());
@@ -55,7 +50,7 @@ public class GroupManager {
 
     private List<Group> groupByTag(List<MediaFile> files) {
         Map<String, Group> map = new LinkedHashMap<>();
-        Group untagged = new Group("Untagged");
+        Group untagged = new Group("Untagged", Group.GroupBy.TAG);
         for (MediaFile f : files) {
             if (f == null) continue;
             List<String> tags = f.getTags();
@@ -63,7 +58,8 @@ public class GroupManager {
                 untagged.addFile(f);
             } else {
                 for (String tag : tags) {
-                    if (!map.containsKey(tag)) map.put(tag, new Group(tag));
+                    if (!map.containsKey(tag))
+                        map.put(tag, new Group(tag, Group.GroupBy.TAG));
                     map.get(tag).addFile(f);
                 }
             }
@@ -79,12 +75,10 @@ public class GroupManager {
         for (MediaFile f : files) {
             if (f == null) continue;
             String key;
-            try {
-                key = sdf.format(new Date(f.getDateAdded()));
-            } catch (Exception e) {
-                key = "Unknown";
-            }
-            if (!map.containsKey(key)) map.put(key, new Group(key));
+            try { key = sdf.format(new Date(f.getDateAdded())); }
+            catch (Exception e) { key = "Unknown"; }
+            if (!map.containsKey(key))
+                map.put(key, new Group(key, Group.GroupBy.DATE));
             map.get(key).addFile(f);
         }
         return new ArrayList<>(map.values());
@@ -97,10 +91,10 @@ public class GroupManager {
             String path = f.getPath();
             if (path == null) continue;
             java.io.File file = new java.io.File(path);
-            String folder = file.getParent() != null
-                ? file.getParentFile().getName()
-                : "Unknown";
-            if (!map.containsKey(folder)) map.put(folder, new Group(folder));
+            String folder = file.getParentFile() != null
+                ? file.getParentFile().getName() : "Unknown";
+            if (!map.containsKey(folder))
+                map.put(folder, new Group(folder, Group.GroupBy.FOLDER));
             map.get(folder).addFile(f);
         }
         return new ArrayList<>(map.values());
