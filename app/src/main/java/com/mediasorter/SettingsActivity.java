@@ -613,6 +613,19 @@ public class SettingsActivity extends Activity {
             }
         });
         layout.addView(btnAddToList);
+        
+        Button btnBulkAdd = makeButton("Add all tags from scanned files");
+btnBulkAdd.setOnClickListener(v -> {
+    // Get all unique tags from all scanned files via tagManager
+    List<Tag> allTags = tagManager.getAllTags();
+    List<String> tagNames = new ArrayList<>();
+    for (Tag t : allTags) tagNames.add(t.getName());
+    int added = tagListManager.bulkAddToList(listIndex, tagNames);
+    Toast.makeText(this,
+        added + " tags added",
+        Toast.LENGTH_SHORT).show();
+});
+layout.addView(btnBulkAdd);
 
         ScrollView sv = new ScrollView(this);
         sv.addView(layout);
