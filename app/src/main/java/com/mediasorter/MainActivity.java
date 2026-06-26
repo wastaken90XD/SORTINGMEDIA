@@ -74,14 +74,14 @@ public class MainActivity extends Activity
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        CrashLogger.init(this);
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-        initManagers();
-        initAdapters();
-        initViews();
-    }
+protected void onCreate(Bundle savedInstanceState) {
+    CrashLogger.init(this);
+    super.onCreate(savedInstanceState);
+    setContentView(R.layout.activity_main);
+    initManagers();  // ← must be first
+    initAdapters();  // ← depends on thumbnailLoader from initManagers
+    initViews();
+}
 
     @Override
     protected void onResume() {
