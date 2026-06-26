@@ -144,37 +144,40 @@ protected void onCreate(Bundle savedInstanceState) {
     }
 
 private void initAdapters() {
+    mediaAdapter = new MediaAdapter(thumbnailLoader, this::onFileSelected);
+    tagAdapter   = new TagAdapter(this::onTagToggled);
+
     mediaAdapter.setSelectionListener(count -> {
-    mainHandler.post(() -> {
-        if (count > 0) {
-            btnScan.setText(count + " selected");
-            btnScan.setOnClickListener(v ->
-                new AlertDialog.Builder(this)
-                    .setTitle("Batch action")
-                    .setItems(
-                        new String[]{
-                            "Select all",
-                            "Deselect all",
-                            "Tag selected",
-                            "Rename selected",
-                            "Analyze colors",
-                            "Cancel"
-                        },
-                        (d, which) -> {
-                            if (which == 0)      mediaAdapter.selectAll();
-                            else if (which == 1) mediaAdapter.deselectAll();
-                            else if (which == 2) showBatchTagDialog();
-                            else if (which == 3) showBatchRenameDialog();
-                            else if (which == 4) showColorAnalysisDialog();
-                            else                 mediaAdapter.exitSelectMode();
-                        })
-                    .show());
-        } else {
-            btnScan.setText("SCAN");
-            btnScan.setOnClickListener(v -> startScan());
-        }
+        mainHandler.post(() -> {
+            if (count > 0) {
+                btnScan.setText(count + " selected");
+                btnScan.setOnClickListener(v ->
+                    new AlertDialog.Builder(this)
+                        .setTitle("Batch action")
+                        .setItems(
+                            new String[]{
+                                "Select all",
+                                "Deselect all",
+                                "Tag selected",
+                                "Rename selected",
+                                "Analyze colors",
+                                "Cancel"
+                            },
+                            (d, which) -> {
+                                if (which == 0)      mediaAdapter.selectAll();
+                                else if (which == 1) mediaAdapter.deselectAll();
+                                else if (which == 2) showBatchTagDialog();
+                                else if (which == 3) showBatchRenameDialog();
+                                else if (which == 4) showColorAnalysisDialog();
+                                else                 mediaAdapter.exitSelectMode();
+                            })
+                        .show());
+            } else {
+                btnScan.setText("SCAN");
+                btnScan.setOnClickListener(v -> startScan());
+            }
+        });
     });
-});
 }
     private void initViews() {
         RecyclerView fileBrowser = findViewById(R.id.fileBrowser);
