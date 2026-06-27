@@ -1014,7 +1014,9 @@ private BatchRenameManager.Case caseFromPos(int pos) {
         .setPositiveButton("Delete", (d, w) -> {
             boolean deleted = indexer.deleteFile(file.getPath());
             if (deleted) {
-                fullList.removeIf(f -> f.getPath().equals(file.getPath()));
+                for (int i = fullList.size() - 1; i >= 0; i--) {
+            if (fullList.get(i).getPath().equals(path)) fullList.remove(i);
+        }
                 mediaAdapter.removeFile(file.getPath());
                 thumbnailLoader.cancel(file.getPath());
                 if (currentIndex >= fullList.size()) {
@@ -1045,8 +1047,12 @@ public void onFileAdded(String path) {
 @Override
 public void onFileDeleted(String path) {
     mainHandler.post(() -> {
-        fullList.removeIf(f -> f.getPath().equals(path));
-        currentFiles.removeIf(f -> f.getPath().equals(path));
+        for (int i = fullList.size() - 1; i >= 0; i--) {
+    if (fullList.get(i).getPath().equals(path)) fullList.remove(i);
+}
+for (int i = currentFiles.size() - 1; i >= 0; i--) {
+    if (currentFiles.get(i).getPath().equals(path)) currentFiles.remove(i);
+}
         mediaAdapter.removeFile(path);
         updateProgress();
     });
@@ -1103,7 +1109,9 @@ public void onFileModified(String path) {
     @Override
     public void onFileRemoved(String path) {
         mainHandler.post(() -> {
-            fullList.removeIf(f -> f.getPath().equals(path));
+            for (int i = fullList.size() - 1; i >= 0; i--) {
+            if (fullList.get(i).getPath().equals(path)) fullList.remove(i);
+        }
             mediaAdapter.removeFile(path);
             updateProgress();
         });
