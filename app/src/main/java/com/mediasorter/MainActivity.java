@@ -1015,7 +1015,7 @@ private BatchRenameManager.Case caseFromPos(int pos) {
             boolean deleted = indexer.deleteFile(file.getPath());
             if (deleted) {
                 for (int i = fullList.size() - 1; i >= 0; i--) {
-            if (fullList.get(i).getPath().equals(path)) fullList.remove(i);
+            if (fullList.get(i).getPath().equals(file.getPath())) fullList.remove(i);
         }
                 mediaAdapter.removeFile(file.getPath());
                 thumbnailLoader.cancel(file.getPath());
