@@ -1046,14 +1046,15 @@ public void onFileAdded(String path) {
 
 @Override
 public void onFileDeleted(String path) {
+    final String deletedPath = path;
     mainHandler.post(() -> {
         for (int i = fullList.size() - 1; i >= 0; i--) {
-    if (fullList.get(i).getPath().equals(path)) fullList.remove(i);
-}
-for (int i = currentFiles.size() - 1; i >= 0; i--) {
-    if (currentFiles.get(i).getPath().equals(path)) currentFiles.remove(i);
-}
-        mediaAdapter.removeFile(path);
+            if (fullList.get(i).getPath().equals(deletedPath)) fullList.remove(i);
+        }
+        for (int i = currentFiles.size() - 1; i >= 0; i--) {
+            if (currentFiles.get(i).getPath().equals(deletedPath)) currentFiles.remove(i);
+        }
+        mediaAdapter.removeFile(deletedPath);
         updateProgress();
     });
 }
