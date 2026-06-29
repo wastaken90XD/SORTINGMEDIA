@@ -140,12 +140,15 @@ public class MediaIndexer {
             }
 
             List<String> toRemove = new ArrayList<>();
+            String normalizedFolder = folderPath.endsWith("/")
+                ? folderPath
+                : folderPath + "/";
+
             synchronized (index) {
                 for (MediaFile mf : index) {
-                    if (mf.getPath().startsWith(folderPath)) {
-                        if (!new File(mf.getPath()).exists()) {
-                            toRemove.add(mf.getPath());
-                        }
+                    if (mf.getPath().startsWith(normalizedFolder)
+                            && !onDisk.contains(mf.getPath())) {
+                        toRemove.add(mf.getPath());
                     }
                 }
             }
