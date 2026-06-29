@@ -14,7 +14,7 @@ public class FolderWatcher {
         void onFileModified(String path);
     }
 
-    // Use ConcurrentHashMap for thread‑safe access from callbacks and main thread
+    // Thread‑safe map of watched folders
     private final ConcurrentHashMap<String, FileObserver> watchers = new ConcurrentHashMap<>();
     private final Listener listener;
 
@@ -24,23 +24,22 @@ public class FolderWatcher {
 
     /**
      * Starts watching a folder for file additions, deletions, and modifications.
-     *
      * @param folderPath absolute path to an existing directory
      */
     public void watch(String folderPath) {
-        // Normalize path to avoid duplicates (e.g. /sdcard/DCIM vs /storage/emulated/0/DCIM)
+        // Normalize to avoid duplicates
         File folder = new File(folderPath).getAbsoluteFile();
-        String key = folder.getAbsolutePath();
+        final String key = folder.getAbsolutePath();
 
         if (!folder.exists() || !folder.isDirectory()) {
-            // Log or throw – silent failure is confusing
+            // Silently ignore non‑existent folders
             return;
         }
 
         if (watchers.containsKey(key)) return;
 
-        // FileObserver requires an absolute path to a directory
-        FileObserver observer = new FileObserver(folder,
+        // Use the String constructor for API < 29 compatibility
+        FileObserver observer = new FileObserver(folder.getAbsolutePath(),
                 FileObserver.CREATE |
                 FileObserver.DELETE |
                 FileObserver.MODIFY |
@@ -54,7 +53,6 @@ public class FolderWatcher {
                 // Build clean full path
                 String fullPath = new File(folder, fileName).getAbsolutePath();
 
-                // Mask to get base event
                 int baseEvent = event & FileObserver.ALL_EVENTS;
                 switch (baseEvent) {
                     case FileObserver.CREATE:
@@ -111,10 +109,4 @@ public class FolderWatcher {
             o.startWatching();
         }
     }
-
-    /**
-     * Note: On Android 10+ (API 29) FileObserver cannot reliably monitor
-     * external storage due to scoped storage restrictions.
-     * Consider using MediaStore or SAF for full reliability.
-     */
 }
