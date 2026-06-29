@@ -260,11 +260,16 @@ public class MediaIndexer {
     }
 
     private void removeFromIndex(String path) {
-        synchronized (index) {
-            index.removeIf(mf -> mf.getPath().equals(path));
+    synchronized (index) {
+        for (int i = index.size() - 1; i >= 0; i--) {
+            if (index.get(i).getPath().equals(path)) {
+                index.remove(i);
+                break;
+            }
         }
-        manifest.remove(path);
     }
+    manifest.remove(path);
+}
 
     public List<String> getAllTagsFromIndex() {
         List<String> result = new ArrayList<>();
