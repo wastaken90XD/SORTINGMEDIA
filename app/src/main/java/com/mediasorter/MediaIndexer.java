@@ -138,11 +138,6 @@ public class MediaIndexer {
                     }
                 }
             }
-
-            Set<String> onDisk = new HashSet<>();
-                for (File f : files) {
-                    if (!f.isDirectory()) onDisk.add(f.getAbsolutePath());
-                }
             
             List<String> toRemove = new ArrayList<>();
             String normalizedFolder = folderPath.endsWith("/")
