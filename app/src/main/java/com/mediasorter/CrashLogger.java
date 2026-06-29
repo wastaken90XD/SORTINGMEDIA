@@ -14,15 +14,21 @@ import java.util.Locale;
 public class CrashLogger implements Thread.UncaughtExceptionHandler {
 
     private static final String LOG_FILE = "crash_log.txt";
+    private static final Object WRITE_LOCK = new Object();
+    private static volatile boolean installed = false;
+
     private final Context context;
     private final Thread.UncaughtExceptionHandler defaultHandler;
 
-    public CrashLogger(Context context) {
-        this.context        = context;
+    private CrashLogger(Context context) {
+        this.context = context;
         this.defaultHandler = Thread.getDefaultUncaughtExceptionHandler();
     }
 
     public static void init(Context context) {
+        // Prevent double initialisation
+        if (installed) return;
+        installed = true;
         Thread.setDefaultUncaughtExceptionHandler(new CrashLogger(context));
     }
 
@@ -33,20 +39,25 @@ public class CrashLogger implements Thread.UncaughtExceptionHandler {
             throwable.printStackTrace(new PrintWriter(sw));
 
             String timestamp = new SimpleDateFormat(
-                "yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
+                    "yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
 
             String entry = "\n--- CRASH " + timestamp + " ---\n"
-                + "Thread: " + thread.getName() + "\n"
-                + sw.toString()
-                + "\n";
+                    + "Thread: " + thread.getName() + "\n"
+                    + sw.toString()
+                    + "\n";
 
-            File logFile = new File(context.getFilesDir(), LOG_FILE);
-            FileWriter fw = new FileWriter(logFile, true);
-            fw.write(entry);
-            fw.close();
+            // Thread‑safe file append
+            synchronized (WRITE_LOCK) {
+                File logFile = new File(context.getFilesDir(), LOG_FILE);
+                FileWriter fw = new FileWriter(logFile, true);
+                fw.write(entry);
+                fw.close();
+            }
+        } catch (Exception ignored) {
+            // Fail silently – nothing we can do during a crash
+        }
 
-        } catch (Exception ignored) {}
-
+        // Chain to the original handler (usually the system handler)
         if (defaultHandler != null) {
             defaultHandler.uncaughtException(thread, throwable);
         }
@@ -72,6 +83,7 @@ public class CrashLogger implements Thread.UncaughtExceptionHandler {
 
     public static void clearLog(Context context) {
         File logFile = new File(context.getFilesDir(), LOG_FILE);
+        // File deletion doesn't need to be synchronised with writes
         if (logFile.exists()) logFile.delete();
     }
 }
