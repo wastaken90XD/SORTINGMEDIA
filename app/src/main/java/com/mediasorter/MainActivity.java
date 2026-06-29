@@ -634,173 +634,278 @@ public class MainActivity extends Activity
     }
 
     private void showBatchRenameDialog() {
-        List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
-        if (selectedFiles.isEmpty()) return;
+    List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
+    if (selectedFiles.isEmpty()) return;
 
-        // Save current settings to restore if cancelled
-        final BatchRenameManager.Separator oldSep = batchRenameManager.getSeparator();
-        final BatchRenameManager.Order    oldOrd = batchRenameManager.getOrder();
-        final BatchRenameManager.Case     oldCase = batchRenameManager.getCaseMode();
+    // Save current settings to restore if cancelled
+    final BatchRenameManager.Separator oldSep = batchRenameManager.getSeparator();
+    final BatchRenameManager.Order oldOrd = batchRenameManager.getOrder();
+    final BatchRenameManager.Case oldCase = batchRenameManager.getCaseMode();
+    final String oldPrefix = batchRenameManager.getPrefix();
+    final String oldSuffix = batchRenameManager.getSuffix();
+    final boolean oldIncludeFolder = batchRenameManager.isIncludeFolder();
+    final BatchRenameManager.Numbering oldNum = batchRenameManager.getNumbering();
+    final int oldNumStart = batchRenameManager.getNumberStart();
+    final int oldNumPad = batchRenameManager.getNumberPadding();
+    final String oldDateFormat = batchRenameManager.getDateFormat();
+    final BatchRenameManager.NumberPosition oldNumPos = batchRenameManager.getNumberPosition();
+    final String oldNumSep = batchRenameManager.getNumberSeparator();
+    final Map<String, String> oldReplacements = batchRenameManager.getReplacements();
 
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(32, 16, 32, 16);
+    // Build layout programmatically
+    LinearLayout layout = new LinearLayout(this);
+    layout.setOrientation(LinearLayout.VERTICAL);
+    layout.setPadding(32, 16, 32, 16);
 
-        // Separator
-        TextView sepLabel = new TextView(this);
-        sepLabel.setText("Separator:");
-        sepLabel.setTextColor(0xFFCCCCCC);
-        layout.addView(sepLabel);
+    // --- Separator ---
+    layout.addView(makeLabel("Separator:"));
+    String[] sepOptions = {"Underscore (_)", "Dash (-)", "Space ( )", "None"};
+    Spinner sepSpinner = makeSpinner(sepOptions);
+    sepSpinner.setSelection(batchRenameManager.getSeparator().ordinal());
+    layout.addView(sepSpinner);
 
-        String[] sepOptions = {"Underscore (_)", "Dash (-)", "Space ( )", "None"};
-        android.widget.Spinner sepSpinner = new android.widget.Spinner(this);
-        ArrayAdapter<String> sepAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, sepOptions);
-        sepAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        sepSpinner.setAdapter(sepAdapter);
-        // Set spinner to current setting
-        sepSpinner.setSelection(batchRenameManager.getSeparator().ordinal());
-        layout.addView(sepSpinner);
+    // --- Order ---
+    layout.addView(makeLabel("Order:"));
+    String[] ordOptions = {"Tags Only", "Original + Tags", "Tags + Original"};
+    Spinner ordSpinner = makeSpinner(ordOptions);
+    ordSpinner.setSelection(batchRenameManager.getOrder().ordinal());
+    layout.addView(ordSpinner);
 
-        // Order
-        TextView ordLabel = new TextView(this);
-        ordLabel.setText("Order:");
-        ordLabel.setTextColor(0xFFCCCCCC);
-        layout.addView(ordLabel);
+    // --- Case ---
+    layout.addView(makeLabel("Case:"));
+    String[] caseOptions = {"As-is", "Lowercase", "Uppercase"};
+    Spinner caseSpinner = makeSpinner(caseOptions);
+    caseSpinner.setSelection(batchRenameManager.getCaseMode().ordinal());
+    layout.addView(caseSpinner);
 
-        String[] ordOptions = {"Tags Only", "Original + Tags", "Tags + Original"};
-        android.widget.Spinner ordSpinner = new android.widget.Spinner(this);
-        ArrayAdapter<String> ordAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, ordOptions);
-        ordAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        ordSpinner.setAdapter(ordAdapter);
-        ordSpinner.setSelection(batchRenameManager.getOrder().ordinal());
-        layout.addView(ordSpinner);
+    // --- Prefix ---
+    layout.addView(makeLabel("Prefix (optional):"));
+    EditText prefixEdit = new EditText(this);
+    prefixEdit.setText(batchRenameManager.getPrefix());
+    prefixEdit.setTextColor(0xFFFFFFFF);
+    prefixEdit.setBackground(null);
+    layout.addView(prefixEdit);
 
-        // Case
-        TextView caseLabel = new TextView(this);
-        caseLabel.setText("Case:");
-        caseLabel.setTextColor(0xFFCCCCCC);
-        layout.addView(caseLabel);
+    // --- Suffix ---
+    layout.addView(makeLabel("Suffix (optional):"));
+    EditText suffixEdit = new EditText(this);
+    suffixEdit.setText(batchRenameManager.getSuffix());
+    suffixEdit.setTextColor(0xFFFFFFFF);
+    suffixEdit.setBackground(null);
+    layout.addView(suffixEdit);
 
-        String[] caseOptions = {"As-is", "Lowercase", "Uppercase"};
-        android.widget.Spinner caseSpinner = new android.widget.Spinner(this);
-        ArrayAdapter<String> caseAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, caseOptions);
-        caseAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        caseSpinner.setAdapter(caseAdapter);
-        caseSpinner.setSelection(batchRenameManager.getCaseMode().ordinal());
-        layout.addView(caseSpinner);
+    // --- Include folder ---
+    CheckBox includeFolderCheck = new CheckBox(this);
+    includeFolderCheck.setText("Include folder name");
+    includeFolderCheck.setTextColor(0xFFCCCCCC);
+    includeFolderCheck.setChecked(batchRenameManager.isIncludeFolder());
+    layout.addView(includeFolderCheck);
 
-        // Preview
-        TextView previewLabel = new TextView(this);
-        previewLabel.setText("Preview:");
-        previewLabel.setTextColor(0xFFCCCCCC);
-        layout.addView(previewLabel);
+    // --- Numbering ---
+    layout.addView(makeLabel("Numbering:"));
+    String[] numOptions = {"None", "Sequential", "Date"};
+    Spinner numSpinner = makeSpinner(numOptions);
+    numSpinner.setSelection(batchRenameManager.getNumbering().ordinal());
+    layout.addView(numSpinner);
 
-        TextView previewText = new TextView(this);
-        previewText.setTextColor(0xFF888888);
-        previewText.setTextSize(10f);
-        layout.addView(previewText);
+    // Number position & separator
+    layout.addView(makeLabel("Number position:"));
+    String[] posOptions = {"Before name", "After name"};
+    Spinner numPosSpinner = makeSpinner(posOptions);
+    numPosSpinner.setSelection(batchRenameManager.getNumberPosition().ordinal());
+    layout.addView(numPosSpinner);
 
-        // Update preview on spinner change
-        android.widget.AdapterView.OnItemSelectedListener previewUpdater =
-                new android.widget.AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(android.widget.AdapterView<?> p,
-                                               View v, int pos, long id) {
-                        updateRenamePreview(batchRenameManager, selectedFiles,
-                                sepSpinner, ordSpinner, caseSpinner, previewText);
-                    }
-                    @Override
-                    public void onNothingSelected(android.widget.AdapterView<?> p) {}
-                };
+    EditText numSepEdit = new EditText(this);
+    numSepEdit.setText(batchRenameManager.getNumberSeparator());
+    numSepEdit.setHint("Separator for number");
+    numSepEdit.setTextColor(0xFFFFFFFF);
+    layout.addView(numSepEdit);
 
-        sepSpinner.setOnItemSelectedListener(previewUpdater);
-        ordSpinner.setOnItemSelectedListener(previewUpdater);
-        caseSpinner.setOnItemSelectedListener(previewUpdater);
+    // Sequential settings
+    layout.addView(makeLabel("Sequential start:"));
+    EditText numStartEdit = new EditText(this);
+    numStartEdit.setText(String.valueOf(batchRenameManager.getNumberStart()));
+    numStartEdit.setInputType(InputType.TYPE_CLASS_NUMBER);
+    numStartEdit.setTextColor(0xFFFFFFFF);
+    layout.addView(numStartEdit);
 
-        // Initial preview
-        updateRenamePreview(batchRenameManager, selectedFiles,
-                sepSpinner, ordSpinner, caseSpinner, previewText);
+    layout.addView(makeLabel("Sequential padding (digits):"));
+    EditText numPadEdit = new EditText(this);
+    numPadEdit.setText(String.valueOf(batchRenameManager.getNumberPadding()));
+    numPadEdit.setInputType(InputType.TYPE_CLASS_NUMBER);
+    numPadEdit.setTextColor(0xFFFFFFFF);
+    layout.addView(numPadEdit);
 
-        android.widget.ScrollView sv = new android.widget.ScrollView(this);
-        sv.addView(layout);
+    // Date format
+    layout.addView(makeLabel("Date format:"));
+    EditText dateFmtEdit = new EditText(this);
+    dateFmtEdit.setText(batchRenameManager.getDateFormat());
+    dateFmtEdit.setTextColor(0xFFFFFFFF);
+    layout.addView(dateFmtEdit);
 
-        new AlertDialog.Builder(this)
-                .setTitle("Batch Rename " + selectedFiles.size() + " files")
-                .setView(sv)
-                .setPositiveButton("Rename", (d, w) -> {
-                    applyBatchRename(batchRenameManager, selectedFiles,
-                            sepSpinner, ordSpinner, caseSpinner);
-                })
-                .setNegativeButton("Cancel", (d, w) -> {
-                    // Restore saved settings
-                    batchRenameManager.setSeparator(oldSep);
-                    batchRenameManager.setOrder(oldOrd);
-                    batchRenameManager.setCaseMode(oldCase);
-                })
-                .setNeutralButton("Undo", (d, w) -> {
-                    if (batchRenameManager.canUndo()) {
-                        BatchRenameManager.RenameResult result = batchRenameManager.undo();
-                        Toast.makeText(this,
-                                "Undone: " + result.succeeded + " files",
-                                Toast.LENGTH_SHORT).show();
-                        mediaAdapter.exitSelectMode();
-                        scheduleRefresh();
-                    }
-                })
-                .show();
+    // --- Find & Replace ---
+    layout.addView(makeLabel("Find & Replace (old=new, one per line):"));
+    EditText replacementsEdit = new EditText(this);
+    StringBuilder sb = new StringBuilder();
+    for (Map.Entry<String, String> e : batchRenameManager.getReplacements().entrySet()) {
+        if (sb.length() > 0) sb.append("\n");
+        sb.append(e.getKey()).append("=").append(e.getValue());
     }
+    replacementsEdit.setText(sb.toString());
+    replacementsEdit.setTextColor(0xFFFFFFFF);
+    replacementsEdit.setMinLines(2);
+    layout.addView(replacementsEdit);
 
-    private void updateRenamePreview(BatchRenameManager mgr,
-                                     List<MediaFile> files,
-                                     android.widget.Spinner sep,
-                                     android.widget.Spinner ord,
-                                     android.widget.Spinner cas,
-                                     TextView previewText) {
+    // Preview text
+    layout.addView(makeLabel("Preview:"));
+    TextView previewText = new TextView(this);
+    previewText.setTextColor(0xFF888888);
+    previewText.setTextSize(10f);
+    layout.addView(previewText);
 
-        mgr.setSeparator(sepFromPos(sep.getSelectedItemPosition()));
-        mgr.setOrder(ordFromPos(ord.getSelectedItemPosition()));
-        mgr.setCaseMode(caseFromPos(cas.getSelectedItemPosition()));
+    // --- Listener to update preview ---
+    AdapterView.OnItemSelectedListener previewUpdater = new AdapterView.OnItemSelectedListener() {
+        @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+            refreshPreview();
+        }
+        @Override public void onNothingSelected(AdapterView<?> p) {}
+    };
+    TextWatcher tw = new TextWatcher() {
+        @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+        @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+        @Override public void afterTextChanged(Editable s) { refreshPreview(); }
+    };
 
-        List<BatchRenameManager.RenamePreview> previews = mgr.preview(files);
-        StringBuilder sb = new StringBuilder();
+    sepSpinner.setOnItemSelectedListener(previewUpdater);
+    ordSpinner.setOnItemSelectedListener(previewUpdater);
+    caseSpinner.setOnItemSelectedListener(previewUpdater);
+    numSpinner.setOnItemSelectedListener(previewUpdater);
+    numPosSpinner.setOnItemSelectedListener(previewUpdater);
+    prefixEdit.addTextChangedListener(tw);
+    suffixEdit.addTextChangedListener(tw);
+    includeFolderCheck.setOnCheckedChangeListener((v, checked) -> refreshPreview());
+    numStartEdit.addTextChangedListener(tw);
+    numPadEdit.addTextChangedListener(tw);
+    dateFmtEdit.addTextChangedListener(tw);
+    numSepEdit.addTextChangedListener(tw);
+    replacementsEdit.addTextChangedListener(tw);
+
+    // Helper to apply UI state to manager & update preview
+    final Runnable refreshPreview = () -> {
+        // Apply all UI values to manager
+        batchRenameManager.setSeparator(sepFromPos(sepSpinner.getSelectedItemPosition()));
+        batchRenameManager.setOrder(ordFromPos(ordSpinner.getSelectedItemPosition()));
+        batchRenameManager.setCaseMode(caseFromPos(caseSpinner.getSelectedItemPosition()));
+        batchRenameManager.setPrefix(prefixEdit.getText().toString().trim());
+        batchRenameManager.setSuffix(suffixEdit.getText().toString().trim());
+        batchRenameManager.setIncludeFolder(includeFolderCheck.isChecked());
+
+        switch (numSpinner.getSelectedItemPosition()) {
+            case 0: batchRenameManager.setNumbering(BatchRenameManager.Numbering.NONE); break;
+            case 1: batchRenameManager.setNumbering(BatchRenameManager.Numbering.SEQUENTIAL); break;
+            case 2: batchRenameManager.setNumbering(BatchRenameManager.Numbering.DATE); break;
+        }
+        batchRenameManager.setNumberPosition(numPosSpinner.getSelectedItemPosition() == 0
+                ? BatchRenameManager.NumberPosition.BEFORE : BatchRenameManager.NumberPosition.AFTER);
+        batchRenameManager.setNumberSeparator(numSepEdit.getText().toString());
+
+        try { batchRenameManager.setNumberStart(Integer.parseInt(numStartEdit.getText().toString())); }
+        catch (Exception e) { /* keep old */ }
+        try { batchRenameManager.setNumberPadding(Integer.parseInt(numPadEdit.getText().toString())); }
+        catch (Exception e) { /* keep old */ }
+        batchRenameManager.setDateFormat(dateFmtEdit.getText().toString().trim());
+
+        // Replacements
+        batchRenameManager.getReplacements().clear();
+        String replText = replacementsEdit.getText().toString().trim();
+        if (!replText.isEmpty()) {
+            for (String line : replText.split("\n")) {
+                String[] parts = line.split("=", 2);
+                if (parts.length == 2) {
+                    batchRenameManager.addReplacement(parts[0], parts[1]);
+                }
+            }
+        }
+
+        // Build preview
+        List<BatchRenameManager.RenamePreview> previews = batchRenameManager.preview(selectedFiles);
+        StringBuilder psb = new StringBuilder();
         int shown = Math.min(previews.size(), 5);
         for (int i = 0; i < shown; i++) {
             BatchRenameManager.RenamePreview p = previews.get(i);
-            sb.append(p.originalName)
-                    .append(" → ")
-                    .append(p.newName);
-            if (p.hasConflict) sb.append(" ⚠ conflict");
-            sb.append("\n");
+            psb.append(p.originalName).append(" → ").append(p.newName);
+            if (p.hasConflict) psb.append(" ⚠ conflict");
+            psb.append("\n");
         }
-        if (previews.size() > 5) {
-            sb.append("... and ").append(previews.size() - 5).append(" more");
-        }
-        previewText.setText(sb.toString());
-    }
+        if (previews.size() > 5) psb.append("... and ").append(previews.size() - 5).append(" more");
+        previewText.setText(psb.toString());
+    };
 
-    private void applyBatchRename(BatchRenameManager mgr,
-                                  List<MediaFile> files,
-                                  android.widget.Spinner sep,
-                                  android.widget.Spinner ord,
-                                  android.widget.Spinner cas) {
+    // Initial preview
+    mainHandler.post(refreshPreview);
 
-        mgr.setSeparator(sepFromPos(sep.getSelectedItemPosition()));
-        mgr.setOrder(ordFromPos(ord.getSelectedItemPosition()));
-        mgr.setCaseMode(caseFromPos(cas.getSelectedItemPosition()));
+    ScrollView sv = new ScrollView(this);
+    sv.addView(layout);
 
-        List<BatchRenameManager.RenamePreview> previews = mgr.preview(files);
-        BatchRenameManager.RenameResult result = mgr.apply(previews);
+    new AlertDialog.Builder(this)
+        .setTitle("Batch Rename " + selectedFiles.size() + " files")
+        .setView(sv)
+        .setPositiveButton("Rename", (d, w) -> {
+            // Apply is already done by the preview updater; we just commit
+            List<BatchRenameManager.RenamePreview> previews = batchRenameManager.preview(selectedFiles);
+            BatchRenameManager.RenameResult result = batchRenameManager.apply(previews);
+            Toast.makeText(this, "Renamed: " + result.succeeded
+                + (result.failed > 0 ? "  Failed: " + result.failed : ""), Toast.LENGTH_SHORT).show();
+            mediaAdapter.exitSelectMode();
+            btnScan.setText("SCAN");
+            btnScan.setOnClickListener(v -> startScan());
+            scheduleRefresh();
+        })
+        .setNegativeButton("Cancel", (d, w) -> {
+            // Restore all saved settings
+            batchRenameManager.setSeparator(oldSep);
+            batchRenameManager.setOrder(oldOrd);
+            batchRenameManager.setCaseMode(oldCase);
+            batchRenameManager.setPrefix(oldPrefix);
+            batchRenameManager.setSuffix(oldSuffix);
+            batchRenameManager.setIncludeFolder(oldIncludeFolder);
+            batchRenameManager.setNumbering(oldNum);
+            batchRenameManager.setNumberStart(oldNumStart);
+            batchRenameManager.setNumberPadding(oldNumPad);
+            batchRenameManager.setDateFormat(oldDateFormat);
+            batchRenameManager.setNumberPosition(oldNumPos);
+            batchRenameManager.setNumberSeparator(oldNumSep);
+            batchRenameManager.getReplacements().clear();
+            batchRenameManager.getReplacements().putAll(oldReplacements);
+        })
+        .setNeutralButton("Undo", (d, w) -> {
+            if (batchRenameManager.canUndo()) {
+                BatchRenameManager.RenameResult result = batchRenameManager.undo();
+                Toast.makeText(this, "Undone: " + result.succeeded + " files", Toast.LENGTH_SHORT).show();
+                mediaAdapter.exitSelectMode();
+                scheduleRefresh();
+            }
+        })
+        .show();
+}
 
-        Toast.makeText(this,
-                "Renamed: " + result.succeeded
-                        + (result.failed > 0 ? "  Failed: " + result.failed : ""),
-                Toast.LENGTH_SHORT).show();
+// Helper to create a label TextView
+private TextView makeLabel(String text) {
+    TextView tv = new TextView(this);
+    tv.setText(text);
+    tv.setTextColor(0xFFCCCCCC);
+    tv.setTextSize(12f);
+    return tv;
+}
 
-        mediaAdapter.exitSelectMode();
-        btnScan.setText("SCAN");
-        btnScan.setOnClickListener(v -> startScan());
-        scheduleRefresh();
-    }
+// Helper to create a Spinner
+private Spinner makeSpinner(String[] options) {
+    Spinner sp = new Spinner(this);
+    ArrayAdapter<String> ad = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, options);
+    ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+    sp.setAdapter(ad);
+    return sp;
+}
 
     private BatchRenameManager.Separator sepFromPos(int pos) {
         switch (pos) {
