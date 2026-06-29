@@ -157,12 +157,13 @@ public class MediaIndexer {
                     }
                 }
             }
+                        
             for (String path : toRemove) {
                 removeFromIndex(path);
                 if (listener != null) listener.onFileRemoved(path);
-            }
-        });
-    }
+        }
+    });
+}
 
     // ── Clean rescan — removes ghost files ────────────────────────────────────
 
