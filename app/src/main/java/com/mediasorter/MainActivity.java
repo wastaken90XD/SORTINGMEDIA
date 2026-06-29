@@ -30,6 +30,7 @@ import com.mediasorter.models.TagList;
 import com.mediasorter.models.Tag;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public class MainActivity extends Activity
         implements FolderWatcher.Listener, MediaIndexer.IndexListener {
@@ -652,7 +653,6 @@ public class MainActivity extends Activity
     final String oldNumSep = batchRenameManager.getNumberSeparator();
     final Map<String, String> oldReplacements = batchRenameManager.getReplacements();
 
-    // Build layout programmatically
     LinearLayout layout = new LinearLayout(this);
     layout.setOrientation(LinearLayout.VERTICAL);
     layout.setPadding(32, 16, 32, 16);
@@ -660,21 +660,21 @@ public class MainActivity extends Activity
     // --- Separator ---
     layout.addView(makeLabel("Separator:"));
     String[] sepOptions = {"Underscore (_)", "Dash (-)", "Space ( )", "None"};
-    Spinner sepSpinner = makeSpinner(sepOptions);
+    android.widget.Spinner sepSpinner = makeSpinner(sepOptions);
     sepSpinner.setSelection(batchRenameManager.getSeparator().ordinal());
     layout.addView(sepSpinner);
 
     // --- Order ---
     layout.addView(makeLabel("Order:"));
     String[] ordOptions = {"Tags Only", "Original + Tags", "Tags + Original"};
-    Spinner ordSpinner = makeSpinner(ordOptions);
+    android.widget.Spinner ordSpinner = makeSpinner(ordOptions);
     ordSpinner.setSelection(batchRenameManager.getOrder().ordinal());
     layout.addView(ordSpinner);
 
     // --- Case ---
     layout.addView(makeLabel("Case:"));
     String[] caseOptions = {"As-is", "Lowercase", "Uppercase"};
-    Spinner caseSpinner = makeSpinner(caseOptions);
+    android.widget.Spinner caseSpinner = makeSpinner(caseOptions);
     caseSpinner.setSelection(batchRenameManager.getCaseMode().ordinal());
     layout.addView(caseSpinner);
 
@@ -683,7 +683,6 @@ public class MainActivity extends Activity
     EditText prefixEdit = new EditText(this);
     prefixEdit.setText(batchRenameManager.getPrefix());
     prefixEdit.setTextColor(0xFFFFFFFF);
-    prefixEdit.setBackground(null);
     layout.addView(prefixEdit);
 
     // --- Suffix ---
@@ -691,11 +690,10 @@ public class MainActivity extends Activity
     EditText suffixEdit = new EditText(this);
     suffixEdit.setText(batchRenameManager.getSuffix());
     suffixEdit.setTextColor(0xFFFFFFFF);
-    suffixEdit.setBackground(null);
     layout.addView(suffixEdit);
 
     // --- Include folder ---
-    CheckBox includeFolderCheck = new CheckBox(this);
+    android.widget.CheckBox includeFolderCheck = new android.widget.CheckBox(this);
     includeFolderCheck.setText("Include folder name");
     includeFolderCheck.setTextColor(0xFFCCCCCC);
     includeFolderCheck.setChecked(batchRenameManager.isIncludeFolder());
@@ -704,14 +702,14 @@ public class MainActivity extends Activity
     // --- Numbering ---
     layout.addView(makeLabel("Numbering:"));
     String[] numOptions = {"None", "Sequential", "Date"};
-    Spinner numSpinner = makeSpinner(numOptions);
+    android.widget.Spinner numSpinner = makeSpinner(numOptions);
     numSpinner.setSelection(batchRenameManager.getNumbering().ordinal());
     layout.addView(numSpinner);
 
     // Number position & separator
     layout.addView(makeLabel("Number position:"));
     String[] posOptions = {"Before name", "After name"};
-    Spinner numPosSpinner = makeSpinner(posOptions);
+    android.widget.Spinner numPosSpinner = makeSpinner(posOptions);
     numPosSpinner.setSelection(batchRenameManager.getNumberPosition().ordinal());
     layout.addView(numPosSpinner);
 
@@ -725,14 +723,14 @@ public class MainActivity extends Activity
     layout.addView(makeLabel("Sequential start:"));
     EditText numStartEdit = new EditText(this);
     numStartEdit.setText(String.valueOf(batchRenameManager.getNumberStart()));
-    numStartEdit.setInputType(InputType.TYPE_CLASS_NUMBER);
+    numStartEdit.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
     numStartEdit.setTextColor(0xFFFFFFFF);
     layout.addView(numStartEdit);
 
     layout.addView(makeLabel("Sequential padding (digits):"));
     EditText numPadEdit = new EditText(this);
     numPadEdit.setText(String.valueOf(batchRenameManager.getNumberPadding()));
-    numPadEdit.setInputType(InputType.TYPE_CLASS_NUMBER);
+    numPadEdit.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
     numPadEdit.setTextColor(0xFFFFFFFF);
     layout.addView(numPadEdit);
 
@@ -758,100 +756,111 @@ public class MainActivity extends Activity
 
     // Preview text
     layout.addView(makeLabel("Preview:"));
-    TextView previewText = new TextView(this);
+    final TextView previewText = new TextView(this);
     previewText.setTextColor(0xFF888888);
     previewText.setTextSize(10f);
     layout.addView(previewText);
 
-    // --- Listener to update preview ---
-    AdapterView.OnItemSelectedListener previewUpdater = new AdapterView.OnItemSelectedListener() {
-        @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-            refreshPreview();
+    // --- Runnable that updates preview after reading UI values ---
+    final Runnable refreshPreview = new Runnable() {
+        @Override public void run() {
+            // Apply all UI values to manager
+            batchRenameManager.setSeparator(sepFromPos(sepSpinner.getSelectedItemPosition()));
+            batchRenameManager.setOrder(ordFromPos(ordSpinner.getSelectedItemPosition()));
+            batchRenameManager.setCaseMode(caseFromPos(caseSpinner.getSelectedItemPosition()));
+            batchRenameManager.setPrefix(prefixEdit.getText().toString().trim());
+            batchRenameManager.setSuffix(suffixEdit.getText().toString().trim());
+            batchRenameManager.setIncludeFolder(includeFolderCheck.isChecked());
+
+            switch (numSpinner.getSelectedItemPosition()) {
+                case 0: batchRenameManager.setNumbering(BatchRenameManager.Numbering.NONE); break;
+                case 1: batchRenameManager.setNumbering(BatchRenameManager.Numbering.SEQUENTIAL); break;
+                case 2: batchRenameManager.setNumbering(BatchRenameManager.Numbering.DATE); break;
+            }
+            batchRenameManager.setNumberPosition(
+                    numPosSpinner.getSelectedItemPosition() == 0
+                    ? BatchRenameManager.NumberPosition.BEFORE
+                    : BatchRenameManager.NumberPosition.AFTER);
+            batchRenameManager.setNumberSeparator(numSepEdit.getText().toString());
+
+            try { batchRenameManager.setNumberStart(Integer.parseInt(numStartEdit.getText().toString())); }
+            catch (Exception e) { /* keep old */ }
+            try { batchRenameManager.setNumberPadding(Integer.parseInt(numPadEdit.getText().toString())); }
+            catch (Exception e) { /* keep old */ }
+            batchRenameManager.setDateFormat(dateFmtEdit.getText().toString().trim());
+
+            // Replacements
+            batchRenameManager.getReplacements().clear();
+            String replText = replacementsEdit.getText().toString().trim();
+            if (!replText.isEmpty()) {
+                for (String line : replText.split("\n")) {
+                    String[] parts = line.split("=", 2);
+                    if (parts.length == 2) {
+                        batchRenameManager.addReplacement(parts[0], parts[1]);
+                    }
+                }
+            }
+
+            // Build preview
+            List<BatchRenameManager.RenamePreview> previews = batchRenameManager.preview(selectedFiles);
+            StringBuilder psb = new StringBuilder();
+            int shown = Math.min(previews.size(), 5);
+            for (int i = 0; i < shown; i++) {
+                BatchRenameManager.RenamePreview p = previews.get(i);
+                psb.append(p.originalName).append(" → ").append(p.newName);
+                if (p.hasConflict) psb.append(" ⚠ conflict");
+                psb.append("\n");
+            }
+            if (previews.size() > 5) psb.append("... and ").append(previews.size() - 5).append(" more");
+            previewText.setText(psb.toString());
         }
-        @Override public void onNothingSelected(AdapterView<?> p) {}
     };
+
+    // --- Listeners ---
+    android.widget.AdapterView.OnItemSelectedListener spinnerListener = new android.widget.AdapterView.OnItemSelectedListener() {
+        @Override public void onItemSelected(android.widget.AdapterView<?> p, View v, int pos, long id) {
+            refreshPreview.run();
+        }
+        @Override public void onNothingSelected(android.widget.AdapterView<?> p) {}
+    };
+
     TextWatcher tw = new TextWatcher() {
         @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
         @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
-        @Override public void afterTextChanged(Editable s) { refreshPreview(); }
+        @Override public void afterTextChanged(Editable s) { refreshPreview.run(); }
     };
 
-    sepSpinner.setOnItemSelectedListener(previewUpdater);
-    ordSpinner.setOnItemSelectedListener(previewUpdater);
-    caseSpinner.setOnItemSelectedListener(previewUpdater);
-    numSpinner.setOnItemSelectedListener(previewUpdater);
-    numPosSpinner.setOnItemSelectedListener(previewUpdater);
+    sepSpinner.setOnItemSelectedListener(spinnerListener);
+    ordSpinner.setOnItemSelectedListener(spinnerListener);
+    caseSpinner.setOnItemSelectedListener(spinnerListener);
+    numSpinner.setOnItemSelectedListener(spinnerListener);
+    numPosSpinner.setOnItemSelectedListener(spinnerListener);
+
     prefixEdit.addTextChangedListener(tw);
     suffixEdit.addTextChangedListener(tw);
-    includeFolderCheck.setOnCheckedChangeListener((v, checked) -> refreshPreview());
     numStartEdit.addTextChangedListener(tw);
     numPadEdit.addTextChangedListener(tw);
     dateFmtEdit.addTextChangedListener(tw);
     numSepEdit.addTextChangedListener(tw);
     replacementsEdit.addTextChangedListener(tw);
 
-    // Helper to apply UI state to manager & update preview
-    final Runnable refreshPreview = () -> {
-        // Apply all UI values to manager
-        batchRenameManager.setSeparator(sepFromPos(sepSpinner.getSelectedItemPosition()));
-        batchRenameManager.setOrder(ordFromPos(ordSpinner.getSelectedItemPosition()));
-        batchRenameManager.setCaseMode(caseFromPos(caseSpinner.getSelectedItemPosition()));
-        batchRenameManager.setPrefix(prefixEdit.getText().toString().trim());
-        batchRenameManager.setSuffix(suffixEdit.getText().toString().trim());
-        batchRenameManager.setIncludeFolder(includeFolderCheck.isChecked());
-
-        switch (numSpinner.getSelectedItemPosition()) {
-            case 0: batchRenameManager.setNumbering(BatchRenameManager.Numbering.NONE); break;
-            case 1: batchRenameManager.setNumbering(BatchRenameManager.Numbering.SEQUENTIAL); break;
-            case 2: batchRenameManager.setNumbering(BatchRenameManager.Numbering.DATE); break;
+    includeFolderCheck.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+        @Override public void onCheckedChanged(android.widget.CompoundButton buttonView, boolean isChecked) {
+            refreshPreview.run();
         }
-        batchRenameManager.setNumberPosition(numPosSpinner.getSelectedItemPosition() == 0
-                ? BatchRenameManager.NumberPosition.BEFORE : BatchRenameManager.NumberPosition.AFTER);
-        batchRenameManager.setNumberSeparator(numSepEdit.getText().toString());
-
-        try { batchRenameManager.setNumberStart(Integer.parseInt(numStartEdit.getText().toString())); }
-        catch (Exception e) { /* keep old */ }
-        try { batchRenameManager.setNumberPadding(Integer.parseInt(numPadEdit.getText().toString())); }
-        catch (Exception e) { /* keep old */ }
-        batchRenameManager.setDateFormat(dateFmtEdit.getText().toString().trim());
-
-        // Replacements
-        batchRenameManager.getReplacements().clear();
-        String replText = replacementsEdit.getText().toString().trim();
-        if (!replText.isEmpty()) {
-            for (String line : replText.split("\n")) {
-                String[] parts = line.split("=", 2);
-                if (parts.length == 2) {
-                    batchRenameManager.addReplacement(parts[0], parts[1]);
-                }
-            }
-        }
-
-        // Build preview
-        List<BatchRenameManager.RenamePreview> previews = batchRenameManager.preview(selectedFiles);
-        StringBuilder psb = new StringBuilder();
-        int shown = Math.min(previews.size(), 5);
-        for (int i = 0; i < shown; i++) {
-            BatchRenameManager.RenamePreview p = previews.get(i);
-            psb.append(p.originalName).append(" → ").append(p.newName);
-            if (p.hasConflict) psb.append(" ⚠ conflict");
-            psb.append("\n");
-        }
-        if (previews.size() > 5) psb.append("... and ").append(previews.size() - 5).append(" more");
-        previewText.setText(psb.toString());
-    };
+    });
 
     // Initial preview
     mainHandler.post(refreshPreview);
 
-    ScrollView sv = new ScrollView(this);
+    android.widget.ScrollView sv = new android.widget.ScrollView(this);
     sv.addView(layout);
 
     new AlertDialog.Builder(this)
         .setTitle("Batch Rename " + selectedFiles.size() + " files")
         .setView(sv)
         .setPositiveButton("Rename", (d, w) -> {
-            // Apply is already done by the preview updater; we just commit
+            // The preview updater has already applied the settings, so just commit
             List<BatchRenameManager.RenamePreview> previews = batchRenameManager.preview(selectedFiles);
             BatchRenameManager.RenameResult result = batchRenameManager.apply(previews);
             Toast.makeText(this, "Renamed: " + result.succeeded
@@ -862,7 +871,7 @@ public class MainActivity extends Activity
             scheduleRefresh();
         })
         .setNegativeButton("Cancel", (d, w) -> {
-            // Restore all saved settings
+            // Restore original settings
             batchRenameManager.setSeparator(oldSep);
             batchRenameManager.setOrder(oldOrd);
             batchRenameManager.setCaseMode(oldCase);
@@ -888,7 +897,7 @@ public class MainActivity extends Activity
         })
         .show();
 }
-
+                
 // Helper to create a label TextView
 private TextView makeLabel(String text) {
     TextView tv = new TextView(this);
