@@ -177,13 +177,22 @@ public class MediaIndexer {
 
             // Remove ghosts
             List<String> toRemove = new ArrayList<>();
+            String normalizedFolder = folderPath.endsWith("/")
+                ? folderPath
+                : folderPath + "/";
+
             synchronized (index) {
                 for (MediaFile mf : index) {
-                    if (mf.getPath().startsWith(folderPath)
+                    if (mf.getPath().startsWith(normalizedFolder)
                             && !onDisk.contains(mf.getPath())) {
                         toRemove.add(mf.getPath());
                     }
                 }
+            }
+            
+            for (String path : toRemove) {
+                removeFromIndex(path);
+                if (listener != null) listener.onFileRemoved(path);
             }
             
             for (String path : toRemove) {
