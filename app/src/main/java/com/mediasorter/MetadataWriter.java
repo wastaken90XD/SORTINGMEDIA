@@ -378,6 +378,25 @@ public class MetadataWriter {
              |  (data[offset+3] & 0xFF);
     }
 
+    private static byte[] readAllBytes(File file) {
+    if (!file.exists() || file.length() > Integer.MAX_VALUE) return null;
+    try (FileInputStream fis = new FileInputStream(file)) {
+        byte[] data = new byte[(int) file.length()];
+        int offset = 0;
+        int remaining = data.length;
+        while (remaining > 0) {
+            int read = fis.read(data, offset, remaining);
+            if (read < 0) break;
+            offset += read;
+            remaining -= read;
+        }
+        return (offset == data.length) ? data : Arrays.copyOf(data, offset);
+    } catch (IOException e) {
+        Log.e(TAG, "readAllBytes failed: " + e.getMessage());
+        return null;
+    }
+}
+
     private static String escapeXml(String s) {
         return s.replace("&", "&amp;")
                 .replace("<", "&lt;")
