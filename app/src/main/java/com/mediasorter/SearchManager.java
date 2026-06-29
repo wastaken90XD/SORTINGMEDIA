@@ -6,13 +6,12 @@ import java.util.List;
 
 public class SearchManager {
 
-    private List<MediaFile> fullList = new ArrayList<>();
+    private volatile List<MediaFile> fullList = new ArrayList<>();
 
     public void setFullList(List<MediaFile> files) {
-        this.fullList = files;
+        // Always store a snapshot to avoid external modification
+        this.fullList = new ArrayList<>(files);
     }
-
-    // ── Search ────────────────────────────────────────────────────────────────
 
     public List<MediaFile> search(String query) {
         if (query == null || query.trim().isEmpty()) {
@@ -29,20 +28,18 @@ public class SearchManager {
         return result;
     }
 
-    // All terms must match — AND logic
     private boolean matchesAll(MediaFile f, String[] terms) {
-    for (String term : terms) {
-        if (term.startsWith("-")) {
-            // Exclusion — file must NOT match this term
-            String exclude = term.substring(1);
-            if (!exclude.isEmpty() && matchesTerm(f, exclude)) return false;
-        } else {
-            // Inclusion — file must match this term
-            if (!matchesTerm(f, term)) return false;
+        for (String term : terms) {
+            if (term.startsWith("-")) {
+                String exclude = term.substring(1);
+                if (!exclude.isEmpty() && matchesTerm(f, exclude)) return false;
+            } else {
+                if (!matchesTerm(f, term)) return false;
+            }
         }
+        return true;
     }
-    return true;
-}
+
     private boolean matchesTerm(MediaFile f, String term) {
         // Filename
         if (f.getName().toLowerCase().contains(term)) return true;
@@ -52,24 +49,24 @@ public class SearchManager {
             if (tag.toLowerCase().contains(term)) return true;
         }
 
-        // Type filter — e.g. "type:image" or "type:video"
+        // Type filter
         if (term.startsWith("type:")) {
             String type = term.substring(5);
             return f.getType().name().toLowerCase().contains(type);
         }
 
-        // Extension filter — e.g. "ext:jpg"
+        // Extension filter (case‑insensitive)
         if (term.startsWith("ext:")) {
-            String ext = term.substring(4);
+            String ext = term.substring(4).toLowerCase();
             return f.getName().toLowerCase().endsWith("." + ext);
         }
 
-        // Size filter — e.g. "size:>1mb" or "size:<500kb"
+        // Size filter
         if (term.startsWith("size:")) {
             return matchesSize(f, term.substring(5));
         }
 
-        // Tagged/untagged filter
+        // Tagged/untagged
         if (term.equals("tagged"))   return !f.getTags().isEmpty();
         if (term.equals("untagged")) return f.getTags().isEmpty();
 
@@ -80,7 +77,7 @@ public class SearchManager {
         try {
             boolean gt = sizeExpr.startsWith(">");
             boolean lt = sizeExpr.startsWith("<");
-            String  val = sizeExpr.substring(1).toLowerCase();
+            String  val = sizeExpr.substring(1).trim().toLowerCase();
 
             long bytes = parseSize(val);
             if (gt) return f.getSize() > bytes;
