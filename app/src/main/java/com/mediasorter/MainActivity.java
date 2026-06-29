@@ -18,6 +18,7 @@ import android.widget.FrameLayout;
 import android.widget.PopupMenu;
 import android.widget.TextView;
 import android.widget.LinearLayout;
+import android.widget.Toast;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import com.mediasorter.adapters.MediaAdapter;
@@ -26,18 +27,14 @@ import com.mediasorter.adapters.TagAdapter;
 import com.mediasorter.models.Group;
 import com.mediasorter.models.MediaFile;
 import com.mediasorter.models.TagList;
+import com.mediasorter.models.Tag;
 import java.util.ArrayList;
 import java.util.List;
-import com.mediasorter.BatchRenameManager;
-import android.widget.Toast;
-import com.mediasorter.ColorAnalyzer;
-import com.mediasorter.models.Tag;
-
 
 public class MainActivity extends Activity
         implements FolderWatcher.Listener, MediaIndexer.IndexListener {
 
-    private BatchRenameManager batchRenameManager = new BatchRenameManager();            
+    private BatchRenameManager batchRenameManager = new BatchRenameManager();
     private MediaIndexer    indexer;
     private TagManager      tagManager;
     private TagListManager  tagListManager;
@@ -74,14 +71,15 @@ public class MainActivity extends Activity
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     @Override
-protected void onCreate(Bundle savedInstanceState) {
-    CrashLogger.init(this);
-    super.onCreate(savedInstanceState);
-    setContentView(R.layout.activity_main);
-    initManagers();  // ← must be first
-    initAdapters();  // ← depends on thumbnailLoader from initManagers
-    initViews();
-}
+    protected void onCreate(Bundle savedInstanceState) {
+        // Use Application context to avoid memory leak
+        CrashLogger.init(getApplicationContext());
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        initManagers();  // ← must be first
+        initAdapters();  // ← depends on thumbnailLoader from initManagers
+        initViews();
+    }
 
     @Override
     protected void onResume() {
@@ -101,84 +99,84 @@ protected void onCreate(Bundle savedInstanceState) {
         thumbnailLoader.shutdown();
     }
 
-     @Override
-        public void onBackPressed() {
+    @Override
+    public void onBackPressed() {
         if (mediaAdapter.isSelectMode()) {
-        mediaAdapter.exitSelectMode();
-        btnScan.setText("SCAN");
-        btnScan.setOnClickListener(v -> startScan());
-    } else {
-        super.onBackPressed();
+            mediaAdapter.exitSelectMode();
+            btnScan.setText("SCAN");
+            btnScan.setOnClickListener(v -> startScan());
+        } else {
+            super.onBackPressed();
+        }
     }
-}
-     
 
     // ── Init ──────────────────────────────────────────────────────────────────
 
     private void initManagers() {
-    indexer         = new MediaIndexer();
-    tagManager      = new TagManager(this);
-    tagListManager  = new TagListManager(this);
-    folderManager   = new FolderManager(this);
-    folderWatcher   = new FolderWatcher(this);
-    searchManager   = new SearchManager();
-    groupManager    = new GroupManager();
-    cacheManager    = new CacheManager(this);
-    thumbnailLoader = new ThumbnailLoader(this);
-    sortManager     = new SortManager();
-    fileStatus      = new FileStatus(this);
-    filterManager   = new FilterManager(fileStatus);
-    gestureSettings = new GestureSettings(this);
-    windowManager   = new WindowManager(getWindowSize());
-    indexer.setListener(this);
+        indexer         = new MediaIndexer();
+        tagManager      = new TagManager(this);
+        tagListManager  = new TagListManager(this);
+        folderManager   = new FolderManager(this);
+        folderWatcher   = new FolderWatcher(this);
+        searchManager   = new SearchManager();
+        groupManager    = new GroupManager();
+        cacheManager    = new CacheManager(this);
+        thumbnailLoader = new ThumbnailLoader(this);
+        sortManager     = new SortManager();
+        fileStatus      = new FileStatus(this);
+        filterManager   = new FilterManager(fileStatus);
+        gestureSettings = new GestureSettings(this);
+        windowManager   = new WindowManager(getWindowSize());
+        indexer.setListener(this);
 
-    // Auto-refresh tag list on any change
-    tagManager.setTagChangeListener(() ->
-        mainHandler.post(() ->
-            tagAdapter.setTags(tagManager.getAllTags())));
-}
+        // Auto-refresh tag list on any change
+        tagManager.setTagChangeListener(() ->
+                mainHandler.post(() ->
+                        tagAdapter.setTags(tagManager.getAllTags())));
+    }
 
     private int getWindowSize() {
         return getSharedPreferences("window_prefs", MODE_PRIVATE)
-            .getInt("window_size", 20);
+                .getInt("window_size", 20);
     }
 
-private void initAdapters() {
-    mediaAdapter = new MediaAdapter(thumbnailLoader, this::onFileSelected);
-    tagAdapter   = new TagAdapter(this::onTagToggled);
+    private void initAdapters() {
+        mediaAdapter = new MediaAdapter(thumbnailLoader, this::onFileSelected);
+        tagAdapter   = new TagAdapter(this::onTagToggled);
 
-    mediaAdapter.setSelectionListener(count -> {
-        mainHandler.post(() -> {
-            if (count > 0) {
-                btnScan.setText(count + " selected");
-                btnScan.setOnClickListener(v ->
-                    new AlertDialog.Builder(this)
-                        .setTitle("Batch action")
-                        .setItems(
-                            new String[]{
-                                "Select all",
-                                "Deselect all",
-                                "Tag selected",
-                                "Rename selected",
-                                "Analyze colors",
-                                "Cancel"
-                            },
-                            (d, which) -> {
-                                if (which == 0)      mediaAdapter.selectAll();
-                                else if (which == 1) mediaAdapter.deselectAll();
-                                else if (which == 2) showBatchTagDialog();
-                                else if (which == 3) showBatchRenameDialog();
-                                else if (which == 4) showColorAnalysisDialog();
-                                else                 mediaAdapter.exitSelectMode();
-                            })
-                        .show());
-            } else {
-                btnScan.setText("SCAN");
-                btnScan.setOnClickListener(v -> startScan());
-            }
+        mediaAdapter.setSelectionListener(count -> {
+            mainHandler.post(() -> {
+                if (count > 0) {
+                    btnScan.setText(count + " selected");
+                    btnScan.setOnClickListener(v ->
+                            new AlertDialog.Builder(this)
+                                    .setTitle("Batch action")
+                                    .setItems(
+                                            new String[]{
+                                                    "Select all",
+                                                    "Deselect all",
+                                                    "Tag selected",
+                                                    "Rename selected",
+                                                    "Analyze colors",
+                                                    "Cancel"
+                                            },
+                                            (d, which) -> {
+                                                if (which == 0)      mediaAdapter.selectAll();
+                                                else if (which == 1) mediaAdapter.deselectAll();
+                                                else if (which == 2) showBatchTagDialog();
+                                                else if (which == 3) showBatchRenameDialog();
+                                                else if (which == 4) showColorAnalysisDialog();
+                                                else                 mediaAdapter.exitSelectMode();
+                                            })
+                                    .show());
+                } else {
+                    btnScan.setText("SCAN");
+                    btnScan.setOnClickListener(v -> startScan());
+                }
+            });
         });
-    });
-}
+    }
+
     private void initViews() {
         RecyclerView fileBrowser = findViewById(R.id.fileBrowser);
         fileBrowser.setLayoutManager(new LinearLayoutManager(this));
@@ -193,55 +191,56 @@ private void initAdapters() {
         previewManager = new PreviewManager(this, previewContainer, fileStatus);
 
         previewManager.setActionListener(new PreviewManager.ActionListener() {
-    @Override public void onSkip()   { handleSkip(); }
-    @Override public void onFlag()   { handleFlag(); }
-    @Override public void onDone()   { handleDone(); }
-    @Override public void onNext()   { navigateNext(); }
-    @Override public void onPrev()   { navigatePrev(); }
-    @Override public void onDpadUp()     { executeDpad(gestureSettings.getDpadUp()); }
-    @Override public void onDpadDown()   { executeDpad(gestureSettings.getDpadDown()); }
-    @Override public void onDpadLeft()   { executeDpad(gestureSettings.getDpadLeft()); }
-    @Override public void onDpadRight()  { executeDpad(gestureSettings.getDpadRight()); }
-    @Override public void onDpadCenter() { executeDpad(gestureSettings.getDpadCenter()); }
-    @Override public void onTagListChanged(int index) {
-        tagListManager.setActiveIndex(index);
-        refreshSidePanel();
-    }
-});
+            @Override public void onSkip()   { handleSkip(); }
+            @Override public void onFlag()   { handleFlag(); }
+            @Override public void onDone()   { handleDone(); }
+            @Override public void onNext()   { navigateNext(); }
+            @Override public void onPrev()   { navigatePrev(); }
+            @Override public void onDpadUp()     { executeDpad(gestureSettings.getDpadUp()); }
+            @Override public void onDpadDown()   { executeDpad(gestureSettings.getDpadDown()); }
+            @Override public void onDpadLeft()   { executeDpad(gestureSettings.getDpadLeft()); }
+            @Override public void onDpadRight()  { executeDpad(gestureSettings.getDpadRight()); }
+            @Override public void onDpadCenter() { executeDpad(gestureSettings.getDpadCenter()); }
+            @Override public void onTagListChanged(int index) {
+                tagListManager.setActiveIndex(index);
+                refreshSidePanel();
+            }
+        });
+
         // Side panel tag list click
         previewManager.getSidePanelAdapter().setListener((tagName, applied) ->
-            applyTagToCurrentFile(tagName, applied));
+                applyTagToCurrentFile(tagName, applied));
 
         // Tag list spinner
         refreshTagListSpinner();
 
         // Swipe gesture
         GestureDetector gestureDetector = new GestureDetector(this,
-        new GestureDetector.SimpleOnGestureListener() {
-        @Override
-        public boolean onFling(MotionEvent e1, MotionEvent e2,
-                               float vX, float vY) {
-            if (e1 == null || e2 == null) return false;
-            float dx = e2.getX() - e1.getX();
-            float dy = e2.getY() - e1.getY();
-            if (Math.abs(dx) > Math.abs(dy)) {
-                if (Math.abs(dx) > 100) {
-                    executeSwipe(dx < 0
-                        ? gestureSettings.getLeft()
-                        : gestureSettings.getRight());
-                    return true;
-                }
-            } else {
-                if (Math.abs(dy) > 100) {
-                    executeSwipe(dy < 0
-                        ? gestureSettings.getUp()
-                        : gestureSettings.getDown());
-                    return true;
-                }
-            }
-            return false;
-        }
-    });
+                new GestureDetector.SimpleOnGestureListener() {
+                    @Override
+                    public boolean onFling(MotionEvent e1, MotionEvent e2,
+                                           float vX, float vY) {
+                        if (e1 == null || e2 == null) return false;
+                        float dx = e2.getX() - e1.getX();
+                        float dy = e2.getY() - e1.getY();
+                        if (Math.abs(dx) > Math.abs(dy)) {
+                            if (Math.abs(dx) > 100) {
+                                executeSwipe(dx < 0
+                                        ? gestureSettings.getLeft()
+                                        : gestureSettings.getRight());
+                                return true;
+                            }
+                        } else {
+                            if (Math.abs(dy) > 100) {
+                                executeSwipe(dy < 0
+                                        ? gestureSettings.getUp()
+                                        : gestureSettings.getDown());
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                });
 
         previewManager.setSwipeDetector(gestureDetector);
 
@@ -257,13 +256,13 @@ private void initAdapters() {
         });
 
         ((EditText) findViewById(R.id.tagSearch)).addTextChangedListener(
-            new TextWatcher() {
-                @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
-                @Override public void afterTextChanged(Editable s) {}
-                @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
-                    tagAdapter.setTags(tagManager.searchTags(s.toString()));
-                }
-            });
+                new TextWatcher() {
+                    @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+                    @Override public void afterTextChanged(Editable s) {}
+                    @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                        tagAdapter.setTags(tagManager.searchTags(s.toString()));
+                    }
+                });
 
         Button btnAddTag = findViewById(R.id.btnAddTag);
         btnAddTag.setOnClickListener(v -> {
@@ -275,19 +274,8 @@ private void initAdapters() {
             input.setText("");
         });
 
-        Button btnToggleTagPanel = findViewById(R.id.btnToggleTagPanel);
-        LinearLayout tagPanel    = findViewById(R.id.tagPanel);
-        if (btnToggleTagPanel != null && tagPanel != null) {
-                tagPanel.setVisibility(View.GONE);
-                btnToggleTagPanel.setOnClickListener(v -> {
-        boolean visible = tagPanel.getVisibility() == View.VISIBLE;
-        tagPanel.setVisibility(visible ? View.GONE : View.VISIBLE);
-        btnToggleTagPanel.setText(visible ? "Tags" : "Tags ✓");
-        btnToggleTagPanel.setBackgroundTintList(
-            android.content.res.ColorStateList.valueOf(
-                visible ? 0xFF2A2A3E : 0xFFE94560));
-    });
-}
+        // Tag panel toggle with initialisation fix
+        setupTagPanelToggle();
 
         btnSort = findViewById(R.id.btnSort);
         btnSort.setText(sortManager.getLabel());
@@ -310,49 +298,78 @@ private void initAdapters() {
         findViewById(R.id.btnGroupBy).setOnClickListener(v -> showGroupMenu(v));
 
         findViewById(R.id.btnDashboard).setOnClickListener(v ->
-            startActivity(new Intent(this, DashboardActivity.class)));
+                startActivity(new Intent(this, DashboardActivity.class)));
 
         findViewById(R.id.btnSettings).setOnClickListener(v ->
-            startActivity(new Intent(this, SettingsActivity.class)));
+                startActivity(new Intent(this, SettingsActivity.class)));
 
         Button btnDelete = findViewById(R.id.btnDelete);
-if (btnDelete != null) {
-    btnDelete.setOnClickListener(v -> deleteCurrentFile());
-}
+        if (btnDelete != null) {
+            btnDelete.setOnClickListener(v -> deleteCurrentFile());
+        }
 
         tagAdapter.setTags(tagManager.getAllTags());
+    }
+
+    private void setupTagPanelToggle() {
+        Button btnToggle = findViewById(R.id.btnToggleTagPanel);
+        LinearLayout tagPanel = findViewById(R.id.tagPanel);
+        if (btnToggle == null || tagPanel == null) return;
+
+        // Initial state: hidden
+        tagPanel.setVisibility(View.GONE);
+        syncTagToggleButton(btnToggle, false);
+
+        btnToggle.setOnClickListener(v -> {
+            boolean visible = tagPanel.getVisibility() == View.VISIBLE;
+            if (visible) {
+                tagPanel.setVisibility(View.GONE);
+            } else {
+                tagPanel.setVisibility(View.VISIBLE);
+            }
+            syncTagToggleButton(btnToggle, !visible);
+        });
+    }
+
+    private void syncTagToggleButton(Button btn, boolean panelVisible) {
+        btn.setText(panelVisible ? "Tags ✓" : "Tags");
+        btn.setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(
+                        panelVisible ? 0xFFE94560 : 0xFF2A2A3E));
     }
 
     // ── Tag list spinner ──────────────────────────────────────────────────────
 
     private void refreshTagListSpinner() {
         ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
-            android.R.layout.simple_spinner_item,
-            tagListManager.getListNames());
+                android.R.layout.simple_spinner_item,
+                tagListManager.getListNames());
         adapter.setDropDownViewResource(
-            android.R.layout.simple_spinner_dropdown_item);
+                android.R.layout.simple_spinner_dropdown_item);
         previewManager.setTagListSpinner(adapter,
-            tagListManager.getActiveIndex());
+                tagListManager.getActiveIndex());
     }
 
     private void refreshSidePanel() {
         if (currentIndex < 0 || currentIndex >= fullList.size()) return;
-        MediaFile file     = fullList.get(currentIndex);
-        TagList   active   = tagListManager.getActiveList();
-        List<String> tags  = active.getTags();
+        MediaFile file = fullList.get(currentIndex);
+        if (file == null) return;
+        TagList active = tagListManager.getActiveList();
+        if (active == null) return;
+        List<String> tags = active.getTags();
         previewManager.setSidePanelTags(tags, file.getTags());
         updateDpadLabels();
     }
 
     private void updateDpadLabels() {
-    previewManager.updateDpadLabels(
-        gestureSettings.getSummary(gestureSettings.getDpadUp()),
-        gestureSettings.getSummary(gestureSettings.getDpadDown()),
-        gestureSettings.getSummary(gestureSettings.getDpadLeft()),
-        gestureSettings.getSummary(gestureSettings.getDpadRight()),
-        gestureSettings.getSummary(gestureSettings.getDpadCenter())
-    );
-}
+        previewManager.updateDpadLabels(
+                gestureSettings.getSummary(gestureSettings.getDpadUp()),
+                gestureSettings.getSummary(gestureSettings.getDpadDown()),
+                gestureSettings.getSummary(gestureSettings.getDpadLeft()),
+                gestureSettings.getSummary(gestureSettings.getDpadRight()),
+                gestureSettings.getSummary(gestureSettings.getDpadCenter())
+        );
+    }
 
     // ── Refresh ───────────────────────────────────────────────────────────────
 
@@ -363,47 +380,47 @@ if (btnDelete != null) {
     }
 
     private void executeRefresh() {
-    refreshPending = false;
+        refreshPending = false;
 
-    String query = searchBar != null
-        ? searchBar.getText().toString().trim()
-        : "";
+        String query = searchBar != null
+                ? searchBar.getText().toString().trim()
+                : "";
 
-    List<MediaFile> base = indexer.getIndex();
-    if (base == null) base = new ArrayList<>();
+        List<MediaFile> base = indexer.getIndex();
+        if (base == null) base = new ArrayList<>();
 
-    if (!query.isEmpty()) {
-        searchManager.setFullList(base);
-        base = searchManager.search(query);
-    }
+        if (!query.isEmpty()) {
+            searchManager.setFullList(base);
+            base = searchManager.search(query);
+        }
 
-    List<MediaFile> flattened = new ArrayList<>();
-    try {
-        List<Group> groups = groupManager.group(base);
-        if (groups != null) {
-            for (Group g : groups) {
-                if (g != null && g.getFiles() != null) {
-                    flattened.addAll(g.getFiles());
+        List<MediaFile> flattened = new ArrayList<>();
+        try {
+            List<Group> groups = groupManager.group(base);
+            if (groups != null) {
+                for (Group g : groups) {
+                    if (g != null && g.getFiles() != null) {
+                        flattened.addAll(g.getFiles());
+                    }
                 }
             }
+        } catch (Exception e) {
+            flattened = new ArrayList<>(base);
         }
-    } catch (Exception e) {
-        flattened = new ArrayList<>(base);
+
+        flattened = filterManager.apply(flattened);
+        sortManager.sort(flattened);
+
+        fullList = flattened;
+        windowManager.setFullIndex(fullList);
+
+        if (currentIndex >= 0 && currentIndex < fullList.size()) {
+            windowManager.centerOn(currentIndex);
+        }
+
+        updateWindow();
+        updateProgress();
     }
-
-    flattened = filterManager.apply(flattened);
-    sortManager.sort(flattened);
-
-    fullList = flattened;
-    windowManager.setFullIndex(fullList);
-
-    if (currentIndex >= 0 && currentIndex < fullList.size()) {
-        windowManager.centerOn(currentIndex);
-    }
-
-    updateWindow();
-    updateProgress();
-}
 
     // ── Window ────────────────────────────────────────────────────────────────
 
@@ -445,38 +462,38 @@ if (btnDelete != null) {
     // ── Gesture execution ─────────────────────────────────────────────────────
 
     private void executeSwipe(List<GestureSettings.GestureStep> steps) {
-    for (GestureSettings.GestureStep step : steps) {
-        if (step.action == GestureSettings.GestureAction.APPLY_TAG
-                && !step.tag.isEmpty()) {
-            if (currentIndex < 0 || currentIndex >= fullList.size()) continue;
-            MediaFile file = fullList.get(currentIndex);
-            tagManager.applyOrUndo(file, step.tag);
-            fullList.set(currentIndex, file);
-            mediaAdapter.updateFile(file);
-            refreshSidePanel();
-            updateProgress();
-        } else {
-            executeAction(step.action);
+        for (GestureSettings.GestureStep step : steps) {
+            if (step.action == GestureSettings.GestureAction.APPLY_TAG
+                    && !step.tag.isEmpty()) {
+                if (currentIndex < 0 || currentIndex >= fullList.size()) continue;
+                MediaFile file = fullList.get(currentIndex);
+                tagManager.applyOrUndo(file, step.tag);
+                fullList.set(currentIndex, file);
+                mediaAdapter.updateFile(file);
+                refreshSidePanel();
+                updateProgress();
+            } else {
+                executeAction(step.action);
+            }
         }
     }
-}
-                
+
     private void executeDpad(List<GestureSettings.GestureStep> steps) {
-    for (GestureSettings.GestureStep step : steps) {
-        if (step.action == GestureSettings.GestureAction.APPLY_TAG
-                && !step.tag.isEmpty()) {
-            if (currentIndex < 0 || currentIndex >= fullList.size()) continue;
-            MediaFile file = fullList.get(currentIndex);
-            tagManager.applyOrUndo(file, step.tag);
-            fullList.set(currentIndex, file);
-            mediaAdapter.updateFile(file);
-            refreshSidePanel();
-            updateProgress();
-        } else {
-            executeAction(step.action);
+        for (GestureSettings.GestureStep step : steps) {
+            if (step.action == GestureSettings.GestureAction.APPLY_TAG
+                    && !step.tag.isEmpty()) {
+                if (currentIndex < 0 || currentIndex >= fullList.size()) continue;
+                MediaFile file = fullList.get(currentIndex);
+                tagManager.applyOrUndo(file, step.tag);
+                fullList.set(currentIndex, file);
+                mediaAdapter.updateFile(file);
+                refreshSidePanel();
+                updateProgress();
+            } else {
+                executeAction(step.action);
+            }
         }
     }
-}
 
     private void executeAction(GestureSettings.GestureAction action) {
         switch (action) {
@@ -577,330 +594,345 @@ if (btnDelete != null) {
         shiftWindowIfNeeded(currentIndex);
         loadFileAtIndex(currentIndex);
     }
-                
-        private void showBatchTagDialog() {
-            List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
-            if (selectedFiles.isEmpty()) return;
 
-    List<Tag> allTags = tagManager.getAllTags();
-    if (allTags.isEmpty()) {
-        Toast.makeText(this, "No tags yet", Toast.LENGTH_SHORT).show();
-        return;
-    }
+    // ── Batch dialogs ─────────────────────────────────────────────────────────
 
-    String[]  tagNames = new String[allTags.size()];
-    boolean[] checked  = new boolean[allTags.size()];
-    for (int i = 0; i < allTags.size(); i++) tagNames[i] = allTags.get(i).getName();
+    private void showBatchTagDialog() {
+        List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
+        if (selectedFiles.isEmpty()) return;
 
-    new AlertDialog.Builder(this)
-        .setTitle("Tag " + selectedFiles.size() + " files")
-        .setMultiChoiceItems(tagNames, checked,
-            (d, which, isChecked) -> checked[which] = isChecked)
-        .setPositiveButton("Apply", (d, w) -> {
-            for (MediaFile file : selectedFiles) {
-                for (int i = 0; i < tagNames.length; i++) {
-                    if (checked[i]) tagManager.applyTag(file, tagNames[i]);
-                }
-                mediaAdapter.updateFile(file);
-            }
-            mediaAdapter.exitSelectMode();
-            btnScan.setText("SCAN");
-            btnScan.setOnClickListener(v -> startScan());
-            scheduleRefresh();
-            Toast.makeText(this, "Tagged " + selectedFiles.size() + " files",
-                Toast.LENGTH_SHORT).show();
-        })
-        .setNegativeButton("Cancel", null)
-        .show();
-}
-    private void showBatchRenameDialog() {
-    List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
-    if (selectedFiles.isEmpty()) return;
+        List<Tag> allTags = tagManager.getAllTags();
+        if (allTags.isEmpty()) {
+            Toast.makeText(this, "No tags yet", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
-    LinearLayout layout = new LinearLayout(this);
-    layout.setOrientation(LinearLayout.VERTICAL);
-    layout.setPadding(32, 16, 32, 16);
+        String[]  tagNames = new String[allTags.size()];
+        boolean[] checked  = new boolean[allTags.size()];
+        for (int i = 0; i < allTags.size(); i++) tagNames[i] = allTags.get(i).getName();
 
-    // Separator
-    TextView sepLabel = new TextView(this);
-    sepLabel.setText("Separator:");
-    sepLabel.setTextColor(0xFFCCCCCC);
-    layout.addView(sepLabel);
-
-    String[] sepOptions = {"Underscore (_)", "Dash (-)", "Space ( )", "None"};
-    android.widget.Spinner sepSpinner = new android.widget.Spinner(this);
-    android.widget.ArrayAdapter<String> sepAdapter = new android.widget.ArrayAdapter<>(
-        this, android.R.layout.simple_spinner_item, sepOptions);
-    sepAdapter.setDropDownViewResource(
-        android.R.layout.simple_spinner_dropdown_item);
-    sepSpinner.setAdapter(sepAdapter);
-    layout.addView(sepSpinner);
-
-    // Order
-    TextView ordLabel = new TextView(this);
-    ordLabel.setText("Order:");
-    ordLabel.setTextColor(0xFFCCCCCC);
-    layout.addView(ordLabel);
-
-    String[] ordOptions = {"Tags Only", "Original + Tags", "Tags + Original"};
-    android.widget.Spinner ordSpinner = new android.widget.Spinner(this);
-    android.widget.ArrayAdapter<String> ordAdapter = new android.widget.ArrayAdapter<>(
-        this, android.R.layout.simple_spinner_item, ordOptions);
-    ordAdapter.setDropDownViewResource(
-        android.R.layout.simple_spinner_dropdown_item);
-    ordSpinner.setAdapter(ordAdapter);
-    layout.addView(ordSpinner);
-
-    // Case
-    TextView caseLabel = new TextView(this);
-    caseLabel.setText("Case:");
-    caseLabel.setTextColor(0xFFCCCCCC);
-    layout.addView(caseLabel);
-
-    String[] caseOptions = {"As-is", "Lowercase", "Uppercase"};
-    android.widget.Spinner caseSpinner = new android.widget.Spinner(this);
-    android.widget.ArrayAdapter<String> caseAdapter = new android.widget.ArrayAdapter<>(
-        this, android.R.layout.simple_spinner_item, caseOptions);
-    caseAdapter.setDropDownViewResource(
-        android.R.layout.simple_spinner_dropdown_item);
-    caseSpinner.setAdapter(caseAdapter);
-    layout.addView(caseSpinner);
-
-    // Preview
-    TextView previewLabel = new TextView(this);
-    previewLabel.setText("Preview:");
-    previewLabel.setTextColor(0xFFCCCCCC);
-    layout.addView(previewLabel);
-
-    TextView previewText = new TextView(this);
-    previewText.setTextColor(0xFF888888);
-    previewText.setTextSize(10f);
-    layout.addView(previewText);
-
-    // Update preview on spinner change
-    android.widget.AdapterView.OnItemSelectedListener previewUpdater =
-        new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(android.widget.AdapterView<?> p,
-                    View v, int pos, long id) {
-                updateRenamePreview(batchRenameManager, selectedFiles,
-                    sepSpinner, ordSpinner, caseSpinner, previewText);
-            }
-            @Override
-            public void onNothingSelected(android.widget.AdapterView<?> p) {}
-        };
-
-    sepSpinner.setOnItemSelectedListener(previewUpdater);
-    ordSpinner.setOnItemSelectedListener(previewUpdater);
-    caseSpinner.setOnItemSelectedListener(previewUpdater);
-
-    android.widget.ScrollView sv = new android.widget.ScrollView(this);
-    sv.addView(layout);
-
-    new AlertDialog.Builder(this)
-        .setTitle("Batch Rename " + selectedFiles.size() + " files")
-        .setView(sv)
-        .setPositiveButton("Rename", (d, w) -> {
-            applyBatchRename(batchRenameManager, selectedFiles,
-                sepSpinner, ordSpinner, caseSpinner);
-        })
-        .setNegativeButton("Cancel", null)
-        .setNeutralButton("Undo", (d, w) -> {
-            if (batchRenameManager.canUndo()) {
-                BatchRenameManager.RenameResult result = batchRenameManager.undo();
-                android.widget.Toast.makeText(this,
-                    "Undone: " + result.succeeded + " files",
-                    android.widget.Toast.LENGTH_SHORT).show();
-                mediaAdapter.exitSelectMode();
-                scheduleRefresh();
-            }
-        })
-        .show();
-}
-
-private void showColorAnalysisDialog() {
-    List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
-    if (selectedFiles.isEmpty()) return;
-
-    android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
-    layout.setOrientation(android.widget.LinearLayout.VERTICAL);
-    layout.setPadding(32, 16, 32, 16);
-
-    layout.addView(makeLabel("Number of colors per image (1-10):"));
-android.widget.EditText colorCountInput = new android.widget.EditText(this);
-colorCountInput.setText("3");
-colorCountInput.setTextColor(0xFFFFFFFF);
-colorCountInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-colorCountInput.setBackground(null);
-layout.addView(colorCountInput);
-
-layout.addView(makeLabel("Similarity threshold (1-100, lower = stricter):"));
-android.widget.EditText threshInput = new android.widget.EditText(this);
-threshInput.setText("20");
-threshInput.setTextColor(0xFFFFFFFF);
-threshInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | 
-    android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-threshInput.setBackground(null);
-layout.addView(threshInput);
-
-    layout.addView(makeLabel("Mode:"));
-    String[] modes = {
-        "Tag with colors",
-        "Rename by color",
-        "Group similar",
-        "Tag + Rename",
-        "All three"
-    };
-    android.widget.Spinner modeSpin = makeSpinner(modes);
-    layout.addView(modeSpin);
-
-    android.widget.ScrollView sv = new android.widget.ScrollView(this);
-    sv.addView(layout);
-
-    new AlertDialog.Builder(this)
-        .setTitle("Color analysis — " + selectedFiles.size() + " files")
-        .setView(sv)
-        .setPositiveButton("Analyze", (d, w) -> {
-            int topN;
-float threshold;
-try {
-    topN = Integer.parseInt(colorCountInput.getText().toString().trim());
-    topN = Math.max(1, Math.min(10, topN));
-} catch (Exception e) { topN = 3; }
-
-try {
-    threshold = Float.parseFloat(threshInput.getText().toString().trim());
-    threshold = Math.max(1f, Math.min(100f, threshold));
-} catch (Exception e) { threshold = 20f; }
-            ColorAnalyzer.Mode mode;
-            switch (modeSpin.getSelectedItemPosition()) {
-                case 0:  mode = ColorAnalyzer.Mode.TAG;            break;
-                case 1:  mode = ColorAnalyzer.Mode.RENAME;         break;
-                case 2:  mode = ColorAnalyzer.Mode.GROUP;          break;
-                case 3:  mode = ColorAnalyzer.Mode.TAG_AND_RENAME; break;
-                default: mode = ColorAnalyzer.Mode.ALL;            break;
-            }
-            final ColorAnalyzer.Mode finalMode = mode;
-            final int finalTopN = topN;
-            final float finalThreshold = threshold;
-
-            folderWatcher.pauseAll();
-            new Thread(() -> {
-                List<ColorAnalyzer.Result> results =
-                    ColorAnalyzer.analyze(selectedFiles, finalTopN,
-                        finalThreshold, finalMode, tagManager, batchRenameManager);
-                mainHandler.post(() -> {
-                    folderWatcher.resumeAll();
-                    int ok = 0;
-                    for (ColorAnalyzer.Result r : results) if (r.success) ok++;
+        new AlertDialog.Builder(this)
+                .setTitle("Tag " + selectedFiles.size() + " files")
+                .setMultiChoiceItems(tagNames, checked,
+                        (d, which, isChecked) -> checked[which] = isChecked)
+                .setPositiveButton("Apply", (d, w) -> {
+                    for (MediaFile file : selectedFiles) {
+                        for (int i = 0; i < tagNames.length; i++) {
+                            if (checked[i]) tagManager.applyTag(file, tagNames[i]);
+                        }
+                        mediaAdapter.updateFile(file);
+                    }
                     mediaAdapter.exitSelectMode();
                     btnScan.setText("SCAN");
                     btnScan.setOnClickListener(v -> startScan());
                     scheduleRefresh();
-                    Toast.makeText(this,
-                        "Analyzed " + ok + " / " + selectedFiles.size() + " files",
-                        Toast.LENGTH_SHORT).show();
-                });
-            }).start();
-        })
-        .setNegativeButton("Cancel", null)
-        .show();
-}
-
-private android.widget.TextView makeLabel(String text) {
-    android.widget.TextView tv = new android.widget.TextView(this);
-    tv.setText(text);
-    tv.setTextColor(0xFFCCCCCC);
-    tv.setTextSize(12f);
-    return tv;
-}
-
-private android.widget.Spinner makeSpinner(String[] options) {
-    android.widget.Spinner sp = new android.widget.Spinner(this);
-    android.widget.ArrayAdapter<String> ad = new android.widget.ArrayAdapter<>(
-        this, android.R.layout.simple_spinner_item, options);
-    ad.setDropDownViewResource(
-        android.R.layout.simple_spinner_dropdown_item);
-    sp.setAdapter(ad);
-    return sp;
-}
-
-private void updateRenamePreview(BatchRenameManager mgr,
-        List<MediaFile> files,
-        android.widget.Spinner sep,
-        android.widget.Spinner ord,
-        android.widget.Spinner cas,
-        TextView previewText) {
-
-    mgr.setSeparator(sepFromPos(sep.getSelectedItemPosition()));
-    mgr.setOrder(ordFromPos(ord.getSelectedItemPosition()));
-    mgr.setCaseMode(caseFromPos(cas.getSelectedItemPosition()));
-
-    List<BatchRenameManager.RenamePreview> previews = mgr.preview(files);
-    StringBuilder sb = new StringBuilder();
-    int shown = Math.min(previews.size(), 5);
-    for (int i = 0; i < shown; i++) {
-        BatchRenameManager.RenamePreview p = previews.get(i);
-        sb.append(p.originalName)
-          .append(" → ")
-          .append(p.newName);
-        if (p.hasConflict) sb.append(" ⚠ conflict");
-        sb.append("\n");
+                    Toast.makeText(this, "Tagged " + selectedFiles.size() + " files",
+                            Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
-    if (previews.size() > 5) {
-        sb.append("... and ").append(previews.size() - 5).append(" more");
+
+    private void showBatchRenameDialog() {
+        List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
+        if (selectedFiles.isEmpty()) return;
+
+        // Save current settings to restore if cancelled
+        final BatchRenameManager.Separator oldSep = batchRenameManager.getSeparator();
+        final BatchRenameManager.Order    oldOrd = batchRenameManager.getOrder();
+        final BatchRenameManager.Case     oldCase = batchRenameManager.getCaseMode();
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(32, 16, 32, 16);
+
+        // Separator
+        TextView sepLabel = new TextView(this);
+        sepLabel.setText("Separator:");
+        sepLabel.setTextColor(0xFFCCCCCC);
+        layout.addView(sepLabel);
+
+        String[] sepOptions = {"Underscore (_)", "Dash (-)", "Space ( )", "None"};
+        android.widget.Spinner sepSpinner = new android.widget.Spinner(this);
+        ArrayAdapter<String> sepAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, sepOptions);
+        sepAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        sepSpinner.setAdapter(sepAdapter);
+        // Set spinner to current setting
+        sepSpinner.setSelection(batchRenameManager.getSeparator().ordinal());
+        layout.addView(sepSpinner);
+
+        // Order
+        TextView ordLabel = new TextView(this);
+        ordLabel.setText("Order:");
+        ordLabel.setTextColor(0xFFCCCCCC);
+        layout.addView(ordLabel);
+
+        String[] ordOptions = {"Tags Only", "Original + Tags", "Tags + Original"};
+        android.widget.Spinner ordSpinner = new android.widget.Spinner(this);
+        ArrayAdapter<String> ordAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, ordOptions);
+        ordAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        ordSpinner.setAdapter(ordAdapter);
+        ordSpinner.setSelection(batchRenameManager.getOrder().ordinal());
+        layout.addView(ordSpinner);
+
+        // Case
+        TextView caseLabel = new TextView(this);
+        caseLabel.setText("Case:");
+        caseLabel.setTextColor(0xFFCCCCCC);
+        layout.addView(caseLabel);
+
+        String[] caseOptions = {"As-is", "Lowercase", "Uppercase"};
+        android.widget.Spinner caseSpinner = new android.widget.Spinner(this);
+        ArrayAdapter<String> caseAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, caseOptions);
+        caseAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        caseSpinner.setAdapter(caseAdapter);
+        caseSpinner.setSelection(batchRenameManager.getCaseMode().ordinal());
+        layout.addView(caseSpinner);
+
+        // Preview
+        TextView previewLabel = new TextView(this);
+        previewLabel.setText("Preview:");
+        previewLabel.setTextColor(0xFFCCCCCC);
+        layout.addView(previewLabel);
+
+        TextView previewText = new TextView(this);
+        previewText.setTextColor(0xFF888888);
+        previewText.setTextSize(10f);
+        layout.addView(previewText);
+
+        // Update preview on spinner change
+        android.widget.AdapterView.OnItemSelectedListener previewUpdater =
+                new android.widget.AdapterView.OnItemSelectedListener() {
+                    @Override
+                    public void onItemSelected(android.widget.AdapterView<?> p,
+                                               View v, int pos, long id) {
+                        updateRenamePreview(batchRenameManager, selectedFiles,
+                                sepSpinner, ordSpinner, caseSpinner, previewText);
+                    }
+                    @Override
+                    public void onNothingSelected(android.widget.AdapterView<?> p) {}
+                };
+
+        sepSpinner.setOnItemSelectedListener(previewUpdater);
+        ordSpinner.setOnItemSelectedListener(previewUpdater);
+        caseSpinner.setOnItemSelectedListener(previewUpdater);
+
+        // Initial preview
+        updateRenamePreview(batchRenameManager, selectedFiles,
+                sepSpinner, ordSpinner, caseSpinner, previewText);
+
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(layout);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Batch Rename " + selectedFiles.size() + " files")
+                .setView(sv)
+                .setPositiveButton("Rename", (d, w) -> {
+                    applyBatchRename(batchRenameManager, selectedFiles,
+                            sepSpinner, ordSpinner, caseSpinner);
+                })
+                .setNegativeButton("Cancel", (d, w) -> {
+                    // Restore saved settings
+                    batchRenameManager.setSeparator(oldSep);
+                    batchRenameManager.setOrder(oldOrd);
+                    batchRenameManager.setCaseMode(oldCase);
+                })
+                .setNeutralButton("Undo", (d, w) -> {
+                    if (batchRenameManager.canUndo()) {
+                        BatchRenameManager.RenameResult result = batchRenameManager.undo();
+                        Toast.makeText(this,
+                                "Undone: " + result.succeeded + " files",
+                                Toast.LENGTH_SHORT).show();
+                        mediaAdapter.exitSelectMode();
+                        scheduleRefresh();
+                    }
+                })
+                .show();
     }
-    previewText.setText(sb.toString());
-}
 
-private void applyBatchRename(BatchRenameManager mgr,
-        List<MediaFile> files,
-        android.widget.Spinner sep,
-        android.widget.Spinner ord,
-        android.widget.Spinner cas) {
+    private void updateRenamePreview(BatchRenameManager mgr,
+                                     List<MediaFile> files,
+                                     android.widget.Spinner sep,
+                                     android.widget.Spinner ord,
+                                     android.widget.Spinner cas,
+                                     TextView previewText) {
 
-    mgr.setSeparator(sepFromPos(sep.getSelectedItemPosition()));
-    mgr.setOrder(ordFromPos(ord.getSelectedItemPosition()));
-    mgr.setCaseMode(caseFromPos(cas.getSelectedItemPosition()));
+        mgr.setSeparator(sepFromPos(sep.getSelectedItemPosition()));
+        mgr.setOrder(ordFromPos(ord.getSelectedItemPosition()));
+        mgr.setCaseMode(caseFromPos(cas.getSelectedItemPosition()));
 
-    List<BatchRenameManager.RenamePreview> previews = mgr.preview(files);
-    BatchRenameManager.RenameResult result = mgr.apply(previews);
-
-    android.widget.Toast.makeText(this,
-        "Renamed: " + result.succeeded
-        + (result.failed > 0 ? "  Failed: " + result.failed : ""),
-        android.widget.Toast.LENGTH_SHORT).show();
-
-    mediaAdapter.exitSelectMode();
-    btnScan.setText("SCAN");
-    btnScan.setOnClickListener(v -> startScan());
-    scheduleRefresh();
-}
-
-private BatchRenameManager.Separator sepFromPos(int pos) {
-    switch (pos) {
-        case 1:  return BatchRenameManager.Separator.DASH;
-        case 2:  return BatchRenameManager.Separator.SPACE;
-        case 3:  return BatchRenameManager.Separator.NONE;
-        default: return BatchRenameManager.Separator.UNDERSCORE;
+        List<BatchRenameManager.RenamePreview> previews = mgr.preview(files);
+        StringBuilder sb = new StringBuilder();
+        int shown = Math.min(previews.size(), 5);
+        for (int i = 0; i < shown; i++) {
+            BatchRenameManager.RenamePreview p = previews.get(i);
+            sb.append(p.originalName)
+                    .append(" → ")
+                    .append(p.newName);
+            if (p.hasConflict) sb.append(" ⚠ conflict");
+            sb.append("\n");
+        }
+        if (previews.size() > 5) {
+            sb.append("... and ").append(previews.size() - 5).append(" more");
+        }
+        previewText.setText(sb.toString());
     }
-}
 
-private BatchRenameManager.Order ordFromPos(int pos) {
-    switch (pos) {
-        case 1:  return BatchRenameManager.Order.ORIGINAL_THEN_TAGS;
-        case 2:  return BatchRenameManager.Order.TAGS_THEN_ORIGINAL;
-        default: return BatchRenameManager.Order.TAGS_ONLY;
-    }
-}
+    private void applyBatchRename(BatchRenameManager mgr,
+                                  List<MediaFile> files,
+                                  android.widget.Spinner sep,
+                                  android.widget.Spinner ord,
+                                  android.widget.Spinner cas) {
 
-private BatchRenameManager.Case caseFromPos(int pos) {
-    switch (pos) {
-        case 1:  return BatchRenameManager.Case.LOWERCASE;
-        case 2:  return BatchRenameManager.Case.UPPERCASE;
-        default: return BatchRenameManager.Case.AS_IS;
+        mgr.setSeparator(sepFromPos(sep.getSelectedItemPosition()));
+        mgr.setOrder(ordFromPos(ord.getSelectedItemPosition()));
+        mgr.setCaseMode(caseFromPos(cas.getSelectedItemPosition()));
+
+        List<BatchRenameManager.RenamePreview> previews = mgr.preview(files);
+        BatchRenameManager.RenameResult result = mgr.apply(previews);
+
+        Toast.makeText(this,
+                "Renamed: " + result.succeeded
+                        + (result.failed > 0 ? "  Failed: " + result.failed : ""),
+                Toast.LENGTH_SHORT).show();
+
+        mediaAdapter.exitSelectMode();
+        btnScan.setText("SCAN");
+        btnScan.setOnClickListener(v -> startScan());
+        scheduleRefresh();
     }
-}            
+
+    private BatchRenameManager.Separator sepFromPos(int pos) {
+        switch (pos) {
+            case 1:  return BatchRenameManager.Separator.DASH;
+            case 2:  return BatchRenameManager.Separator.SPACE;
+            case 3:  return BatchRenameManager.Separator.NONE;
+            default: return BatchRenameManager.Separator.UNDERSCORE;
+        }
+    }
+
+    private BatchRenameManager.Order ordFromPos(int pos) {
+        switch (pos) {
+            case 1:  return BatchRenameManager.Order.ORIGINAL_THEN_TAGS;
+            case 2:  return BatchRenameManager.Order.TAGS_THEN_ORIGINAL;
+            default: return BatchRenameManager.Order.TAGS_ONLY;
+        }
+    }
+
+    private BatchRenameManager.Case caseFromPos(int pos) {
+        switch (pos) {
+            case 1:  return BatchRenameManager.Case.LOWERCASE;
+            case 2:  return BatchRenameManager.Case.UPPERCASE;
+            default: return BatchRenameManager.Case.AS_IS;
+        }
+    }
+
+    // ── Color analysis dialog ────────────────────────────────────────────────
+
+    private void showColorAnalysisDialog() {
+        List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
+        if (selectedFiles.isEmpty()) return;
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(32, 16, 32, 16);
+
+        layout.addView(makeLabel("Number of colors per image (1-10):"));
+        EditText colorCountInput = new EditText(this);
+        colorCountInput.setText("3");
+        colorCountInput.setTextColor(0xFFFFFFFF);
+        colorCountInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        colorCountInput.setBackground(null);
+        layout.addView(colorCountInput);
+
+        layout.addView(makeLabel("Similarity threshold (1-100, lower = stricter):"));
+        EditText threshInput = new EditText(this);
+        threshInput.setText("20");
+        threshInput.setTextColor(0xFFFFFFFF);
+        threshInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER |
+                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        threshInput.setBackground(null);
+        layout.addView(threshInput);
+
+        layout.addView(makeLabel("Mode:"));
+        String[] modes = {
+                "Tag with colors",
+                "Rename by color",
+                "Group similar",
+                "Tag + Rename",
+                "All three"
+        };
+        android.widget.Spinner modeSpin = makeSpinner(modes);
+        layout.addView(modeSpin);
+
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(layout);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Color analysis — " + selectedFiles.size() + " files")
+                .setView(sv)
+                .setPositiveButton("Analyze", (d, w) -> {
+                    int topN;
+                    float threshold;
+                    try {
+                        topN = Integer.parseInt(colorCountInput.getText().toString().trim());
+                        topN = Math.max(1, Math.min(10, topN));
+                    } catch (Exception e) { topN = 3; }
+
+                    try {
+                        threshold = Float.parseFloat(threshInput.getText().toString().trim());
+                        threshold = Math.max(1f, Math.min(100f, threshold));
+                    } catch (Exception e) { threshold = 20f; }
+                    ColorAnalyzer.Mode mode;
+                    switch (modeSpin.getSelectedItemPosition()) {
+                        case 0:  mode = ColorAnalyzer.Mode.TAG;            break;
+                        case 1:  mode = ColorAnalyzer.Mode.RENAME;         break;
+                        case 2:  mode = ColorAnalyzer.Mode.GROUP;          break;
+                        case 3:  mode = ColorAnalyzer.Mode.TAG_AND_RENAME; break;
+                        default: mode = ColorAnalyzer.Mode.ALL;            break;
+                    }
+                    final ColorAnalyzer.Mode finalMode = mode;
+                    final int finalTopN = topN;
+                    final float finalThreshold = threshold;
+
+                    folderWatcher.pauseAll();
+                    new Thread(() -> {
+                        List<ColorAnalyzer.Result> results =
+                                ColorAnalyzer.analyze(selectedFiles, finalTopN,
+                                        finalThreshold, finalMode, tagManager, batchRenameManager);
+                        mainHandler.post(() -> {
+                            folderWatcher.resumeAll();
+                            int ok = 0;
+                            for (ColorAnalyzer.Result r : results) if (r.success) ok++;
+                            mediaAdapter.exitSelectMode();
+                            btnScan.setText("SCAN");
+                            btnScan.setOnClickListener(v -> startScan());
+                            scheduleRefresh();
+                            Toast.makeText(this,
+                                    "Analyzed " + ok + " / " + selectedFiles.size() + " files",
+                                    Toast.LENGTH_SHORT).show();
+                        });
+                    }).start();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private TextView makeLabel(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(0xFFCCCCCC);
+        tv.setTextSize(12f);
+        return tv;
+    }
+
+    private android.widget.Spinner makeSpinner(String[] options) {
+        android.widget.Spinner sp = new android.widget.Spinner(this);
+        ArrayAdapter<String> ad = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, options);
+        ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        sp.setAdapter(ad);
+        return sp;
+    }
 
     // ── Sort / Filter / Group ─────────────────────────────────────────────────
 
@@ -953,23 +985,23 @@ private BatchRenameManager.Case caseFromPos(int pos) {
     }
 
     private void showGroupMenu(View anchor) {
-    PopupMenu menu = new PopupMenu(this, anchor);
-    menu.getMenu().add("By File Type");
-    menu.getMenu().add("By Tag");
-    menu.getMenu().add("By Date");
-    menu.getMenu().add("By Folder");
-    menu.setOnMenuItemClickListener(item -> {
-        switch (item.getTitle().toString()) {
-            case "By File Type": groupManager.setGroupBy(Group.GroupBy.FILE_TYPE); break;
-            case "By Tag":       groupManager.setGroupBy(Group.GroupBy.TAG);       break;
-            case "By Date":      groupManager.setGroupBy(Group.GroupBy.DATE);      break;
-            case "By Folder":    groupManager.setGroupBy(Group.GroupBy.FOLDER);    break;
-        }
-        scheduleRefresh();
-        return true;
-    });
-    menu.show();
-}
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add("By File Type");
+        menu.getMenu().add("By Tag");
+        menu.getMenu().add("By Date");
+        menu.getMenu().add("By Folder");
+        menu.setOnMenuItemClickListener(item -> {
+            switch (item.getTitle().toString()) {
+                case "By File Type": groupManager.setGroupBy(Group.GroupBy.FILE_TYPE); break;
+                case "By Tag":       groupManager.setGroupBy(Group.GroupBy.TAG);       break;
+                case "By Date":      groupManager.setGroupBy(Group.GroupBy.DATE);      break;
+                case "By Folder":    groupManager.setGroupBy(Group.GroupBy.FOLDER);    break;
+            }
+            scheduleRefresh();
+            return true;
+        });
+        menu.show();
+    }
 
     // ── Progress ──────────────────────────────────────────────────────────────
 
@@ -991,84 +1023,75 @@ private BatchRenameManager.Case caseFromPos(int pos) {
         EditText input = new EditText(this);
         input.setHint("/sdcard/DCIM");
         new AlertDialog.Builder(this)
-            .setTitle("Add folder to watch")
-            .setView(input)
-            .setPositiveButton("Add", (d, w) -> {
-                String path = input.getText().toString().trim();
-                if (!path.isEmpty()) {
-                    folderManager.addFolder(path);
-                    startScan();
-                }
-            })
-            .setNegativeButton("Cancel", null)
-            .show();
+                .setTitle("Add folder to watch")
+                .setView(input)
+                .setPositiveButton("Add", (d, w) -> {
+                    String path = input.getText().toString().trim();
+                    if (!path.isEmpty()) {
+                        folderManager.addFolder(path);
+                        startScan();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
+    // ── Delete file (now uses full refresh for consistency) ──────────────────
+
     private void deleteCurrentFile() {
-    if (currentIndex < 0 || currentIndex >= fullList.size()) return;
-    MediaFile file = fullList.get(currentIndex);
+        if (currentIndex < 0 || currentIndex >= fullList.size()) return;
+        MediaFile file = fullList.get(currentIndex);
 
-    new AlertDialog.Builder(this)
-        .setTitle("Delete file?")
-        .setMessage(file.getName())
-        .setPositiveButton("Delete", (d, w) -> {
-            boolean deleted = indexer.deleteFile(file.getPath());
-            if (deleted) {
-                for (int i = fullList.size() - 1; i >= 0; i--) {
-            if (fullList.get(i).getPath().equals(file.getPath())) fullList.remove(i);
-        }
-                mediaAdapter.removeFile(file.getPath());
-                thumbnailLoader.cancel(file.getPath());
-                if (currentIndex >= fullList.size()) {
-                    currentIndex = fullList.size() - 1;
-                }
-                if (currentIndex >= 0) loadFileAtIndex(currentIndex);
-                updateProgress();
-                Toast.makeText(this, "Deleted", Toast.LENGTH_SHORT).show();
-            } else {
-                Toast.makeText(this, "Could not delete", Toast.LENGTH_SHORT).show();
+        new AlertDialog.Builder(this)
+                .setTitle("Delete file?")
+                .setMessage(file.getName())
+                .setPositiveButton("Delete", (d, w) -> {
+                    boolean deleted = indexer.deleteFile(file.getPath());
+                    if (deleted) {
+                        // Full refresh rebuilds everything consistently
+                        scheduleRefresh();
+                        Toast.makeText(this, "Deleted", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(this, "Could not delete", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    // ── FolderWatcher callbacks ──────────────────────────────────────────────
+
+    @Override
+    public void onFileAdded(String path) {
+        mainHandler.post(() -> {
+            if (!indexer.isScanning()) {
+                indexer.rescan(new java.io.File(path).getParent());
             }
-        })
-        .setNegativeButton("Cancel", null)
-        .show();
-}
-                
-    // ── FolderWatcher ─────────────────────────────────────────────────────────
+        });
+    }
 
-@Override
-public void onFileAdded(String path) {
-    mainHandler.post(() -> {
-        if (!indexer.isScanning()) {
-            indexer.rescan(new java.io.File(path).getParent());
-        }
-    });
-}
+    @Override
+    public void onFileDeleted(String path) {
+        final String deletedPath = path;
+        mainHandler.post(() -> {
+            // Remove from adapter immediately for responsiveness,
+            // then do a full refresh to synchronise all data structures.
+            mediaAdapter.removeFile(deletedPath);
+            scheduleRefresh();
+        });
+    }
 
-@Override
-public void onFileDeleted(String path) {
-    final String deletedPath = path;
-    mainHandler.post(() -> {
-        for (int i = fullList.size() - 1; i >= 0; i--) {
-            if (fullList.get(i).getPath().equals(deletedPath)) fullList.remove(i);
-        }
-        for (int i = currentFiles.size() - 1; i >= 0; i--) {
-            if (currentFiles.get(i).getPath().equals(deletedPath)) currentFiles.remove(i);
-        }
-        mediaAdapter.removeFile(deletedPath);
-        updateProgress();
-    });
-}
+    @Override
+    public void onFileModified(String path) {
+        mainHandler.post(() -> {
+            if (!indexer.isScanning()) {
+                cacheManager.invalidateThumbnail(path);
+                indexer.rescan(new java.io.File(path).getParent());
+            }
+        });
+    }
 
-@Override
-public void onFileModified(String path) {
-    mainHandler.post(() -> {
-        if (!indexer.isScanning()) {
-            cacheManager.invalidateThumbnail(path);
-            indexer.rescan(new java.io.File(path).getParent());
-        }
-    });
-}
-    // ── MediaIndexer ──────────────────────────────────────────────────────────
+    // ── MediaIndexer callbacks ───────────────────────────────────────────────
 
     @Override
     public void onFileFound(MediaFile file) {}
@@ -1080,19 +1103,19 @@ public void onFileModified(String path) {
 
     @Override
     public void onScanComplete(List<MediaFile> allFiles) {
-    mainHandler.post(() -> {
-        btnScan.setEnabled(true);
-        btnScan.setText("SCAN");
+        mainHandler.post(() -> {
+            btnScan.setEnabled(true);
+            btnScan.setText("SCAN");
 
-        // Import all tags found in scanned files into TagManager
-        List<String> allTagsFromFiles = indexer.getAllTagsFromIndex();
-        if (!allTagsFromFiles.isEmpty()) {
-            tagManager.importTagsFromFiles(allTagsFromFiles);
-        }
+            // Import all tags found in scanned files into TagManager
+            List<String> allTagsFromFiles = indexer.getAllTagsFromIndex();
+            if (!allTagsFromFiles.isEmpty()) {
+                tagManager.importTagsFromFiles(allTagsFromFiles);
+            }
 
-        executeRefresh();
-    });
-}
+            executeRefresh();
+        });
+    }
 
     @Override
     public void onFileChanged(MediaFile file) {
@@ -1111,8 +1134,8 @@ public void onFileModified(String path) {
     public void onFileRemoved(String path) {
         mainHandler.post(() -> {
             for (int i = fullList.size() - 1; i >= 0; i--) {
-            if (fullList.get(i).getPath().equals(path)) fullList.remove(i);
-        }
+                if (fullList.get(i).getPath().equals(path)) fullList.remove(i);
+            }
             mediaAdapter.removeFile(path);
             updateProgress();
         });
