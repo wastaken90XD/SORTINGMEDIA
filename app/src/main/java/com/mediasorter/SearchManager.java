@@ -31,12 +31,18 @@ public class SearchManager {
 
     // All terms must match — AND logic
     private boolean matchesAll(MediaFile f, String[] terms) {
-        for (String term : terms) {
+    for (String term : terms) {
+        if (term.startsWith("-")) {
+            // Exclusion — file must NOT match this term
+            String exclude = term.substring(1);
+            if (!exclude.isEmpty() && matchesTerm(f, exclude)) return false;
+        } else {
+            // Inclusion — file must match this term
             if (!matchesTerm(f, term)) return false;
         }
-        return true;
     }
-
+    return true;
+}
     private boolean matchesTerm(MediaFile f, String term) {
         // Filename
         if (f.getName().toLowerCase().contains(term)) return true;
