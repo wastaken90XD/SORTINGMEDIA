@@ -1,6 +1,7 @@
 package com.mediasorter.models;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class Group {
@@ -19,7 +20,7 @@ public class Group {
 
     public String          getLabel()   { return label; }
     public GroupBy         getGroupBy() { return groupBy; }
-    public List<MediaFile> getFiles()   { return files; }
+    public List<MediaFile> getFiles()   { return Collections.unmodifiableList(files); }
     public int             getCount()   { return files.size(); }
 
     public void addFile(MediaFile f)    { files.add(f); }
