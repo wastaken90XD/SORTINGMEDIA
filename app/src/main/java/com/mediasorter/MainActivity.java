@@ -301,11 +301,11 @@ private void initAdapters() {
         btnScan.setOnClickListener(v -> startScan());
 
         findViewById(R.id.btnRescan).setOnClickListener(v -> {
-    for (String folder : folderManager.getFolders()) {
-        indexer.rescanClean(folder);
-    }
-    Toast.makeText(this, "Rescanning…", Toast.LENGTH_SHORT).show();
-});
+            for (String folder : folderManager.getFolders()) {
+                indexer.rescanClean(folder);
+            }
+            Toast.makeText(this, "Rescanning…", Toast.LENGTH_SHORT).show();
+        });
 
         findViewById(R.id.btnGroupBy).setOnClickListener(v -> showGroupMenu(v));
 
