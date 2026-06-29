@@ -4,9 +4,9 @@ import android.content.Context;
 import com.mediasorter.models.MediaFile;
 import java.io.File;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class BatchRenameManager {
 
@@ -38,8 +38,8 @@ public class BatchRenameManager {
     private Order     order     = Order.TAGS_ONLY;
     private Case      caseMode  = Case.AS_IS;
 
-    // Undo stack — maps new path → original path
-    private final Map<String, String> undoMap = new HashMap<>();
+    // Thread‑safe undo map
+    private final Map<String, String> undoMap = new ConcurrentHashMap<>();
 
     // ── Settings ──────────────────────────────────────────────────────────────
 
@@ -73,20 +73,35 @@ public class BatchRenameManager {
             String extension = getExtension(file.getName());
             String fullNew   = newName + extension;
 
-            // Check for conflicts
-            boolean conflict = usedNames.contains(fullNew)
-                || new File(new File(file.getPath()).getParent(), fullNew).exists();
+            // If the new name is exactly the original name, skip and mark as no conflict
+            if (fullNew.equals(file.getName())) {
+                previews.add(new RenamePreview(file.getPath(), file.getName(), fullNew, false));
+                continue;
+            }
 
+            boolean conflict = usedNames.contains(fullNew) || targetExists(file, fullNew);
             if (!conflict) usedNames.add(fullNew);
 
             previews.add(new RenamePreview(
-                file.getPath(),
-                file.getName(),
-                fullNew,
-                conflict));
+                    file.getPath(),
+                    file.getName(),
+                    fullNew,
+                    conflict));
         }
 
         return previews;
+    }
+
+    // Helper to safely check if a target file exists
+    private boolean targetExists(MediaFile file, String newName) {
+        try {
+            File parent = new File(file.getPath()).getParentFile();
+            if (parent == null) return false;
+            return new File(parent, newName).exists();
+        } catch (SecurityException e) {
+            // If we can’t read the directory, treat it as a conflict to be safe
+            return true;
+        }
     }
 
     // ── Apply ─────────────────────────────────────────────────────────────────
@@ -99,6 +114,12 @@ public class BatchRenameManager {
             if (p.hasConflict) {
                 result.failed++;
                 result.errors.add("Conflict: " + p.newName);
+                continue;
+            }
+
+            // No‑op if the name wouldn’t change
+            if (p.newName.equals(p.originalName)) {
+                result.succeeded++;
                 continue;
             }
 
