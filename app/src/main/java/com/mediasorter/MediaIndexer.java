@@ -182,6 +182,7 @@ public class MediaIndexer {
                     }
                 }
             }
+            
             for (String path : toRemove) {
                 removeFromIndex(path);
                 manifest.remove(path);
