@@ -11,6 +11,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.zip.CRC32;
 import java.util.zip.Deflater;
+import java.io.IOException;
 
 public class MetadataWriter {
 
@@ -178,64 +179,62 @@ public class MetadataWriter {
         {0x69, 0x54, 0x58, 0x74}; // iTXt chunk type
 
     private static boolean writePng(String filePath, List<String> tags) {
-        try {
-            FileInputStream fis = new FileInputStream(filePath);
-            byte[] original = new byte[fis.available()];
-            fis.read(original);
-            fis.close();
-
-            // Validate PNG signature
-            for (int i = 0; i < PNG_SIGNATURE.length; i++) {
-                if (original[i] != PNG_SIGNATURE[i]) {
-                    Log.e(TAG, "Not a valid PNG");
-                    return false;
-                }
-            }
-
-            // Build XMP as iTXt chunk
-            byte[] xmpBytes = buildXmp(tags);
-            byte[] iTXtChunk = buildPngITXtChunk(xmpBytes);
-
-            // Find position before IEND chunk
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            out.write(PNG_SIGNATURE);
-
-            int pos = 8;
-            boolean injected = false;
-
-            while (pos < original.length - 4) {
-                int chunkLen = readInt(original, pos);
-                byte[] chunkType = Arrays.copyOfRange(original, pos + 4, pos + 8);
-
-                // Remove existing XMP iTXt if present
-                boolean isXmpChunk = Arrays.equals(chunkType, PNG_XTXT) &&
-                    isXmpITXt(original, pos + 8);
-
-                if (Arrays.equals(chunkType, PNG_IEND) && !injected) {
-                    // Inject XMP before IEND
-                    out.write(iTXtChunk);
-                    injected = true;
-                }
-
-                if (!isXmpChunk) {
-                    out.write(original, pos, 12 + chunkLen);
-                }
-
-                pos += 12 + chunkLen;
-            }
-
-            FileOutputStream fos = new FileOutputStream(filePath);
-            fos.write(out.toByteArray());
-            fos.close();
-
-            Log.d(TAG, "PNG XMP written successfully");
-            return true;
-
-        } catch (Exception e) {
-            Log.e(TAG, "PNG write failed: " + e.getMessage());
+    try {
+        File file = new File(filePath);
+        byte[] original = readAllBytes(file);   // safe full read
+        if (original == null) {
+            Log.e(TAG, "Failed to read PNG");
             return false;
         }
+
+        // Validate PNG signature
+        for (int i = 0; i < PNG_SIGNATURE.length; i++) {
+            if (original[i] != PNG_SIGNATURE[i]) {
+                Log.e(TAG, "Not a valid PNG");
+                return false;
+            }
+        }
+
+        byte[] xmpBytes = buildXmp(tags);
+        byte[] iTXtChunk = buildPngITXtChunk(xmpBytes);
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(PNG_SIGNATURE);
+
+        int pos = 8;
+        boolean injected = false;
+
+        while (pos < original.length - 4) {
+            int chunkLen = readInt(original, pos);
+            byte[] chunkType = Arrays.copyOfRange(original, pos + 4, pos + 8);
+
+            boolean isXmpChunk = Arrays.equals(chunkType, PNG_XTXT) &&
+                    isXmpITXt(original, pos + 8);
+
+            if (Arrays.equals(chunkType, PNG_IEND) && !injected) {
+                out.write(iTXtChunk);
+                injected = true;
+            }
+
+            if (!isXmpChunk) {
+                out.write(original, pos, 12 + chunkLen);
+            }
+
+            pos += 12 + chunkLen;
+        }
+
+        FileOutputStream fos = new FileOutputStream(filePath);
+        fos.write(out.toByteArray());
+        fos.close();
+
+        Log.d(TAG, "PNG XMP written successfully");
+        return true;
+
+    } catch (Exception e) {
+        Log.e(TAG, "PNG write failed: " + e.getMessage());
+        return false;
     }
+}
 
     private static byte[] buildPngITXtChunk(byte[] xmpBytes) throws Exception {
         // iTXt keyword for XMP
@@ -286,61 +285,55 @@ public class MetadataWriter {
     // ── MP4 ───────────────────────────────────────────────────────────────────
 
     private static boolean writeMp4(String filePath, List<String> tags) {
-        try {
-            byte[] xmpBytes = buildXmp(tags);
+    try {
+        byte[] xmpBytes = buildXmp(tags);
 
-            FileInputStream fis = new FileInputStream(filePath);
-            byte[] original = new byte[fis.available()];
-            fis.read(original);
-            fis.close();
+        File file = new File(filePath);
+        byte[] original = readAllBytes(file);
+        if (original == null) {
+            Log.e(TAG, "Failed to read MP4");
+            return false;
+        }
 
-            // Build XMP UUID atom
-            // UUID for XMP: BE7ACFCB97A942E89C71999491E3AFAC
-            byte[] xmpUuid = {
+        byte[] xmpUuid = {
                 (byte)0xBE, (byte)0x7A, (byte)0xCF, (byte)0xCB,
                 (byte)0x97, (byte)0xA9, (byte)0x42, (byte)0xE8,
                 (byte)0x9C, (byte)0x71, (byte)0x99, (byte)0x94,
                 (byte)0x91, (byte)0xE3, (byte)0xAF, (byte)0xAC
-            };
+        };
 
-            int atomSize = 8 + 16 + xmpBytes.length; // size + 'uuid' + uuid + data
-            byte[] atom = new byte[atomSize];
+        int atomSize = 8 + 16 + xmpBytes.length;
+        byte[] atom = new byte[atomSize];
 
-            // Size
-            atom[0] = (byte)((atomSize >> 24) & 0xFF);
-            atom[1] = (byte)((atomSize >> 16) & 0xFF);
-            atom[2] = (byte)((atomSize >> 8) & 0xFF);
-            atom[3] = (byte)(atomSize & 0xFF);
-            // Type 'uuid'
-            atom[4] = 0x75; // u
-            atom[5] = 0x75; // u
-            atom[6] = 0x69; // i
-            atom[7] = 0x64; // d
-            // UUID
-            System.arraycopy(xmpUuid, 0, atom, 8, 16);
-            // XMP data
-            System.arraycopy(xmpBytes, 0, atom, 24, xmpBytes.length);
+        atom[0] = (byte)((atomSize >> 24) & 0xFF);
+        atom[1] = (byte)((atomSize >> 16) & 0xFF);
+        atom[2] = (byte)((atomSize >> 8) & 0xFF);
+        atom[3] = (byte)(atomSize & 0xFF);
+        atom[4] = 0x75; // u
+        atom[5] = 0x75; // u
+        atom[6] = 0x69; // i
+        atom[7] = 0x64; // d
+        System.arraycopy(xmpUuid, 0, atom, 8, 16);
+        System.arraycopy(xmpBytes, 0, atom, 24, xmpBytes.length);
 
-            // Remove existing XMP uuid atom if present
-            byte[] cleaned = removeMp4Xmp(original, xmpUuid);
+        byte[] cleaned = removeMp4Xmp(original, xmpUuid);
 
-            // Append XMP atom before mdat or at end
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            out.write(cleaned);
-            out.write(atom);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(cleaned);
+        out.write(atom);
 
-            FileOutputStream fos = new FileOutputStream(filePath);
-            fos.write(out.toByteArray());
-            fos.close();
+        FileOutputStream fos = new FileOutputStream(filePath);
+        fos.write(out.toByteArray());
+        fos.close();
 
-            Log.d(TAG, "MP4 XMP written successfully");
-            return true;
+        Log.d(TAG, "MP4 XMP written successfully");
+        return true;
 
-        } catch (Exception e) {
-            Log.e(TAG, "MP4 write failed: " + e.getMessage());
-            return false;
-        }
+    } catch (Exception e) {
+        Log.e(TAG, "MP4 write failed: " + e.getMessage());
+        return false;
     }
+}
 
     private static byte[] removeMp4Xmp(byte[] data, byte[] uuid) {
         try {
