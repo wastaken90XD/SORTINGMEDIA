@@ -4,6 +4,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import com.mediasorter.models.MediaFile;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -14,10 +15,9 @@ public class ColorAnalyzer {
 
     public enum Mode { TAG, RENAME, GROUP, TAG_AND_RENAME, ALL }
 
-    private static final int SAMPLE = 64; // decode to 64x64 for speed
+    private static final int SAMPLE = 64;
 
     // ── Color palette ─────────────────────────────────────────────────────────
-
     private static final String[] NAMES = {
         "Black","DarkGray","Gray","LightGray","White",
         "Red","DarkRed","Orange","Amber","Yellow",
@@ -46,14 +46,14 @@ public class ColorAnalyzer {
     }
 
     public static List<Result> analyze(List<MediaFile> files,
-                                        int topN,
-                                        float threshold,
-                                        Mode mode,
-                                        TagManager tagManager,
-                                        BatchRenameManager renamer) {
+                                       int topN,
+                                       float threshold,
+                                       Mode mode,
+                                       TagManager tagManager,
+                                       BatchRenameManager renamer) {
         List<Result> results = new ArrayList<>();
 
-        // Extract colors for all files
+        // Step 1 – extract colors for every file
         for (MediaFile file : files) {
             Result r = new Result();
             r.path = file.getPath();
@@ -67,31 +67,49 @@ public class ColorAnalyzer {
             results.add(r);
         }
 
-        // Group by similarity
+        // Step 2 – group by similarity (only when needed)
         if (mode == Mode.GROUP || mode == Mode.ALL) {
             assignGroups(results, threshold);
         }
 
-        // Apply to files
+        // Step 3 – apply tags and renames (now using the results so we can update paths)
         for (int i = 0; i < results.size(); i++) {
             Result r    = results.get(i);
             MediaFile f = files.get(i);
             if (!r.success || r.colors.isEmpty()) continue;
 
+            // Tagging
             if (mode == Mode.TAG || mode == Mode.TAG_AND_RENAME || mode == Mode.ALL) {
-                for (String color : r.colors) tagManager.applyTag(f, color);
-                if (r.groupId >= 0) tagManager.applyTag(f, "GRP" + r.groupId);
+                if (tagManager != null) {   // guard against null
+                    for (String color : r.colors) tagManager.applyTag(f, color);
+                    if (r.groupId >= 0) tagManager.applyTag(f, "GRP" + r.groupId);
+                }
             }
 
+            // Renaming
             if (mode == Mode.RENAME || mode == Mode.TAG_AND_RENAME || mode == Mode.ALL) {
                 String prefix = String.join("-", r.colors);
                 if (r.groupId >= 0) prefix = "GRP" + r.groupId + "-" + prefix;
-                String ext  = f.getName().contains(".")
-                    ? f.getName().substring(f.getName().lastIndexOf("."))
-                    : "";
-                String newName = prefix + "_" + stripExt(f.getName()) + ext;
-                new java.io.File(f.getPath()).renameTo(
-                    new java.io.File(new java.io.File(f.getPath()).getParent(), newName));
+
+                String oldName = f.getName();
+                String ext = "";
+                int lastDot = oldName.lastIndexOf('.');
+                if (lastDot > 0) {   // "photo.tar.gz" -> ext = ".gz" (keep it simple)
+                    ext = oldName.substring(lastDot);
+                    oldName = oldName.substring(0, lastDot);  // strip extension
+                }
+
+                String newName = prefix + "_" + oldName + ext;
+                File oldFile = new File(r.path);
+                File newFile = new File(oldFile.getParent(), newName);
+
+                if (oldFile.renameTo(newFile)) {
+                    // Update the result's path to the new location
+                    r.path = newFile.getAbsolutePath();
+                } else {
+                    // Optionally log the error; we keep the old path but mark success = false?
+                    // For now we leave r.path unchanged so the caller sees what happened.
+                }
             }
         }
 
@@ -113,11 +131,14 @@ public class ColorAnalyzer {
         scaled.getPixels(pixels, 0, SAMPLE, 0, 0, SAMPLE, SAMPLE);
         scaled.recycle();
 
-        // Convert to Lab
-        List<float[]> labs = new ArrayList<>();
+        List<float[]> labs = new ArrayList<>(pixels.length);
         for (int p : pixels) {
             labs.add(rgbToLab(Color.red(p), Color.green(p), Color.blue(p)));
         }
+
+        // Prevent infinite loop if topN > number of unique pixels
+        int maxColors = labs.size();
+        if (topN > maxColors) topN = maxColors;
 
         return medianCut(labs, topN);
     }
@@ -125,16 +146,24 @@ public class ColorAnalyzer {
     // ── Median cut ────────────────────────────────────────────────────────────
 
     private static float[][] medianCut(List<float[]> pixels, int n) {
+        if (pixels.isEmpty() || n <= 0) return new float[0][0];
+
         List<List<float[]>> buckets = new ArrayList<>();
         buckets.add(new ArrayList<>(pixels));
 
         while (buckets.size() < n) {
+            // Find the bucket with the largest colour spread
             List<float[]> largest = Collections.max(buckets,
                 (a, b) -> Float.compare(spread(a), spread(b)));
+
+            // If the bucket can't be split further, stop
+            if (largest.size() <= 1) break;
+
             buckets.remove(largest);
             int axis = widestAxis(largest);
             final int ax = axis;
             Collections.sort(largest, (a, b) -> Float.compare(a[ax], b[ax]));
+
             int mid = largest.size() / 2;
             buckets.add(new ArrayList<>(largest.subList(0, mid)));
             buckets.add(new ArrayList<>(largest.subList(mid, largest.size())));
@@ -160,8 +189,8 @@ public class ColorAnalyzer {
         return Math.max(maxL - minL, Math.max(maxA - minA, maxB - minB));
     }
 
+    // Uses the same min/max logic as spread(), but we keep it for clarity.
     private static int widestAxis(List<float[]> bucket) {
-        float rL = 0, rA = 0, rB = 0;
         float minL = Float.MAX_VALUE, maxL = -Float.MAX_VALUE;
         float minA = Float.MAX_VALUE, maxA = -Float.MAX_VALUE;
         float minB = Float.MAX_VALUE, maxB = -Float.MAX_VALUE;
@@ -170,7 +199,9 @@ public class ColorAnalyzer {
             minA = Math.min(minA, c[1]); maxA = Math.max(maxA, c[1]);
             minB = Math.min(minB, c[2]); maxB = Math.max(maxB, c[2]);
         }
-        rL = maxL - minL; rA = maxA - minA; rB = maxB - minB;
+        float rL = maxL - minL;
+        float rA = maxA - minA;
+        float rB = maxB - minB;
         if (rL >= rA && rL >= rB) return 0;
         if (rA >= rB) return 1;
         return 2;
@@ -205,15 +236,14 @@ public class ColorAnalyzer {
 
     private static float colorDistance(List<String> a, List<String> b) {
         if (a.isEmpty() || b.isEmpty()) return Float.MAX_VALUE;
-        // Compare first dominant color index distance
         int ia = indexOf(a.get(0));
         int ib = indexOf(b.get(0));
-        return Math.abs(ia - ib) * 5f; // crude but fast
+        return Math.abs(ia - ib) * 5f;
     }
 
     private static int indexOf(String name) {
         for (int i = 0; i < NAMES.length; i++) if (NAMES[i].equals(name)) return i;
-        return 0;
+        return 0;  // fallback – never reached because nearestName always returns a valid name
     }
 
     // ── Color math ────────────────────────────────────────────────────────────
@@ -254,10 +284,5 @@ public class ColorAnalyzer {
             if (d < best) { best = d; idx = i; }
         }
         return NAMES[idx];
-    }
-
-    private static String stripExt(String name) {
-        int dot = name.lastIndexOf('.');
-        return dot >= 0 ? name.substring(0, dot) : name;
     }
 }
