@@ -16,6 +16,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -30,24 +31,23 @@ public class ThumbnailLoader {
     public static final int QUALITY_MEDIUM = 256;
     public static final int QUALITY_HIGH   = 512;
 
-    // Default max bitmap memory — 20MB
     private static final long DEFAULT_MAX_BYTES = 20 * 1024 * 1024;
 
     private final Context           context;
     private final SharedPreferences prefs;
     private final CacheManager      diskCache;
     private final Handler           mainHandler = new Handler(Looper.getMainLooper());
-    private       ExecutorService   executor    = Executors.newFixedThreadPool(2);
+    private final ExecutorService   executor    = Executors.newFixedThreadPool(2);
 
     // LRU bitmap cache with byte budget
     private final LinkedHashMap<String, Bitmap> memCache =
         new LinkedHashMap<String, Bitmap>(16, 0.75f, true);
     private long currentBytes = 0;
 
-    private int maxCount = 100; // Default Thumbnail count.
-    
-    // In-flight loads
-    private final Map<String, Future<?>> inFlight = new LinkedHashMap<>();
+    private int maxCount = 100; // max entries in memory cache
+
+    // Thread‑safe map of in‑flight loads
+    private final Map<String, Future<?>> inFlight = new ConcurrentHashMap<>();
 
     public ThumbnailLoader(Context context) {
         this.context   = context;
@@ -89,6 +89,12 @@ public class ThumbnailLoader {
 
     public void setMaxCount(int maxCount) {
         this.maxCount = Math.max(10, maxCount);
+        // Immediate eviction if needed
+        synchronized (memCache) {
+            while (memCache.size() > this.maxCount) {
+                removeOldest();
+            }
+        }
     }
 
     // ── Load ──────────────────────────────────────────────────────────────────
@@ -153,36 +159,47 @@ public class ThumbnailLoader {
     private void putInMemCache(String path, Bitmap bmp) {
         long bmpBytes = bmp.getByteCount();
         synchronized (memCache) {
-            // Remove existing entry if present
-            if (memCache.containsKey(path)) {
-                currentBytes -= memCache.get(path).getByteCount();
-                memCache.remove(path);
+            // Remove duplicate entry if any
+            Bitmap old = memCache.remove(path);
+            if (old != null) {
+                currentBytes -= old.getByteCount();
+                // Not recycled here; the old bitmap may still be displayed elsewhere
             }
-            // Evict LRU entries until under limit
+
+            // Evict by count first
+            while (memCache.size() >= maxCount && !memCache.isEmpty()) {
+                removeOldest();
+            }
+
+            // Evict by byte budget
             long limit = getMaxBytes();
             while (currentBytes + bmpBytes > limit && !memCache.isEmpty()) {
-                Iterator<Map.Entry<String, Bitmap>> it =
-                    memCache.entrySet().iterator();
-                if (it.hasNext()) {
-                    Map.Entry<String, Bitmap> oldest = it.next();
-                    currentBytes -= oldest.getValue().getByteCount();
-                    it.remove();
-                }
+                removeOldest();
             }
+
             memCache.put(path, bmp);
             currentBytes += bmpBytes;
+        }
+    }
+
+    /** Must be called inside synchronized(memCache) */
+    private void removeOldest() {
+        Iterator<Map.Entry<String, Bitmap>> it = memCache.entrySet().iterator();
+        if (it.hasNext()) {
+            Map.Entry<String, Bitmap> oldest = it.next();
+            currentBytes -= oldest.getValue().getByteCount();
+            it.remove();
         }
     }
 
     private void evictToLimit() {
         synchronized (memCache) {
             long limit = getMaxBytes();
-            Iterator<Map.Entry<String, Bitmap>> it =
-                memCache.entrySet().iterator();
-            while (currentBytes > limit && it.hasNext()) {
-                Map.Entry<String, Bitmap> entry = it.next();
-                currentBytes -= entry.getValue().getByteCount();
-                it.remove();
+            while (currentBytes > limit && !memCache.isEmpty()) {
+                removeOldest();
+            }
+            while (memCache.size() > maxCount) {
+                removeOldest();
             }
         }
     }
@@ -197,15 +214,13 @@ public class ThumbnailLoader {
     // Clear thumbnails for files outside current window
     public void evictOutsideWindow(List<String> windowPaths) {
         synchronized (memCache) {
-            List<String> toRemove = new ArrayList<>();
-            for (String path : memCache.keySet()) {
-                if (!windowPaths.contains(path)) {
-                    toRemove.add(path);
+            Iterator<Map.Entry<String, Bitmap>> it = memCache.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<String, Bitmap> entry = it.next();
+                if (!windowPaths.contains(entry.getKey())) {
+                    currentBytes -= entry.getValue().getByteCount();
+                    it.remove();
                 }
-            }
-            for (String path : toRemove) {
-                Bitmap bmp = memCache.remove(path);
-                if (bmp != null) currentBytes -= bmp.getByteCount();
             }
         }
     }
