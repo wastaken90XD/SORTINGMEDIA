@@ -19,15 +19,14 @@ public class FolderManager {
     }
 
     public void addFolder(String path) {
+        if (path == null || path.trim().isEmpty()) return;
         Set<String> folders = getFolderSet();
-        folders.add(path);
-        save(folders);
+        if (folders.add(path)) save(folders);
     }
 
     public void removeFolder(String path) {
         Set<String> folders = getFolderSet();
-        folders.remove(path);
-        save(folders);
+        if (folders.remove(path)) save(folders);
     }
 
     public List<String> getFolders() {
