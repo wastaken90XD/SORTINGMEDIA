@@ -31,6 +31,7 @@ import com.mediasorter.models.Tag;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import android.widget.Spinner;
 
 public class MainActivity extends Activity
         implements FolderWatcher.Listener, MediaIndexer.IndexListener {
@@ -1030,14 +1031,6 @@ private Spinner makeSpinner(String[] options) {
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
-    }
-
-    private TextView makeLabel(String text) {
-        TextView tv = new TextView(this);
-        tv.setText(text);
-        tv.setTextColor(0xFFCCCCCC);
-        tv.setTextSize(12f);
-        return tv;
     }
 
     private android.widget.Spinner makeSpinner(String[] options) {
