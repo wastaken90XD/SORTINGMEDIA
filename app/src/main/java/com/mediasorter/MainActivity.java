@@ -1032,15 +1032,6 @@ private Spinner makeSpinner(String[] options) {
                 .setNegativeButton("Cancel", null)
                 .show();
     }
-
-    private android.widget.Spinner makeSpinner(String[] options) {
-        android.widget.Spinner sp = new android.widget.Spinner(this);
-        ArrayAdapter<String> ad = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, options);
-        ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        sp.setAdapter(ad);
-        return sp;
-    }
-
     // ── Sort / Filter / Group ─────────────────────────────────────────────────
 
     private void showSortMenu(View anchor) {
