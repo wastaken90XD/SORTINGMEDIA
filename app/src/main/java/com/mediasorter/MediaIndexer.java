@@ -139,11 +139,12 @@ public class MediaIndexer {
                 }
             }
 
-            List<String> toRemove = new ArrayList<>();
             Set<String> onDisk = new HashSet<>();
                 for (File f : files) {
                     if (!f.isDirectory()) onDisk.add(f.getAbsolutePath());
                 }
+            
+            List<String> toRemove = new ArrayList<>();
             String normalizedFolder = folderPath.endsWith("/")
                 ? folderPath
                 : folderPath + "/";
@@ -179,12 +180,12 @@ public class MediaIndexer {
                 if (!f.isDirectory()) onDisk.add(f.getAbsolutePath());
             }
 
-            // Remove ghosts
-            List<String> toRemove = new ArrayList<>();
             Set<String> onDisk = new HashSet<>();
                 for (File f : files) {
                     if (!f.isDirectory()) onDisk.add(f.getAbsolutePath());
                 }
+            
+            List<String> toRemove = new ArrayList<>();
              String normalizedFolder = folderPath.endsWith("/")
                  ? folderPath
                  : folderPath + "/";
