@@ -12,10 +12,11 @@ import java.util.Map;
 
 public class GroupManager {
 
-    private Group.GroupBy current = Group.GroupBy.FILE_TYPE;
+    // Thread-safe visibility for the grouping mode
+    private volatile Group.GroupBy current = Group.GroupBy.FILE_TYPE;
 
     public void setGroupBy(Group.GroupBy g) { this.current = g; }
-    public Group.GroupBy getCurrent()       { return current; }
+    public Group.GroupBy getCurrent()        { return current; }
 
     public List<Group> group(List<MediaFile> files) {
         if (files == null || files.isEmpty()) return new ArrayList<>();
@@ -25,9 +26,10 @@ public class GroupManager {
                 case TAG:       return groupByTag(files);
                 case DATE:      return groupByDate(files);
                 case FOLDER:    return groupByFolder(files);
-                default:        return groupByType(files);
+                default:        return groupByType(files); // safe fallback
             }
         } catch (Exception e) {
+            // Log the error in production; for now we still provide a safe fallback
             List<Group> fallback = new ArrayList<>();
             Group g = new Group("All", Group.GroupBy.FILE_TYPE);
             for (MediaFile f : files) g.addFile(f);
@@ -41,9 +43,7 @@ public class GroupManager {
         for (MediaFile f : files) {
             if (f == null) continue;
             String key = f.getType() != null ? f.getType().name() : "UNKNOWN";
-            if (!map.containsKey(key))
-                map.put(key, new Group(key, Group.GroupBy.FILE_TYPE));
-            map.get(key).addFile(f);
+            map.computeIfAbsent(key, k -> new Group(k, Group.GroupBy.FILE_TYPE)).addFile(f);
         }
         return new ArrayList<>(map.values());
     }
@@ -58,9 +58,7 @@ public class GroupManager {
                 untagged.addFile(f);
             } else {
                 for (String tag : tags) {
-                    if (!map.containsKey(tag))
-                        map.put(tag, new Group(tag, Group.GroupBy.TAG));
-                    map.get(tag).addFile(f);
+                    map.computeIfAbsent(tag, t -> new Group(t, Group.GroupBy.TAG)).addFile(f);
                 }
             }
         }
@@ -71,15 +69,16 @@ public class GroupManager {
 
     private List<Group> groupByDate(List<MediaFile> files) {
         Map<String, Group> map = new LinkedHashMap<>();
-        SimpleDateFormat sdf   = new SimpleDateFormat("yyyy-MM", Locale.getDefault());
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM", Locale.getDefault());
         for (MediaFile f : files) {
             if (f == null) continue;
             String key;
-            try { key = sdf.format(new Date(f.getDateAdded())); }
-            catch (Exception e) { key = "Unknown"; }
-            if (!map.containsKey(key))
-                map.put(key, new Group(key, Group.GroupBy.DATE));
-            map.get(key).addFile(f);
+            try {
+                key = sdf.format(new Date(f.getDateAdded()));
+            } catch (Exception e) {
+                key = "Unknown";
+            }
+            map.computeIfAbsent(key, k -> new Group(k, Group.GroupBy.DATE)).addFile(f);
         }
         return new ArrayList<>(map.values());
     }
@@ -93,9 +92,7 @@ public class GroupManager {
             java.io.File file = new java.io.File(path);
             String folder = file.getParentFile() != null
                 ? file.getParentFile().getName() : "Unknown";
-            if (!map.containsKey(folder))
-                map.put(folder, new Group(folder, Group.GroupBy.FOLDER));
-            map.get(folder).addFile(f);
+            map.computeIfAbsent(folder, k -> new Group(k, Group.GroupBy.FOLDER)).addFile(f);
         }
         return new ArrayList<>(map.values());
     }
