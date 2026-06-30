@@ -3,12 +3,12 @@ plugins {
 }
 
 android {
-    compileSdk 21
+    compileSdk 33
 
     defaultConfig {
         applicationId "com.mediasorter"
         minSdk        21
-        targetSdk     31
+        targetSdk     33           // bump to 33 (good practice, matches compileSdk)
         versionCode   1
         versionName   "1.0"
     }
@@ -26,15 +26,19 @@ android {
     }
 
     lint {
-        disable 'ExpiredTargetSdkVersion'
-        checkReleaseBuilds false
+        // Treat NewApi violations as fatal errors → build will fail if you use a method added after API 21
+        fatal 'NewApi'
+        // Remove the disable of ExpiredTargetSdkVersion (or keep it if you intentionally stay on 31)
+        // disable 'ExpiredTargetSdkVersion'
+        checkReleaseBuilds true   // enable lint on release builds
+        abortOnError true         // fail the build on any error-level violation
     }
 }
 
 dependencies {
     implementation 'org.apache.sanselan:sanselan:0.97-incubator'
-    implementation 'androidx.appcompat:appcompat:1.6.1'           // was 1.3.1
-    implementation 'androidx.recyclerview:recyclerview:1.3.0'    // was 1.2.1
-    implementation 'androidx.room:room-runtime:2.5.1'            // was 2.3.0
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.recyclerview:recyclerview:1.3.0'
+    implementation 'androidx.room:room-runtime:2.5.1'
     annotationProcessor 'androidx.room:room-compiler:2.5.1'
 }
