@@ -227,3 +227,13 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         }
     }
 }
+
+private static String join(CharSequence delimiter, Iterable<? extends CharSequence> elements) {
+    StringBuilder sb = new StringBuilder();
+    int i = 0;
+    for (CharSequence item : elements) {
+        if (i++ > 0) sb.append(delimiter);
+        sb.append(item);
+    }
+    return sb.toString();
+}
