@@ -258,7 +258,8 @@ public class TagManager {
             if (!f.hasTag(tagName)) continue;
             for (String other : f.getTags()) {
                 if (other.equals(tagName)) continue;
-                coMap.merge(other, 1, Integer::sum);
+                int count = coMap.containsKey(other) ? coMap.get(other) : 0;
+                coMap.put(other, count + 1);
             }
         }
         return coMap;
