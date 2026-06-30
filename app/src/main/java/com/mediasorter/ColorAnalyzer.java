@@ -88,7 +88,7 @@ public class ColorAnalyzer {
 
             // Renaming
             if (mode == Mode.RENAME || mode == Mode.TAG_AND_RENAME || mode == Mode.ALL) {
-                String prefix = String.join("-", r.colors);
+                String prefix = join("-", r.colors);
                 if (r.groupId >= 0) prefix = "GRP" + r.groupId + "-" + prefix;
 
                 String oldName = f.getName();
@@ -188,6 +188,16 @@ public class ColorAnalyzer {
         }
         return Math.max(maxL - minL, Math.max(maxA - minA, maxB - minB));
     }
+
+    private static String join(CharSequence delimiter, Iterable<? extends CharSequence> elements) {
+    StringBuilder sb = new StringBuilder();
+    int i = 0;
+    for (CharSequence item : elements) {
+        if (i++ > 0) sb.append(delimiter);
+        sb.append(item);
+    }
+    return sb.toString();
+}
 
     // Uses the same min/max logic as spread(), but we keep it for clarity.
     private static int widestAxis(List<float[]> bucket) {
