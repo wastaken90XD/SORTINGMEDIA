@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    compileSdk 33
+    compileSdk 21
 
     defaultConfig {
         applicationId "com.mediasorter"
