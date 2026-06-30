@@ -164,7 +164,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
             holder.fileTags.setText("No tags");
             holder.fileTags.setTextColor(0xFF666666);
         } else {
-            holder.fileTags.setText(String.join("  ", tags));
+            holder.fileTags.setText(join("  ", tags));
             holder.fileTags.setTextColor(0xFFE94560);
         }
 
