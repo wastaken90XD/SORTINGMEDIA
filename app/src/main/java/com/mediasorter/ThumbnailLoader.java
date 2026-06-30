@@ -182,17 +182,6 @@ public class ThumbnailLoader {
         }
     }
 
-    private void removeOldest() {
-    Iterator<Map.Entry<String, Bitmap>> it = memCache.entrySet().iterator();
-    if (it.hasNext()) {
-        Map.Entry<String, Bitmap> oldest = it.next();
-        Bitmap bmp = oldest.getValue();
-        if (bmp != null && !bmp.isRecycled()) bmp.recycle();
-        currentBytes -= bmp.getByteCount();
-        it.remove();
-    }
-}
-
     /** Must be called inside synchronized(memCache) */
     private void removeOldest() {
         Iterator<Map.Entry<String, Bitmap>> it = memCache.entrySet().iterator();
