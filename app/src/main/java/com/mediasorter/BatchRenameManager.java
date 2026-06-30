@@ -115,7 +115,7 @@ public class BatchRenameManager {
     public List<RenamePreview> preview(List<MediaFile> files) {
         List<RenamePreview> previews = new ArrayList<>();
         List<String> usedNames = new ArrayList<>();
-        int counter = numberStart;   // sequential counter resets each preview call
+        int counter = numberStart;
 
         for (int i = 0; i < files.size(); i++) {
             MediaFile file = files.get(i);
@@ -125,7 +125,6 @@ public class BatchRenameManager {
             String extension = getExtension(file.getName());
             String fullNew = newName + extension;
 
-            // If no actual change, skip conflict check
             if (fullNew.equals(file.getName())) {
                 previews.add(new RenamePreview(file.getPath(), file.getName(), fullNew, false));
                 if (numbering == Numbering.SEQUENTIAL) counter++;
@@ -215,7 +214,7 @@ public class BatchRenameManager {
 
     public boolean canUndo() { return !undoMap.isEmpty(); }
 
-    // ── Name builder (enhanced) ──────────────────────────────────────────────
+    // ── Name builder (API‑21‑safe) ──────────────────────────────────────────
 
     private String buildName(MediaFile file, int sequenceNumber) {
         String sep = getSeparatorChar();
@@ -227,9 +226,8 @@ public class BatchRenameManager {
             original = original.replace(r.getKey(), r.getValue());
         }
 
-        // 2. Build tag part
-        List<String> tags = file.getTags();
-        String tagPart = String.join(sep, tags);
+        // 2. Build tag part (API‑21‑safe)
+        String tagPart = join(sep, file.getTags());
 
         // 3. Combine according to order
         String body;
@@ -247,8 +245,8 @@ public class BatchRenameManager {
 
         // 4. Apply case
         switch (caseMode) {
-            case LOWERCASE: body = body.toLowerCase(); break;
-            case UPPERCASE: body = body.toUpperCase(); break;
+            case LOWERCASE: body = body.toLowerCase(Locale.US); break;
+            case UPPERCASE: body = body.toUpperCase(Locale.US); break;
         }
 
         // 5. Folder name (optional)
@@ -279,7 +277,6 @@ public class BatchRenameManager {
 
         sb.append(folderPart);
 
-        // Number before or after body
         if (!numberPart.isEmpty() && numberPosition == NumberPosition.BEFORE) {
             sb.append(numberPart).append(numberSeparator);
         }
@@ -295,7 +292,8 @@ public class BatchRenameManager {
         return sb.toString();
     }
 
-    // ── Helpers (unchanged) ──────────────────────────────────────────────────
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
     private String getExtension(String filename) {
         int dot = filename.lastIndexOf('.');
         return dot >= 0 ? filename.substring(dot) : "";
@@ -314,5 +312,18 @@ public class BatchRenameManager {
         } catch (SecurityException e) {
             return true;
         }
+    }
+
+    /**
+     * API‑21‑safe replacement for String.join.
+     */
+    private static String join(CharSequence delimiter, Iterable<? extends CharSequence> elements) {
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        for (CharSequence item : elements) {
+            if (i++ > 0) sb.append(delimiter);
+            sb.append(item);
+        }
+        return sb.toString();
     }
 }
