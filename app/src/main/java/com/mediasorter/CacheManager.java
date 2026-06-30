@@ -57,7 +57,12 @@ public class CacheManager {
         if (files == null || files.length == 0) return;
 
         // Sort by last accessed — oldest first
-        Arrays.sort(files, Comparator.comparingLong(File::lastModified));
+        Arrays.sort(files, new Comparator<File>() {
+    @Override
+    public int compare(File a, File b) {
+        return Long.compare(a.lastModified(), b.lastModified());
+    }
+});
 
         long target = getCacheLimitBytes();
         for (File f : files) {
