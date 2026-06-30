@@ -88,15 +88,6 @@
             android:textSize="14sp"
             android:layout_marginStart="4dp"/>
 
-        <!-- Replace btnDashboard -->
-<Button
-    android:id="@+id/btnDashboard"
-    android:layout_width="wrap_content"
-    android:layout_height="36dp"
-    android:text="Stats"
-    android:textSize="11sp"
-    android:layout_marginStart="4dp"/>
-
 <!-- Replace btnSettings -->
 <Button
     android:id="@+id/btnSettings"
