@@ -456,9 +456,9 @@ public class MainActivity extends Activity
         btnScan.setEnabled(false);
         btnScan.setText("…");
         for (String folder : folderManager.getFolders()) {
-            indexer.scanFolder(folder);
             folderWatcher.watch(folder);
         }
+        indexer.scanFolders(folderManager.getFolders());
     }
 
     // ── Gesture execution ─────────────────────────────────────────────────────
