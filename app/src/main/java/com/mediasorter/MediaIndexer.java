@@ -48,59 +48,59 @@ public class MediaIndexer {
     // ── Full scan ─────────────────────────────────────────────────────────────
 
     public void scanFolder(String folderPath) {
-        if (!scanning.compareAndSet(false, true)) return;
+    if (!scanning.compareAndSet(false, true)) return;
 
-        executor.submit(() -> {
-            try {
-                File folder = new File(folderPath);
-                if (!folder.exists() || !folder.isDirectory()) return;
+    executor.submit(() -> {
+        try {
+            File folder = new File(folderPath);
+            if (!folder.exists() || !folder.isDirectory()) return;
 
-                File[] files = folder.listFiles();
-                if (files == null) return;
+            File[] files = folder.listFiles();
+            if (files == null) return;
 
-                List<MediaFile> page     = new ArrayList<>();
-                List<MediaFile> allFound = new ArrayList<>();
+            List<MediaFile> page     = new ArrayList<>();
+            List<MediaFile> allFound = new ArrayList<>();
 
-                for (File f : files) {
-                    if (f.isDirectory()) continue;
-                    String absPath = f.getAbsolutePath();
-                    if (manifest.containsKey(absPath)) continue;
+            for (File f : files) {
+                if (f.isDirectory()) continue;
+                String absPath = f.getAbsolutePath();
+                if (manifest.containsKey(absPath)) continue;
 
-                    MediaFile mf = buildLight(f);
-                    if (mf.getType() != MediaFile.Type.UNSUPPORTED) {
-                        page.add(mf);
-                        allFound.add(mf);
+                MediaFile mf = buildLight(f);
+                if (mf.getType() != MediaFile.Type.UNSUPPORTED) {
+                    page.add(mf);
+                    allFound.add(mf);
 
-                        // Build hash for the manifest entry
-                        byte[] hash = HashScanner.partialHash(absPath);
-                        manifest.put(absPath, new ManifestEntry(f.length(), hash));
+                    // Build hash for the manifest entry
+                    byte[] hash = HashScanner.partialHash(absPath);
+                    manifest.put(absPath, new ManifestEntry(f.length(), hash));
 
-                        if (page.size() >= PAGE_SIZE) {
-                            final List<MediaFile> batch = new ArrayList<>(page);
-                            if (listener != null) listener.onPageLoaded(batch);
-                            page.clear();
-                            try { Thread.sleep(PAGE_DELAY_MS); }
-                            catch (InterruptedException ignored) {}
-                        }
+                    if (page.size() >= PAGE_SIZE) {
+                        final List<MediaFile> batch = new ArrayList<>(page);
+                        if (listener != null) listener.onPageLoaded(batch);
+                        page.clear();
+                        try { Thread.sleep(PAGE_DELAY_MS); }
+                        catch (InterruptedException ignored) {}
                     }
                 }
-
-                if (!page.isEmpty() && listener != null) {
-                    listener.onPageLoaded(new ArrayList<>(page));
-                }
-
-                synchronized (index) { index.addAll(allFound); }
-                
-            finally {
-                        if (listener != null) {
-                            listener.onScanComplete(new ArrayList<>(index));
-                        }
-                        // Scan next folder in queue
-                        scanNextInQueue();
-                        scanning.set(false);
             }
-        });
-    }
+
+            if (!page.isEmpty() && listener != null) {
+                listener.onPageLoaded(new ArrayList<>(page));
+            }
+
+            synchronized (index) { index.addAll(allFound); }
+
+            if (listener != null) {
+                listener.onScanComplete(new ArrayList<>(index));
+            }
+
+        } finally {
+            scanNextInQueue();
+            scanning.set(false);
+        }
+    });
+}
 
     public void scanFolders(List<String> folders) {
         synchronized (folderQueue) {
