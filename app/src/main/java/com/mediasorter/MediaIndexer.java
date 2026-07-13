@@ -96,7 +96,7 @@ public class MediaIndexer {
             }
 
         } finally {
-            scanNextInQueue();
+            scanNextInQueue();          // if you’re keeping the queue logic
             scanning.set(false);
         }
     });
