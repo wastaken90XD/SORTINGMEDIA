@@ -40,6 +40,7 @@ public class MediaIndexer {
     private final List<MediaFile>               index    = new ArrayList<>();
     private       IndexListener                 listener;
     private final AtomicBoolean                 scanning = new AtomicBoolean(false);
+    private final List<String> folderQueue = new ArrayList<>();
 
     public void setListener(IndexListener l) { this.listener = l; }
     public boolean isScanning()              { return scanning.get(); }
@@ -89,14 +90,32 @@ public class MediaIndexer {
                 }
 
                 synchronized (index) { index.addAll(allFound); }
-
-                if (listener != null) {
-                    listener.onScanComplete(new ArrayList<>(index));
-                }
-            } finally {
-                scanning.set(false);
+                
+            finally {
+                        if (listener != null) {
+                            listener.onScanComplete(new ArrayList<>(index));
+                        }
+                        // Scan next folder in queue
+                        scanNextInQueue();
+                        scanning.set(false);
             }
         });
+    }
+
+    public void scanFolders(List<String> folders) {
+        synchronized (folderQueue) {
+            folderQueue.clear();
+            folderQueue.addAll(folders);
+        }
+        scanNextInQueue();
+    }
+
+    private void scanNextInQueue() {
+        String next = null;
+        synchronized (folderQueue) {
+            if (!folderQueue.isEmpty()) next = folderQueue.remove(0);
+        }
+        if (next != null) scanFolder(next);
     }
 
     // ── Lightweight rescan ────────────────────────────────────────────────────
