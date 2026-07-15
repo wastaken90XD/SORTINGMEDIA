@@ -365,6 +365,7 @@ public class MainActivity extends Activity
         List<String> tags = active.getTags();
         previewManager.setSidePanelTags(tags, file.getTags());
         updateDpadLabels();
+        previewManager.updateGestureLabels(gestureSettings);
     }
 
     private void updateDpadLabels() {
