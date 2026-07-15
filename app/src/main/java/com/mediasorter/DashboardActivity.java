@@ -1,24 +1,33 @@
 package com.mediasorter;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.os.Bundle;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import com.mediasorter.models.MediaFile;
 import com.mediasorter.models.Tag;
+import java.util.ArrayList;
 import java.util.List;
 
 public class DashboardActivity extends Activity {
 
-    private MediaIndexer indexer;
-    private TagManager   tagManager;
+    private List<MediaFile> files;
+    private List<Tag>       tags;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        indexer    = new MediaIndexer();
-        tagManager = new TagManager(this);
+
+        // Retrieve data from Intent extras
+        Intent intent = getIntent();
+        files = (List<MediaFile>) intent.getSerializableExtra("files");
+        tags  = (List<Tag>)       intent.getSerializableExtra("tags");
+
+        if (files == null) files = new ArrayList<>();
+        if (tags  == null) tags  = new ArrayList<>();
+
         buildDashboard();
     }
 
@@ -29,9 +38,6 @@ public class DashboardActivity extends Activity {
         root.setPadding(32, 32, 32, 32);
 
         root.addView(makeTitle("Dashboard"));
-
-        List<MediaFile> files = indexer.getIndex();
-        List<Tag>       tags  = tagManager.getAllTags();
 
         // ── File stats ────────────────────────────────────────────────────────
         root.addView(makeTitle("Files"));
@@ -60,7 +66,6 @@ public class DashboardActivity extends Activity {
             int pct = tagged * 100 / files.size();
             root.addView(makeLabel("Progress:          " + pct + "%"));
 
-            // Simple text progress bar
             StringBuilder bar = new StringBuilder("[");
             int filled = pct / 5;
             for (int i = 0; i < 20; i++) bar.append(i < filled ? "█" : "░");
@@ -98,7 +103,7 @@ public class DashboardActivity extends Activity {
         root.addView(makeLabel("5MB - 20MB:        " + under20mb));
         root.addView(makeLabel("Over 20MB:         " + over20mb));
 
-        // ── Back ──────────────────────────────────────────────────────────────
+        // ── Back button ───────────────────────────────────────────────────────
         android.widget.Button btnBack = new android.widget.Button(this);
         btnBack.setText("← Back");
         btnBack.setTextColor(0xFFFFFFFF);
