@@ -540,6 +540,7 @@ public class MainActivity extends Activity
     private void handleDone() {
         if (currentIndex < 0 || currentIndex >= fullList.size()) return;
         fileStatus.setDone(fullList.get(currentIndex).getPath());
+        autoOrganizer.applyToSingle(file);
         navigateNext();
     }
 
