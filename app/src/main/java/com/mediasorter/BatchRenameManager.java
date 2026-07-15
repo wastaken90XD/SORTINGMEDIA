@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class BatchRenameManager {
 
@@ -60,6 +62,9 @@ public class BatchRenameManager {
     private String          numberSeparator = "_";
     private final Map<String, String> replacements = new LinkedHashMap<>();
 
+    // ── ** NEW: Custom rename pattern (optional) ** ──────────────────────────
+    private String          customPattern  = null;   // if set, overrides Order/Separator/etc.
+
     // Undo stack (thread‑safe)
     private final Map<String, String> undoMap = new ConcurrentHashMap<>();
 
@@ -98,6 +103,22 @@ public class BatchRenameManager {
     public void addReplacement(String find, String replace) {
         if (find != null) replacements.put(find, replace != null ? replace : "");
     }
+
+    // ── ** NEW: Custom pattern getter/setter ** ─────────────────────────────
+    /**
+     * Sets a custom pattern for the filename. If non-null and non-empty,
+     * all other ordering/placement settings (Separator, Order, Prefix,
+     * Suffix, IncludeFolder, Numbering, NumberPosition, NumberSeparator)
+     * are still used to generate the components, but the pattern
+     * determines exactly how they are assembled.
+     * <p>
+     * Placeholders: {TAGS}, {ORIGINAL}, {COUNTER}, {COUNTER:5}, {DATE},
+     * {FOLDER}, {PREFIX}, {SUFFIX}, {EXT}, {SEP}
+     * <p>
+     * Example: "{PREFIX}_{FOLDER}{COUNTER:3}_{TAGS}_{ORIGINAL}{SUFFIX}{EXT}"
+     */
+    public void setPattern(String pattern) { this.customPattern = pattern; }
+    public String getPattern()             { return customPattern; }
 
     public String       getPrefix()          { return prefix; }
     public String       getSuffix()          { return suffix; }
@@ -214,9 +235,15 @@ public class BatchRenameManager {
 
     public boolean canUndo() { return !undoMap.isEmpty(); }
 
-    // ── Name builder (API‑21‑safe) ──────────────────────────────────────────
+    // ── Name builder (now with pattern support) ─────────────────────────────
 
     private String buildName(MediaFile file, int sequenceNumber) {
+        // If a custom pattern is set, use it – otherwise fallback to old behaviour
+        if (customPattern != null && !customPattern.isEmpty()) {
+            return buildNameFromPattern(file, sequenceNumber);
+        }
+
+        // Original logic (unchanged)
         String sep = getSeparatorChar();
         String original = stripExtension(file.getName());
 
@@ -289,6 +316,108 @@ public class BatchRenameManager {
 
         if (!suffix.isEmpty()) sb.append(sep).append(suffix);
 
+        return sb.toString();
+    }
+
+    // ── ** NEW: Pattern‑based name builder ** ───────────────────────────────
+
+    private String buildNameFromPattern(MediaFile file, int sequenceNumber) {
+        String sep = getSeparatorChar();
+        String original = stripExtension(file.getName());
+
+        // Apply replacements to the original part
+        for (Map.Entry<String, String> r : replacements.entrySet()) {
+            if (r.getKey().isEmpty()) continue;
+            original = original.replace(r.getKey(), r.getValue());
+        }
+
+        // Tag part
+        String tagPart = join(sep, file.getTags());
+
+        // Folder part (just the name, no trailing separator)
+        String folderName = "";
+        if (includeFolder) {
+            File parent = new File(file.getPath()).getParentFile();
+            if (parent != null) folderName = parent.getName();
+        }
+
+        // Number part
+        String numberPart = "";
+        if (numbering == Numbering.SEQUENTIAL) {
+            numberPart = String.format(Locale.US, "%0" + numberPadding + "d", sequenceNumber);
+        } else if (numbering == Numbering.DATE) {
+            try {
+                SimpleDateFormat sdf = new SimpleDateFormat(dateFormat, Locale.US);
+                numberPart = sdf.format(new Date(file.getDateAdded()));
+            } catch (Exception e) {
+                numberPart = "DATE_ERROR";
+            }
+        }
+
+        // Extension
+        String ext = getExtension(file.getName());
+
+        // Build result by replacing placeholders
+        String result = customPattern;
+
+        // Simple placeholder replacement (order matters because some may overlap)
+        result = result.replace("{PREFIX}", prefix);
+        result = result.replace("{SUFFIX}", suffix);
+        result = result.replace("{FOLDER}", folderName);
+        result = result.replace("{TAGS}", tagPart);
+        result = result.replace("{ORIGINAL}", original);
+        result = result.replace("{DATE}", numberPart);   // if using DATE numbering
+        result = result.replace("{EXT}", ext);
+        result = result.replace("{SEP}", sep);
+
+        // Handle {COUNTER} and {COUNTER:pad}
+        result = replaceCounter(result, numberPart);
+
+        // Apply case mode to the whole result
+        switch (caseMode) {
+            case LOWERCASE: result = result.toLowerCase(Locale.US); break;
+            case UPPERCASE: result = result.toUpperCase(Locale.US); break;
+        }
+
+        return result;
+    }
+
+    /**
+     * Replaces {COUNTER} and {COUNTER:pad} placeholders with the given numberPart.
+     * If a custom padding is specified (e.g. {COUNTER:4}), it overrides the global
+     * numberPadding for that occurrence.
+     */
+    private String replaceCounter(String template, String currentNumberPart) {
+        // Regex to match {COUNTER} or {COUNTER:5}
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("\\{COUNTER(?::(\\d+))?\\}");
+        Matcher m = p.matcher(template);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            String paddingStr = m.group(1);
+            String replacement;
+            if (paddingStr != null) {
+                // Override global padding for this occurrence
+                try {
+                    int pad = Integer.parseInt(paddingStr);
+                    if (numbering == Numbering.SEQUENTIAL) {
+                        // We need the raw sequence number to re-format it
+                        // Unfortunately we don't have direct access to it here,
+                        // but we can parse the currentNumberPart (which is already
+                        // zero-padded) and re-format with new padding.
+                        int seq = Integer.parseInt(currentNumberPart);
+                        replacement = String.format(Locale.US, "%0" + pad + "d", seq);
+                    } else {
+                        replacement = currentNumberPart; // for DATE, ignore counter
+                    }
+                } catch (Exception e) {
+                    replacement = currentNumberPart;
+                }
+            } else {
+                replacement = currentNumberPart;
+            }
+            m.appendReplacement(sb, replacement);
+        }
+        m.appendTail(sb);
         return sb.toString();
     }
 
