@@ -31,7 +31,8 @@ public class ThumbnailLoader {
     public static final int QUALITY_MEDIUM = 256;
     public static final int QUALITY_HIGH   = 512;
 
-    private static final long DEFAULT_MAX_BYTES = 20 * 1024 * 1024;
+    // Default: 1/8 of the device's max heap – safe for low‑RAM phones
+    private static final long DEFAULT_MAX_BYTES = Runtime.getRuntime().maxMemory() / 8;
 
     private final Context           context;
     private final SharedPreferences prefs;
@@ -44,7 +45,7 @@ public class ThumbnailLoader {
         new LinkedHashMap<String, Bitmap>(16, 0.75f, true);
     private long currentBytes = 0;
 
-    private int maxCount = 100; // max entries in memory cache
+    private int maxCount = 100;
 
     // Thread‑safe map of in‑flight loads
     private final Map<String, Future<?>> inFlight = new ConcurrentHashMap<>();
@@ -89,7 +90,6 @@ public class ThumbnailLoader {
 
     public void setMaxCount(int maxCount) {
         this.maxCount = Math.max(10, maxCount);
-        // Immediate eviction if needed
         synchronized (memCache) {
             while (memCache.size() > this.maxCount) {
                 removeOldest();
@@ -159,11 +159,10 @@ public class ThumbnailLoader {
     private void putInMemCache(String path, Bitmap bmp) {
         long bmpBytes = bmp.getByteCount();
         synchronized (memCache) {
-            // Remove duplicate entry if any
             Bitmap old = memCache.remove(path);
             if (old != null) {
                 currentBytes -= old.getByteCount();
-                // Not recycled here; the old bitmap may still be displayed elsewhere
+                // Do NOT recycle here – it might still be displayed elsewhere
             }
 
             // Evict by count first
@@ -182,19 +181,19 @@ public class ThumbnailLoader {
         }
     }
 
-    /** Must be called inside synchronized(memCache) */
+    /** Must be called inside synchronized(memCache).  Recycles the evicted bitmap. */
     private void removeOldest() {
-    Iterator<Map.Entry<String, Bitmap>> it = memCache.entrySet().iterator();
-    if (it.hasNext()) {
-        Map.Entry<String, Bitmap> oldest = it.next();
-        Bitmap bmp = oldest.getValue();
-        if (bmp != null && !bmp.isRecycled()) {
-            bmp.recycle();                     // ← release native pixels
+        Iterator<Map.Entry<String, Bitmap>> it = memCache.entrySet().iterator();
+        if (it.hasNext()) {
+            Map.Entry<String, Bitmap> oldest = it.next();
+            Bitmap bmp = oldest.getValue();
+            if (bmp != null && !bmp.isRecycled()) {
+                bmp.recycle();                     // ← release native memory
+            }
+            currentBytes -= bmp.getByteCount();
+            it.remove();
         }
-        currentBytes -= bmp.getByteCount();    // still safe even after recycle
-        it.remove();
     }
-}
 
     private void evictToLimit() {
         synchronized (memCache) {
@@ -210,6 +209,9 @@ public class ThumbnailLoader {
 
     public void clearMemCache() {
         synchronized (memCache) {
+            for (Bitmap bmp : memCache.values()) {
+                if (bmp != null && !bmp.isRecycled()) bmp.recycle();
+            }
             memCache.clear();
             currentBytes = 0;
         }
@@ -222,7 +224,9 @@ public class ThumbnailLoader {
             while (it.hasNext()) {
                 Map.Entry<String, Bitmap> entry = it.next();
                 if (!windowPaths.contains(entry.getKey())) {
-                    currentBytes -= entry.getValue().getByteCount();
+                    Bitmap bmp = entry.getValue();
+                    if (bmp != null && !bmp.isRecycled()) bmp.recycle();
+                    currentBytes -= bmp.getByteCount();
                     it.remove();
                 }
             }
@@ -251,26 +255,30 @@ public class ThumbnailLoader {
     // ── Generate ──────────────────────────────────────────────────────────────
 
     private Bitmap generate(MediaFile file, int size) {
-        switch (file.getType()) {
-            case IMAGE: return generateImage(file.getPath(), size);
-            case VIDEO: return generateVideo(file.getPath());
-            default:    return null;
+        try {
+            switch (file.getType()) {
+                case IMAGE: return generateImage(file.getPath(), size);
+                case VIDEO: return generateVideo(file.getPath());
+                default:    return null;
+            }
+        } catch (OutOfMemoryError e) {
+            // Single bad file won't crash the whole app
+            return null;
         }
     }
 
     private Bitmap generateImage(String path, int size) {
-    try {
-        BitmapFactory.Options opts = new BitmapFactory.Options();
-        opts.inJustDecodeBounds = true;
-        BitmapFactory.decodeFile(path, opts);
-        opts.inSampleSize       = calcSampleSize(opts, size, size);
-        opts.inJustDecodeBounds = false;
-        return BitmapFactory.decodeFile(path, opts);
-    } catch (OutOfMemoryError e) {
-        // Return null so the placeholder is shown
-        return null;
+        try {
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(path, opts);
+            opts.inSampleSize       = calcSampleSize(opts, size, size);
+            opts.inJustDecodeBounds = false;
+            return BitmapFactory.decodeFile(path, opts);
+        } catch (OutOfMemoryError e) {
+            return null;
+        }
     }
-}
 
     private Bitmap generateVideo(String path) {
         MediaMetadataRetriever r = new MediaMetadataRetriever();
