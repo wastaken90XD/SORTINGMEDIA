@@ -299,8 +299,12 @@ public class MainActivity extends Activity
 
         findViewById(R.id.btnGroupBy).setOnClickListener(v -> showGroupMenu(v));
 
-        findViewById(R.id.btnDashboard).setOnClickListener(v ->
-                startActivity(new Intent(this, DashboardActivity.class)));
+        findViewById(R.id.btnDashboard).setOnClickListener(v -> {
+    Intent i = new Intent(this, DashboardActivity.class);
+    i.putExtra("files", new ArrayList<>(indexer.getIndex()));  // copy of current index
+    i.putExtra("tags",  new ArrayList<>(tagManager.getAllTags())); // copy of all tags
+    startActivity(i);
+});
 
         findViewById(R.id.btnSettings).setOnClickListener(v ->
                 startActivity(new Intent(this, SettingsActivity.class)));
