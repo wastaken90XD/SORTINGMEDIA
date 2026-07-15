@@ -259,13 +259,18 @@ public class ThumbnailLoader {
     }
 
     private Bitmap generateImage(String path, int size) {
+    try {
         BitmapFactory.Options opts = new BitmapFactory.Options();
         opts.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(path, opts);
         opts.inSampleSize       = calcSampleSize(opts, size, size);
         opts.inJustDecodeBounds = false;
         return BitmapFactory.decodeFile(path, opts);
+    } catch (OutOfMemoryError e) {
+        // Return null so the placeholder is shown
+        return null;
     }
+}
 
     private Bitmap generateVideo(String path) {
         MediaMetadataRetriever r = new MediaMetadataRetriever();
