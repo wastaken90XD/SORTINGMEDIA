@@ -657,6 +657,7 @@ public class MainActivity extends Activity
     final BatchRenameManager.NumberPosition oldNumPos = batchRenameManager.getNumberPosition();
     final String oldNumSep = batchRenameManager.getNumberSeparator();
     final Map<String, String> oldReplacements = batchRenameManager.getReplacements();
+    final String oldPattern = batchRenameManager.getPattern();
 
     LinearLayout layout = new LinearLayout(this);
     layout.setOrientation(LinearLayout.VERTICAL);
@@ -759,6 +760,15 @@ public class MainActivity extends Activity
     replacementsEdit.setMinLines(2);
     layout.addView(replacementsEdit);
 
+    // --- CUSTOM PATTERN ---
+    layout.addView(makeLabel("Custom pattern (optional):"));
+    EditText patternEdit = new EditText(this);
+    patternEdit.setText(batchRenameManager.getPattern() != null ? batchRenameManager.getPattern() : "");
+    patternEdit.setHint("{PREFIX}_{FOLDER}{COUNTER:3}_{TAGS}_{ORIGINAL}{SUFFIX}{EXT}");
+    patternEdit.setTextColor(0xFFFFFFFF);
+    patternEdit.setMinLines(1);
+    layout.addView(patternEdit);
+
     // Preview text
     layout.addView(makeLabel("Preview:"));
     final TextView previewText = new TextView(this);
@@ -806,6 +816,14 @@ public class MainActivity extends Activity
                 }
             }
 
+            // --- PATTERN ---
+            String patternText = patternEdit.getText().toString().trim();
+            if (!patternText.isEmpty()) {
+                batchRenameManager.setPattern(patternText);
+            } else {
+                batchRenameManager.setPattern(null);
+            }
+
             // Build preview
             List<BatchRenameManager.RenamePreview> previews = batchRenameManager.preview(selectedFiles);
             StringBuilder psb = new StringBuilder();
@@ -848,6 +866,7 @@ public class MainActivity extends Activity
     dateFmtEdit.addTextChangedListener(tw);
     numSepEdit.addTextChangedListener(tw);
     replacementsEdit.addTextChangedListener(tw);
+    patternEdit.addTextChangedListener(tw);  // monitor pattern changes
 
     includeFolderCheck.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
         @Override public void onCheckedChanged(android.widget.CompoundButton buttonView, boolean isChecked) {
@@ -891,6 +910,7 @@ public class MainActivity extends Activity
             batchRenameManager.setNumberSeparator(oldNumSep);
             batchRenameManager.getReplacements().clear();
             batchRenameManager.getReplacements().putAll(oldReplacements);
+            batchRenameManager.setPattern(oldPattern);
         })
         .setNeutralButton("Undo", (d, w) -> {
             if (batchRenameManager.canUndo()) {
