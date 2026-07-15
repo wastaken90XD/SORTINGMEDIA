@@ -68,6 +68,8 @@ public class PreviewManager {
     private LinearLayout tagSidePanel;
     private Spinner      tagListSpinner;
     private RecyclerView sidePanelTagList;
+    private TextView    swipeLeftLabel, swipeRightLabel, swipeUpLabel, swipeDownLabel;
+    private View        gestureOverlay;
 
     private ActionListener       actionListener;
     private FileStatus           fileStatus;
@@ -120,6 +122,11 @@ public class PreviewManager {
         tagSidePanel       = root.findViewById(R.id.tagSidePanel);
         tagListSpinner     = root.findViewById(R.id.tagListSpinner);
         sidePanelTagList   = root.findViewById(R.id.sidePanelTagList);
+        swipeLeftLabel  = root.findViewById(R.id.swipeLeftLabel);
+        swipeRightLabel = root.findViewById(R.id.swipeRightLabel);
+        swipeUpLabel    = root.findViewById(R.id.swipeUpLabel);
+        swipeDownLabel  = root.findViewById(R.id.swipeDownLabel);
+        gestureOverlay  = root.findViewById(R.id.gestureOverlay);
     }
 
     // ── Buttons ───────────────────────────────────────────────────────────────
