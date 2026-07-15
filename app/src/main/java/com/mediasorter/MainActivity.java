@@ -52,6 +52,7 @@ public class MainActivity extends Activity
     private FilterManager   filterManager;
     private GestureSettings gestureSettings;
     private WindowManager   windowManager;
+    private AutoOrganizer autoOrganizer;
 
     private MediaAdapter mediaAdapter;
     private TagAdapter   tagAdapter;
@@ -129,6 +130,7 @@ public class MainActivity extends Activity
         filterManager   = new FilterManager(fileStatus);
         gestureSettings = new GestureSettings(this);
         windowManager   = new WindowManager(getWindowSize());
+        autoOrganizer = new AutoOrganizer(this, tagManager, batchRenameManager, fileStatus);
         indexer.setListener(this);
 
         // Auto-refresh tag list on any change
@@ -305,6 +307,9 @@ public class MainActivity extends Activity
     i.putExtra("tags",  new ArrayList<>(tagManager.getAllTags())); // copy of all tags
     startActivity(i);
 });
+
+        findViewById(R.id.btnOrganizer).setOnClickListener(v ->
+            startActivity(new Intent(this, RulesActivity.class)));
 
         findViewById(R.id.btnSettings).setOnClickListener(v ->
                 startActivity(new Intent(this, SettingsActivity.class)));
