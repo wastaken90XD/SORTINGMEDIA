@@ -523,28 +523,30 @@ public class MainActivity extends Activity
     // ── Quick actions ─────────────────────────────────────────────────────────
 
     private void handleSkip() {
-        if (currentIndex < 0 || currentIndex >= fullList.size()) return;
-        fileStatus.setSkipped(fullList.get(currentIndex).getPath());
-        navigateNext();
-    }
-
+    if (currentIndex < 0 || currentIndex >= fullList.size()) return;
+    MediaFile file = fullList.get(currentIndex);
+    fileStatus.setSkipped(file.getPath());
+    autoOrganizer.applyToSingle(file);   // <-- now file exists
+    navigateNext();
+}
     private void handleFlag() {
-        if (currentIndex < 0 || currentIndex >= fullList.size()) return;
-        MediaFile file = fullList.get(currentIndex);
-        if (fileStatus.isFlagged(file.getPath()))
-            fileStatus.clearStatus(file.getPath());
-        else
-            fileStatus.setFlagged(file.getPath());
-        previewManager.load(file);
-    }
+    if (currentIndex < 0 || currentIndex >= fullList.size()) return;
+    MediaFile file = fullList.get(currentIndex);
+    if (fileStatus.isFlagged(file.getPath()))
+        fileStatus.clearStatus(file.getPath());
+    else
+        fileStatus.setFlagged(file.getPath());
+    autoOrganizer.applyToSingle(file);
+    previewManager.load(file);
+}
 
     private void handleDone() {
-        if (currentIndex < 0 || currentIndex >= fullList.size()) return;
-        fileStatus.setDone(fullList.get(currentIndex).getPath());
-        autoOrganizer.applyToSingle(file);
-        navigateNext();
-    }
-
+    if (currentIndex < 0 || currentIndex >= fullList.size()) return;
+    MediaFile file = fullList.get(currentIndex);
+    fileStatus.setDone(file.getPath());
+    autoOrganizer.applyToSingle(file); 
+    navigateNext();
+}
     private void cycleFilter() {
         FilterManager.Filter[] filters = FilterManager.Filter.values();
         int next = (filterManager.getCurrent().ordinal() + 1) % filters.length;
