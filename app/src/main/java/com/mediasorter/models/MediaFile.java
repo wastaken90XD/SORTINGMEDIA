@@ -56,6 +56,10 @@ public class MediaFile {
         return tags.contains(tag);
     }
 
+    public void setPath(String path) {
+        this.path = path;
+    }
+
     public String getFormattedSize() {
         if (size < 1024)             return size + " B";
         if (size < 1024 * 1024)      return (size / 1024) + " KB";
