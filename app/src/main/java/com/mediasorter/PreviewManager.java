@@ -68,8 +68,8 @@ public class PreviewManager {
     private LinearLayout tagSidePanel;
     private Spinner      tagListSpinner;
     private RecyclerView sidePanelTagList;
-    private TextView    swipeLeftLabel, swipeRightLabel, swipeUpLabel, swipeDownLabel;
-    private View        gestureOverlay;
+    private View         gestureOverlay;
+    private TextView     swipeLeftLabel, swipeRightLabel, swipeUpLabel, swipeDownLabel;
 
     private ActionListener       actionListener;
     private FileStatus           fileStatus;
@@ -88,6 +88,10 @@ public class PreviewManager {
 
     private static final float MIN_ZOOM = 1.0f;
     private static final float MAX_ZOOM = 8.0f;
+    private static final long OVERLAY_TIMEOUT = 10000; // ms
+    private final Runnable hideOverlayRunnable = () -> {
+        if (gestureOverlay != null) gestureOverlay.setVisibility(View.GONE);
+    };
 
     public PreviewManager(Context context, View previewRoot, FileStatus fileStatus) {
         this.context    = context;
@@ -122,11 +126,11 @@ public class PreviewManager {
         tagSidePanel       = root.findViewById(R.id.tagSidePanel);
         tagListSpinner     = root.findViewById(R.id.tagListSpinner);
         sidePanelTagList   = root.findViewById(R.id.sidePanelTagList);
-        swipeLeftLabel  = root.findViewById(R.id.swipeLeftLabel);
-        swipeRightLabel = root.findViewById(R.id.swipeRightLabel);
-        swipeUpLabel    = root.findViewById(R.id.swipeUpLabel);
-        swipeDownLabel  = root.findViewById(R.id.swipeDownLabel);
-        gestureOverlay  = root.findViewById(R.id.gestureOverlay);
+        gestureOverlay     = root.findViewById(R.id.gestureOverlay);
+        swipeLeftLabel     = root.findViewById(R.id.swipeLeftLabel);
+        swipeRightLabel    = root.findViewById(R.id.swipeRightLabel);
+        swipeUpLabel       = root.findViewById(R.id.swipeUpLabel);
+        swipeDownLabel     = root.findViewById(R.id.swipeDownLabel);
     }
 
     // ── Buttons ───────────────────────────────────────────────────────────────
@@ -144,6 +148,16 @@ public class PreviewManager {
         dpadCenter.setOnClickListener(v -> { if (actionListener != null) actionListener.onDpadCenter(); });
 
         btnTogglePanel.setOnClickListener(v -> togglePanel());
+
+        // Long‑press on any swipe label to show the overlay again
+        View.OnLongClickListener showOverlay = v -> {
+            showGestureOverlay();
+            return true;
+        };
+        swipeLeftLabel.setOnLongClickListener(showOverlay);
+        swipeRightLabel.setOnLongClickListener(showOverlay);
+        swipeUpLabel.setOnLongClickListener(showOverlay);
+        swipeDownLabel.setOnLongClickListener(showOverlay);
     }
 
     // ── Panel toggle ──────────────────────────────────────────────────────────
@@ -198,6 +212,30 @@ public class PreviewManager {
 
     private String truncate(String s) {
         return s.length() > 6 ? s.substring(0, 6) + "…" : s;
+    }
+
+    // ── Gesture overlay ───────────────────────────────────────────────────────
+
+    /**
+     * Call this from MainActivity to update the swipe labels with the current
+     * gesture actions.  The overlay is shown automatically for a few seconds.
+     */
+    public void updateGestureLabels(GestureSettings gestureSettings) {
+        if (gestureSettings == null || swipeLeftLabel == null) return;
+
+        swipeLeftLabel.setText("← " + gestureSettings.getSummary(gestureSettings.getLeft()));
+        swipeRightLabel.setText("→ " + gestureSettings.getSummary(gestureSettings.getRight()));
+        swipeUpLabel.setText("↑ " + gestureSettings.getSummary(gestureSettings.getUp()));
+        swipeDownLabel.setText("↓ " + gestureSettings.getSummary(gestureSettings.getDown()));
+
+        showGestureOverlay();
+    }
+
+    public void showGestureOverlay() {
+        if (gestureOverlay == null) return;
+        gestureOverlay.setVisibility(View.VISIBLE);
+        mainHandler.removeCallbacks(hideOverlayRunnable);
+        mainHandler.postDelayed(hideOverlayRunnable, OVERLAY_TIMEOUT);
     }
 
     // ── Zoom ──────────────────────────────────────────────────────────────────
