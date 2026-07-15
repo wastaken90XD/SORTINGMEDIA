@@ -28,6 +28,8 @@
             android:name=".DashboardActivity"
             android:exported="false"
             android:screenOrientation="landscape" />
+        
+        <activity android:name=".RulesActivity" />
 
     </application>
 
