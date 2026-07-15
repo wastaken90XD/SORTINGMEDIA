@@ -1,14 +1,12 @@
 package com.mediasorter;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.os.Bundle;
-import android.view.View;
-import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
 import com.mediasorter.organizer.AutoOrganizer;
 import com.mediasorter.organizer.Rule;
+import java.util.ArrayList;
 import java.util.List;
 
 public class RulesActivity extends Activity {
@@ -19,12 +17,14 @@ public class RulesActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        organizer = new AutoOrganizer(this,
-                ((App)getApplication()).getTagManager(),
-                ((App)getApplication()).getBatchRenameManager(),
-                ((App)getApplication()).getFileStatus());
+        // Instantiate managers directly (they read from SharedPreferences, so it's fine)
+        TagManager tagManager = new TagManager(this);
+        BatchRenameManager renamer = new BatchRenameManager();
+        FileStatus fileStatus = new FileStatus(this);
 
+        organizer = new AutoOrganizer(this, tagManager, renamer, fileStatus);
         rules = organizer.getRules();
+
         ListView lv = new ListView(this);
         adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1,
                 getRuleNames());
@@ -32,7 +32,7 @@ public class RulesActivity extends Activity {
         lv.setOnItemClickListener((parent, view, pos, id) -> editRule(pos));
         setContentView(lv);
 
-        findViewById(android.R.id.content).setOnLongClickListener(v -> {
+        lv.setOnLongClickListener(v -> {
             addNewRule();
             return true;
         });
@@ -47,7 +47,6 @@ public class RulesActivity extends Activity {
     private void addNewRule() {
         Rule r = new Rule();
         r.name = "New Rule";
-        r.action = null; // will set in editor
         rules.add(r);
         organizer.setRules(rules);
         adapter.clear();
@@ -55,7 +54,6 @@ public class RulesActivity extends Activity {
     }
 
     private void editRule(int pos) {
-        // For now just toggle enabled, full editor later
         Rule r = rules.get(pos);
         r.enabled = !r.enabled;
         organizer.setRules(rules);
