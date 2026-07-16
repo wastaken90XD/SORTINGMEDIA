@@ -18,13 +18,37 @@ public abstract class Action {
 
     public List<String> getLog() { return log; }
     public void clearLog() { log.clear(); }
+
+    // ── Static factories (hide subclass types) ────────────────────────────
+
+    public static Action moveAction(String destFolder, Conflict conflict) {
+        return new MoveAction(destFolder, conflict);
+    }
+
+    public static Action deleteAction(boolean useTrash, String trashFolder) {
+        return new DeleteAction(useTrash, trashFolder);
+    }
+
+    public static Action tagAction(List<String> tagsToAdd, List<String> tagsToRemove) {
+        return new TagAction(tagsToAdd, tagsToRemove);
+    }
+
+    public static Action statusAction(FileStatus.Status status, boolean clear) {
+        return new StatusAction(status, clear);
+    }
+
+    public static Action renameAction(String pattern) {
+        return new RenameAction(pattern);
+    }
+
+    public enum Conflict { SKIP, OVERWRITE, RENAME }
 }
 
-// --- MoveAction ---
-public class MoveAction extends Action {
-    enum Conflict { SKIP, OVERWRITE, RENAME }
-    final String destFolder;
-    final Conflict conflict;
+// ── Concrete implementations (package‑private) ──────────────────────────
+
+class MoveAction extends Action {
+    private final String destFolder;
+    private final Conflict conflict;
 
     MoveAction(String destFolder, Conflict conflict) {
         this.destFolder = destFolder;
@@ -32,9 +56,7 @@ public class MoveAction extends Action {
     }
 
     @Override
-    public String describe() {
-        return "Move to " + destFolder;
-    }
+    public String describe() { return "Move to " + destFolder; }
 
     @Override
     public boolean execute(MediaFile file, Context context,
@@ -60,7 +82,7 @@ public class MoveAction extends Action {
             }
         }
         if (src.renameTo(destFile)) {
-            file.setPath(destFile.getAbsolutePath()); // keep MediaFile in sync
+            file.setPath(destFile.getAbsolutePath());
             log.add("Moved: " + src.getName() + " → " + destFile.getParent());
             return true;
         } else {
@@ -84,24 +106,9 @@ public class MoveAction extends Action {
     }
 }
 
-// --- CopyAction ---
-public class CopyAction extends Action {
-    // similar to MoveAction but using FileChannel for copy (not implemented here for brevity)
-    // You can add later; for now we'll skip to keep answer concise.
-    @Override
-    public String describe() { return "Copy"; }
-    @Override
-    public boolean execute(MediaFile file, Context context,
-            TagManager tagManager, BatchRenameManager renamer, FileStatus fileStatus) {
-        log.add("Copy not yet implemented");
-        return false;
-    }
-}
-
-// --- DeleteAction ---
-public class DeleteAction extends Action {
-    final boolean useTrash;
-    final String trashFolder;
+class DeleteAction extends Action {
+    private final boolean useTrash;
+    private final String trashFolder;
 
     DeleteAction(boolean useTrash, String trashFolder) {
         this.useTrash = useTrash;
@@ -140,10 +147,9 @@ public class DeleteAction extends Action {
     }
 }
 
-// --- TagAction ---
-public class TagAction extends Action {
-    final List<String> tagsToAdd;
-    final List<String> tagsToRemove;
+class TagAction extends Action {
+    private final List<String> tagsToAdd;
+    private final List<String> tagsToRemove;
 
     TagAction(List<String> add, List<String> remove) {
         this.tagsToAdd = add != null ? add : new ArrayList<String>();
@@ -151,9 +157,7 @@ public class TagAction extends Action {
     }
 
     @Override
-    public String describe() {
-        return "Change tags";
-    }
+    public String describe() { return "Change tags"; }
 
     @Override
     public boolean execute(MediaFile file, Context context,
@@ -165,10 +169,9 @@ public class TagAction extends Action {
     }
 }
 
-// --- StatusAction ---
-public class StatusAction extends Action {
-    final FileStatus.Status status;
-    final boolean clear;
+class StatusAction extends Action {
+    private final FileStatus.Status status;
+    private final boolean clear;
 
     StatusAction(FileStatus.Status status, boolean clear) {
         this.status = status;
@@ -198,23 +201,17 @@ public class StatusAction extends Action {
     }
 }
 
-// --- RenameAction ---
-public class RenameAction extends Action {
-    final String pattern;   // uses BatchRenameManager pattern syntax
+class RenameAction extends Action {
+    private final String pattern;
 
-    RenameAction(String pattern) {
-        this.pattern = pattern;
-    }
+    RenameAction(String pattern) { this.pattern = pattern; }
 
     @Override
-    public String describe() {
-        return "Rename: " + pattern;
-    }
+    public String describe() { return "Rename: " + pattern; }
 
     @Override
     public boolean execute(MediaFile file, Context context,
             TagManager tagManager, BatchRenameManager renamer, FileStatus fileStatus) {
-        // We'll use a temporary BatchRenameManager to generate the new name
         BatchRenameManager temp = new BatchRenameManager();
         temp.setPattern(pattern);
         List<MediaFile> single = new ArrayList<>();
