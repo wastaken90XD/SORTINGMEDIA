@@ -141,7 +141,7 @@ class DeleteAction extends Action {
 }
 
 // --- TagAction ---
-class TagAction extends Action {
+public class TagAction extends Action {
     final List<String> tagsToAdd;
     final List<String> tagsToRemove;
 
