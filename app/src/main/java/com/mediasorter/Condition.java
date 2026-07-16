@@ -10,7 +10,7 @@ public abstract class Condition {
 }
 
 // --- TagCondition ---
-class TagCondition extends Condition {
+public class TagCondition extends Condition {
     final List<String> tags;
     final boolean matchAny;   // true = OR, false = AND
     final boolean negate;
@@ -41,7 +41,7 @@ class TagCondition extends Condition {
 }
 
 // --- NameCondition ---
-class NameCondition extends Condition {
+public class NameCondition extends Condition {
     enum MatchType { CONTAINS, STARTS_WITH, ENDS_WITH, REGEX }
     final String pattern;
     final MatchType type;
@@ -71,7 +71,7 @@ class NameCondition extends Condition {
 }
 
 // --- TypeCondition ---
-class TypeCondition extends Condition {
+public class TypeCondition extends Condition {
     final MediaFile.Type type;
     final boolean negate;
 
@@ -88,7 +88,7 @@ class TypeCondition extends Condition {
 }
 
 // --- SizeCondition ---
-class SizeCondition extends Condition {
+public class SizeCondition extends Condition {
     final long threshold;   // bytes
     final boolean greaterThan;
     final boolean negate;
@@ -107,7 +107,7 @@ class SizeCondition extends Condition {
 }
 
 // --- DateCondition ---
-class DateCondition extends Condition {
+public class DateCondition extends Condition {
     final int days;          // number of days
     final boolean olderThan; // true = older than X days, false = newer than X days
     final boolean negate;
@@ -129,7 +129,7 @@ class DateCondition extends Condition {
 }
 
 // --- StatusCondition ---
-class StatusCondition extends Condition {
+public class StatusCondition extends Condition {
     final FileStatus.Status status;
     final boolean negate;
 
@@ -154,7 +154,7 @@ class StatusCondition extends Condition {
 }
 
 // --- FolderCondition ---
-class FolderCondition extends Condition {
+public class FolderCondition extends Condition {
     final String folderPath;
     final boolean negate;
 
