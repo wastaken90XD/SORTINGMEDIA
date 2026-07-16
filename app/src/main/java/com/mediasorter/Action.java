@@ -21,7 +21,7 @@ public abstract class Action {
 }
 
 // --- MoveAction ---
-class MoveAction extends Action {
+public class MoveAction extends Action {
     enum Conflict { SKIP, OVERWRITE, RENAME }
     final String destFolder;
     final Conflict conflict;
@@ -85,7 +85,7 @@ class MoveAction extends Action {
 }
 
 // --- CopyAction ---
-class CopyAction extends Action {
+public class CopyAction extends Action {
     // similar to MoveAction but using FileChannel for copy (not implemented here for brevity)
     // You can add later; for now we'll skip to keep answer concise.
     @Override
@@ -99,7 +99,7 @@ class CopyAction extends Action {
 }
 
 // --- DeleteAction ---
-class DeleteAction extends Action {
+public class DeleteAction extends Action {
     final boolean useTrash;
     final String trashFolder;
 
@@ -166,7 +166,7 @@ public class TagAction extends Action {
 }
 
 // --- StatusAction ---
-class StatusAction extends Action {
+public class StatusAction extends Action {
     final FileStatus.Status status;
     final boolean clear;
 
@@ -199,7 +199,7 @@ class StatusAction extends Action {
 }
 
 // --- RenameAction ---
-class RenameAction extends Action {
+public class RenameAction extends Action {
     final String pattern;   // uses BatchRenameManager pattern syntax
 
     RenameAction(String pattern) {
