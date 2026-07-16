@@ -2,9 +2,11 @@ package com.mediasorter.models;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.io.Serializable;
 
-public class MediaFile {
-
+public class MediaFile implements Serializable {
+    
+    private static final long serialVersionUID = 1L;
     public enum Type { IMAGE, VIDEO, UNSUPPORTED }
 
     private String path;
