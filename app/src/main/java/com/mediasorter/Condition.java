@@ -7,13 +7,46 @@ import java.util.regex.Pattern;
 
 public abstract class Condition {
     public abstract boolean matches(MediaFile file, FileStatus fileStatus);
+
+    // ── Static factories (hide subclass types) ────────────────────────────
+
+    public static Condition tagCondition(List<String> tags, boolean matchAny, boolean negate) {
+        return new TagCondition(tags, matchAny, negate);
+    }
+
+    public static Condition nameCondition(String pattern, MatchType type, boolean negate) {
+        return new NameCondition(pattern, type, negate);
+    }
+
+    public static Condition typeCondition(MediaFile.Type type, boolean negate) {
+        return new TypeCondition(type, negate);
+    }
+
+    public static Condition sizeCondition(long threshold, boolean greaterThan, boolean negate) {
+        return new SizeCondition(threshold, greaterThan, negate);
+    }
+
+    public static Condition dateCondition(int days, boolean olderThan, boolean negate) {
+        return new DateCondition(days, olderThan, negate);
+    }
+
+    public static Condition statusCondition(FileStatus.Status status, boolean negate) {
+        return new StatusCondition(status, negate);
+    }
+
+    public static Condition folderCondition(String folderPath, boolean negate) {
+        return new FolderCondition(folderPath, negate);
+    }
+
+    public enum MatchType { CONTAINS, STARTS_WITH, ENDS_WITH, REGEX }
 }
 
-// --- TagCondition ---
-public class TagCondition extends Condition {
-    final List<String> tags;
-    final boolean matchAny;   // true = OR, false = AND
-    final boolean negate;
+// ── Concrete implementations (package‑private) ──────────────────────────
+
+class TagCondition extends Condition {
+    private final List<String> tags;
+    private final boolean matchAny;
+    private final boolean negate;
 
     TagCondition(List<String> tags, boolean matchAny, boolean negate) {
         this.tags = tags;
@@ -40,13 +73,11 @@ public class TagCondition extends Condition {
     }
 }
 
-// --- NameCondition ---
-public class NameCondition extends Condition {
-    enum MatchType { CONTAINS, STARTS_WITH, ENDS_WITH, REGEX }
-    final String pattern;
-    final MatchType type;
-    final boolean negate;
-    final Pattern regex;
+class NameCondition extends Condition {
+    private final String pattern;
+    private final MatchType type;
+    private final boolean negate;
+    private final Pattern regex;
 
     NameCondition(String pattern, MatchType type, boolean negate) {
         this.pattern = pattern;
@@ -70,10 +101,9 @@ public class NameCondition extends Condition {
     }
 }
 
-// --- TypeCondition ---
-public class TypeCondition extends Condition {
-    final MediaFile.Type type;
-    final boolean negate;
+class TypeCondition extends Condition {
+    private final MediaFile.Type type;
+    private final boolean negate;
 
     TypeCondition(MediaFile.Type type, boolean negate) {
         this.type = type;
@@ -87,11 +117,10 @@ public class TypeCondition extends Condition {
     }
 }
 
-// --- SizeCondition ---
-public class SizeCondition extends Condition {
-    final long threshold;   // bytes
-    final boolean greaterThan;
-    final boolean negate;
+class SizeCondition extends Condition {
+    private final long threshold;
+    private final boolean greaterThan;
+    private final boolean negate;
 
     SizeCondition(long threshold, boolean greaterThan, boolean negate) {
         this.threshold = threshold;
@@ -106,11 +135,10 @@ public class SizeCondition extends Condition {
     }
 }
 
-// --- DateCondition ---
-public class DateCondition extends Condition {
-    final int days;          // number of days
-    final boolean olderThan; // true = older than X days, false = newer than X days
-    final boolean negate;
+class DateCondition extends Condition {
+    private final int days;
+    private final boolean olderThan;
+    private final boolean negate;
 
     DateCondition(int days, boolean olderThan, boolean negate) {
         this.days = days;
@@ -128,10 +156,9 @@ public class DateCondition extends Condition {
     }
 }
 
-// --- StatusCondition ---
-public class StatusCondition extends Condition {
-    final FileStatus.Status status;
-    final boolean negate;
+class StatusCondition extends Condition {
+    private final FileStatus.Status status;
+    private final boolean negate;
 
     StatusCondition(FileStatus.Status status, boolean negate) {
         this.status = status;
@@ -153,10 +180,9 @@ public class StatusCondition extends Condition {
     }
 }
 
-// --- FolderCondition ---
-public class FolderCondition extends Condition {
-    final String folderPath;
-    final boolean negate;
+class FolderCondition extends Condition {
+    private final String folderPath;
+    private final boolean negate;
 
     FolderCondition(String folderPath, boolean negate) {
         this.folderPath = folderPath.endsWith("/") ? folderPath : folderPath + "/";
