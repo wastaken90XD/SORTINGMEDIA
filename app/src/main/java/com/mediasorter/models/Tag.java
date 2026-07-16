@@ -3,9 +3,11 @@ package com.mediasorter.models;
 import androidx.room.Entity;
 import androidx.room.PrimaryKey;
 import androidx.annotation.NonNull;
+import java.io.Serializable;
 
-@Entity(tableName = "tags")
-public class Tag {
+@Entity(tableName = "tags")    
+public class Tag implements Serializable {
+    private static final long serialVersionUID = 1L;
 
     @PrimaryKey
     @NonNull
