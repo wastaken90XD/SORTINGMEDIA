@@ -54,12 +54,12 @@ public class MainActivity extends Activity
     private GestureSettings gestureSettings;
     private WindowManager   windowManager;
     private AutoOrganizer autoOrganizer;
-
     private MediaAdapter mediaAdapter;
     private TagAdapter   tagAdapter;
 
     private List<MediaFile> fullList     = new ArrayList<>();
     private List<MediaFile> currentFiles = new ArrayList<>();
+    private static List<MediaFile> sLatestFullList = new ArrayList<>();            
     private int             currentIndex = -1;
 
     private boolean refreshPending = false;
@@ -70,7 +70,7 @@ public class MainActivity extends Activity
     private Button   btnFilter;
     private Button   btnScan;
 
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());           
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -112,6 +112,10 @@ public class MainActivity extends Activity
         } else {
             super.onBackPressed();
         }
+    }
+                
+    public static List<MediaFile> getLatestFullList() {
+            return sLatestFullList;
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
@@ -425,6 +429,7 @@ public class MainActivity extends Activity
         sortManager.sort(flattened);
 
         fullList = flattened;
+        sLatestFullList = new ArrayList<>(fullList);
         windowManager.setFullIndex(fullList);
 
         if (currentIndex >= 0 && currentIndex < fullList.size()) {
