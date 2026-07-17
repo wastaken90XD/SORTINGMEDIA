@@ -47,8 +47,8 @@ public abstract class Action {
 // ── Concrete implementations (package‑private) ──────────────────────────
 
 class MoveAction extends Action {
-    private final String destFolder;
-    private final Conflict conflict;
+    final String destFolder;
+    final Conflict conflict;
 
     MoveAction(String destFolder, Conflict conflict) {
         this.destFolder = destFolder;
@@ -107,8 +107,8 @@ class MoveAction extends Action {
 }
 
 class DeleteAction extends Action {
-    private final boolean useTrash;
-    private final String trashFolder;
+    final boolean useTrash;
+    final String trashFolder;
 
     DeleteAction(boolean useTrash, String trashFolder) {
         this.useTrash = useTrash;
@@ -148,8 +148,8 @@ class DeleteAction extends Action {
 }
 
 class TagAction extends Action {
-    private final List<String> tagsToAdd;
-    private final List<String> tagsToRemove;
+    final List<String> tagsToAdd;
+    final List<String> tagsToRemove;
 
     TagAction(List<String> add, List<String> remove) {
         this.tagsToAdd = add != null ? add : new ArrayList<String>();
@@ -170,8 +170,8 @@ class TagAction extends Action {
 }
 
 class StatusAction extends Action {
-    private final FileStatus.Status status;
-    private final boolean clear;
+    final FileStatus.Status status;
+    final boolean clear;
 
     StatusAction(FileStatus.Status status, boolean clear) {
         this.status = status;
@@ -202,7 +202,7 @@ class StatusAction extends Action {
 }
 
 class RenameAction extends Action {
-    private final String pattern;
+    final String pattern;
 
     RenameAction(String pattern) { this.pattern = pattern; }
 
