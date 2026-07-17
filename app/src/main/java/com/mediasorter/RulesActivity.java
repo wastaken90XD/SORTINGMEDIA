@@ -10,6 +10,7 @@ import com.mediasorter.models.MediaFile;
 import com.mediasorter.organizer.*;
 import java.util.ArrayList;
 import java.util.List;
+import com.mediasorter.organizer.RuleParamHelper;
 
 public class RulesActivity extends Activity {
 
@@ -197,36 +198,14 @@ public class RulesActivity extends Activity {
 
     // ── Helper methods for parameter extraction from existing rule ────────
     private String getConditionParam(Rule r) {
-        if (r.conditions.isEmpty()) return "";
-        Condition c = r.conditions.get(0);
-        if (c instanceof TagCondition) {
-            return ((TagCondition) c).tags.get(0);
-        } else if (c instanceof NameCondition) {
-            return ((NameCondition) c).pattern;
-        } else if (c instanceof TypeCondition) {
-            return ((TypeCondition) c).type.name();
-        } else if (c instanceof SizeCondition) {
-            return String.valueOf(((SizeCondition) c).threshold / (1024 * 1024));
-        } else if (c instanceof DateCondition) {
-            return String.valueOf(((DateCondition) c).days);
-        }
-        return "";
-    }
+    if (r.conditions.isEmpty()) return "";
+    return RuleParamHelper.getConditionParam(r.conditions.get(0));
+}
 
     private String getActionParam(Rule r) {
-        if (r.action == null) return "";
-        if (r.action instanceof MoveAction) {
-            return ((MoveAction) c).destFolder;
-        } else if (r.action instanceof DeleteAction) {
-            return ((DeleteAction) c).trashFolder != null ? ((DeleteAction) c).trashFolder : "";
-        } else if (r.action instanceof TagAction) {
-            List<String> tags = ((TagAction) c).tagsToAdd;
-            return tags.isEmpty() ? "" : tags.get(0);
-        } else if (r.action instanceof StatusAction) {
-            return ((StatusAction) c).status.name();
-        }
-        return "";
-    }
+    if (r.action == null) return "";
+    return RuleParamHelper.getActionParam(r.action);
+}
 
     // ── Build condition from dialog index ──────────────────────────────────
     private Condition buildCondition(int index, String param) {
