@@ -57,7 +57,6 @@ class TagCondition extends Condition {
     @Override
     public boolean matches(MediaFile file, FileStatus fileStatus) {
         List<String> fileTags = file.getTags();
-        if (tags == null) tags = new java.util.ArrayList<>();
         if (fileTags == null) fileTags = new java.util.ArrayList<>();
         boolean result;
         if (matchAny) {
