@@ -12,8 +12,9 @@ public class Rule {
     public Action action;
 
     public boolean matchesFile(MediaFile file, FileStatus fileStatus) {
+        if (conditions == null || conditions.isEmpty()) return false;
         for (Condition c : conditions) {
-            if (!c.matches(file, fileStatus)) return false;
+            if (c == null || !c.matches(file, fileStatus)) return false;
         }
         return true;
     }
@@ -22,6 +23,7 @@ public class Rule {
             com.mediasorter.TagManager tm,
             com.mediasorter.BatchRenameManager rm,
             FileStatus fs) {
+        if (action == null) return false;
         return action.execute(file, ctx, tm, rm, fs);
     }
 }

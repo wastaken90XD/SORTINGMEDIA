@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -138,16 +140,26 @@ public class BatchRenameManager {
 
     public List<RenamePreview> preview(List<MediaFile> files) {
         List<RenamePreview> previews = new ArrayList<>();
-        List<String> usedNames = new ArrayList<>();
+        Set<String> usedNames = new HashSet<>();
         int counter = numberStart;
+        boolean hasCustomPattern = customPattern != null && !customPattern.isEmpty();
 
         for (int i = 0; i < files.size(); i++) {
             MediaFile file = files.get(i);
-            if (file.getTags().isEmpty() && numbering == Numbering.NONE) continue;
+            boolean hasTags = file.getTags() != null && !file.getTags().isEmpty();
+            if (!hasTags && numbering == Numbering.NONE && !hasCustomPattern) continue;
 
             String newName = buildName(file, counter);
-            String extension = getExtension(file.getName());
-            String fullNew = newName + extension;
+            String fullNew;
+            if (hasCustomPattern) {
+                fullNew = newName;
+            } else {
+                String extension = getExtension(file.getName());
+                fullNew = newName + extension;
+            }
+
+            // Never allow a completely empty filename
+            if (fullNew.isEmpty()) fullNew = file.getName();
 
             if (fullNew.equals(file.getName())) {
                 previews.add(new RenamePreview(file.getPath(), file.getName(), fullNew, false));
@@ -319,7 +331,9 @@ public class BatchRenameManager {
 
         if (!suffix.isEmpty()) sb.append(sep).append(suffix);
 
-        return sb.toString();
+        String result = sb.toString();
+        if (result.isEmpty()) result = original;
+        return result;
     }
 
     // ── ** NEW: Pattern‑based name builder ** ───────────────────────────────
@@ -382,6 +396,7 @@ public class BatchRenameManager {
             case UPPERCASE: result = result.toUpperCase(Locale.US); break;
         }
 
+        if (result.isEmpty()) result = original + ext;
         return result;
     }
 
@@ -427,11 +442,13 @@ public class BatchRenameManager {
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private String getExtension(String filename) {
+        if (filename == null) return "";
         int dot = filename.lastIndexOf('.');
         return dot >= 0 ? filename.substring(dot) : "";
     }
 
     private String stripExtension(String filename) {
+        if (filename == null) return "";
         int dot = filename.lastIndexOf('.');
         return dot >= 0 ? filename.substring(0, dot) : filename;
     }
