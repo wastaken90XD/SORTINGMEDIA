@@ -10,18 +10,28 @@ public class RuleParamHelper {
 
     /** Returns a string representing the first parameter of the condition, or empty. */
     public static String getConditionParam(Condition c) {
+        if (c == null) return "";
         if (c instanceof TagCondition) {
             List<String> tags = ((TagCondition) c).tags;
-            return tags.isEmpty() ? "" : tags.get(0);
+            if (tags == null || tags.isEmpty()) return "";
+            return tags.get(0);
         } else if (c instanceof NameCondition) {
-            return ((NameCondition) c).pattern;
+            String p = ((NameCondition) c).pattern;
+            return p != null ? p : "";
         } else if (c instanceof TypeCondition) {
-            return ((TypeCondition) c).type.name();
+            com.mediasorter.models.MediaFile.Type t = ((TypeCondition) c).type;
+            return t != null ? t.name() : "";
         } else if (c instanceof SizeCondition) {
             // Display size in MB
-            return String.valueOf(((SizeCondition) c).threshold / (1024 * 1024));
+            return String.valueOf(((SizeCondition) c).threshold / (1024L * 1024L));
         } else if (c instanceof DateCondition) {
             return String.valueOf(((DateCondition) c).days);
+        } else if (c instanceof FolderCondition) {
+            String fp = ((FolderCondition) c).folderPath;
+            return fp != null ? fp.replaceFirst("/$", "") : "";
+        } else if (c instanceof StatusCondition) {
+            com.mediasorter.FileStatus.Status s = ((StatusCondition) c).status;
+            return s != null ? s.name() : "";
         }
         return "";
     }

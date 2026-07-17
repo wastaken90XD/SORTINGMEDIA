@@ -49,7 +49,7 @@ class TagCondition extends Condition {
     final boolean negate;
 
     TagCondition(List<String> tags, boolean matchAny, boolean negate) {
-        this.tags = tags;
+        this.tags = tags != null ? new java.util.ArrayList<>(tags) : new java.util.ArrayList<>();
         this.matchAny = matchAny;
         this.negate = negate;
     }
@@ -57,6 +57,8 @@ class TagCondition extends Condition {
     @Override
     public boolean matches(MediaFile file, FileStatus fileStatus) {
         List<String> fileTags = file.getTags();
+        if (tags == null) tags = new java.util.ArrayList<>();
+        if (fileTags == null) fileTags = new java.util.ArrayList<>();
         boolean result;
         if (matchAny) {
             result = false;
@@ -80,21 +82,22 @@ class NameCondition extends Condition {
     final Pattern regex;
 
     NameCondition(String pattern, MatchType type, boolean negate) {
-        this.pattern = pattern;
-        this.type = type;
+        this.pattern = pattern != null ? pattern : "";
+        this.type = type != null ? type : MatchType.CONTAINS;
         this.negate = negate;
-        this.regex = type == MatchType.REGEX ? Pattern.compile(pattern) : null;
+        this.regex = (this.type == MatchType.REGEX && !this.pattern.isEmpty()) ? Pattern.compile(this.pattern) : null;
     }
 
     @Override
     public boolean matches(MediaFile file, FileStatus fileStatus) {
         String name = file.getName();
+        if (name == null) name = "";
         boolean result;
         switch (type) {
             case CONTAINS:   result = name.contains(pattern); break;
             case STARTS_WITH:result = name.startsWith(pattern); break;
             case ENDS_WITH:  result = name.endsWith(pattern); break;
-            case REGEX:      result = regex.matcher(name).find(); break;
+            case REGEX:      result = regex != null && regex.matcher(name).find(); break;
             default:         result = false;
         }
         return negate ? !result : result;
@@ -106,7 +109,7 @@ class TypeCondition extends Condition {
     final boolean negate;
 
     TypeCondition(MediaFile.Type type, boolean negate) {
-        this.type = type;
+        this.type = type != null ? type : MediaFile.Type.UNSUPPORTED;
         this.negate = negate;
     }
 
@@ -161,7 +164,7 @@ class StatusCondition extends Condition {
     final boolean negate;
 
     StatusCondition(FileStatus.Status status, boolean negate) {
-        this.status = status;
+        this.status = status != null ? status : FileStatus.Status.NONE;
         this.negate = negate;
     }
 
@@ -185,13 +188,16 @@ class FolderCondition extends Condition {
     final boolean negate;
 
     FolderCondition(String folderPath, boolean negate) {
-        this.folderPath = folderPath.endsWith("/") ? folderPath : folderPath + "/";
+        String safe = folderPath != null ? folderPath : "";
+        this.folderPath = safe.endsWith("/") ? safe : safe + "/";
         this.negate = negate;
     }
 
     @Override
     public boolean matches(MediaFile file, FileStatus fileStatus) {
-        boolean result = file.getPath().startsWith(folderPath);
+        String path = file.getPath();
+        if (path == null) path = "";
+        boolean result = path.startsWith(folderPath);
         return negate ? !result : result;
     }
 }
