@@ -205,7 +205,7 @@ public class SettingsActivity extends Activity {
             listRow.addView(nameRow);
 
             if (!list.getTags().isEmpty()) {
-                TextView tagsPreview = makeLabel(joinTags(list.getTags()));
+                TextView tagsPreview = makeLabel(String.join(", ", list.getTags()));
                 tagsPreview.setTextColor(0xFF888888);
                 tagsPreview.setTextSize(10f);
                 listRow.addView(tagsPreview);
@@ -751,16 +751,6 @@ root.addView(btnBulkActive);
         lp.topMargin = 8;
         btn.setLayoutParams(lp);
         return btn;
-    }
-
-    private static String joinTags(List<String> tags) {
-        StringBuilder sb = new StringBuilder();
-        int i = 0;
-        for (String tag : tags) {
-            if (i++ > 0) sb.append(", ");
-            sb.append(tag);
-        }
-        return sb.toString();
     }
 
     private Button makeSmallButton(String text) {

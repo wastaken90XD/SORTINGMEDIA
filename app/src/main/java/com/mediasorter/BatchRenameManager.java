@@ -103,9 +103,6 @@ public class BatchRenameManager {
     public void addReplacement(String find, String replace) {
         if (find != null) replacements.put(find, replace != null ? replace : "");
     }
-    public void clearReplacements() {
-        replacements.clear();
-    }
 
     // ── ** NEW: Custom pattern getter/setter ** ─────────────────────────────
     /**

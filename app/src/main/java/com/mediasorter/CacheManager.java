@@ -65,13 +65,9 @@ public class CacheManager {
         });
 
         long target = getCacheLimitBytes();
-        long currentSize = getCacheSizeBytes();
         for (File f : files) {
-            if (currentSize <= target) break;
-            long removed = f.isDirectory() ? 0 : f.length();
-            if (f.delete()) {
-                currentSize -= removed;
-            }
+            if (getCacheSizeBytes() <= target) break;
+            f.delete();
         }
     }
 
