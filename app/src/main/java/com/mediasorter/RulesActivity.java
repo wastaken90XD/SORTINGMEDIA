@@ -1,282 +1,323 @@
-package com.mediasorter.organizer;
+package com.mediasorter;
 
-import android.content.Context;
-import android.content.SharedPreferences;
-import com.mediasorter.FileStatus;
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.os.Bundle;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.*;
 import com.mediasorter.models.MediaFile;
-import org.json.JSONArray;
-import org.json.JSONObject;
+import com.mediasorter.organizer.*;
 import java.util.ArrayList;
 import java.util.List;
 
-public class RuleSerializer {
+public class RulesActivity extends Activity {
 
-    private static final String PREFS = "organizer_prefs";
-    private static final String KEY   = "rules";
+    private AutoOrganizer organizer;
+    private List<Rule> rules;
+    private ArrayAdapter<String> adapter;
+    private ListView listView;
 
-    // ── Save ──────────────────────────────────────────────────────────────────
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
 
-    public static void saveRules(Context context, List<Rule> rules) {
-        JSONArray arr = new JSONArray();
+        // Managers
+        TagManager tagManager = new TagManager(this);
+        BatchRenameManager renamer = new BatchRenameManager();
+        FileStatus fileStatus = new FileStatus(this);
+        organizer = new AutoOrganizer(this, tagManager, renamer, fileStatus);
+
+        rules = organizer.getRules();
+        if (rules == null) rules = new ArrayList<>();
+
+        // UI
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(0xFF121212);
+
+        listView = new ListView(this);
+        adapter = new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1,
+                getRuleDescriptions()) {
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {
+                TextView tv = (TextView) super.getView(position, convertView, parent);
+                tv.setTextColor(0xFFCCCCCC);
+                return tv;
+            }
+        };
+        listView.setAdapter(adapter);
+        listView.setOnItemClickListener((parent, view, pos, id) -> editRule(pos));
+        listView.setOnItemLongClickListener((parent, view, pos, id) -> {
+            deleteRule(pos);
+            return true;
+        });
+        root.addView(listView, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+
+        // Button row
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+
+        Button addBtn = new Button(this);
+        addBtn.setText("+ Add Rule");
+        addBtn.setOnClickListener(v -> showRuleDialog(null, -1));
+        btnRow.addView(addBtn);
+
+        Button runBtn = new Button(this);
+        runBtn.setText("Run Now");
+        runBtn.setOnClickListener(v -> runOrganizer());
+        btnRow.addView(runBtn);
+
+        Button logBtn = new Button(this);
+        logBtn.setText("Log");
+        logBtn.setOnClickListener(v -> showLog());
+        btnRow.addView(logBtn);
+
+        root.addView(btnRow);
+        setContentView(root);
+    }
+
+    private List<String> getRuleDescriptions() {
+        List<String> descs = new ArrayList<>();
         for (Rule r : rules) {
-            try {
-                JSONObject obj = new JSONObject();
-                obj.put("name",    r.name);
-                obj.put("enabled", r.enabled);
-
-                // Conditions
-                JSONArray conds = new JSONArray();
-                for (Condition c : r.conditions) {
-                    JSONObject co = serializeCondition(c);
-                    if (co != null) conds.put(co);
-                }
-                obj.put("conditions", conds);
-
-                // Action
-                if (r.action != null) {
-                    JSONObject ao = serializeAction(r.action);
-                    if (ao != null) obj.put("action", ao);
-                }
-
-                arr.put(obj);
-            } catch (Exception ignored) {}
+            String status = r.enabled ? "✓ " : "✗ ";
+            descs.add(status + r.name + " — " + (r.action != null ? r.action.describe() : "no action"));
         }
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putString(KEY, arr.toString()).apply();
+        return descs;
     }
 
-    // ── Load ──────────────────────────────────────────────────────────────────
-
-    public static List<Rule> loadRules(Context context) {
-        SharedPreferences prefs =
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        String json = prefs.getString(KEY, "[]");
-        List<Rule> rules = new ArrayList<>();
-        try {
-            JSONArray arr = new JSONArray(json);
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject obj = arr.getJSONObject(i);
-                Rule r = new Rule();
-                r.name    = obj.optString("name", "Rule " + i);
-                r.enabled = obj.optBoolean("enabled", true);
-
-                // Conditions
-                JSONArray conds = obj.optJSONArray("conditions");
-                if (conds != null) {
-                    for (int j = 0; j < conds.length(); j++) {
-                        Condition c = deserializeCondition(conds.getJSONObject(j));
-                        if (c != null) r.conditions.add(c);
-                    }
-                }
-
-                // Action
-                if (obj.has("action")) {
-                    r.action = deserializeAction(obj.getJSONObject("action"));
-                }
-
-                rules.add(r);
-            }
-        } catch (Exception ignored) {}
-        return rules;
+    private void refreshList() {
+        adapter.clear();
+        adapter.addAll(getRuleDescriptions());
     }
 
-    // ── Condition serialization ───────────────────────────────────────────────
-
-    private static JSONObject serializeCondition(Condition c) {
-        try {
-            JSONObject o = new JSONObject();
-            if (c instanceof TagCondition) {
-                TagCondition tc = (TagCondition) c;
-                o.put("type", "tag");
-                o.put("tags", listToJsonArray(tc.tags));
-                o.put("matchAny", tc.matchAny);
-                o.put("negate",   tc.negate);
-
-            } else if (c instanceof NameCondition) {
-                NameCondition nc = (NameCondition) c;
-                o.put("type",    "name");
-                o.put("pattern", nc.pattern);
-                o.put("match",   nc.type.name());
-                o.put("negate",  nc.negate);
-
-            } else if (c instanceof TypeCondition) {
-                TypeCondition tc = (TypeCondition) c;
-                o.put("type",       "filetype");
-                o.put("fileType",   tc.type.name());
-                o.put("negate",     tc.negate);
-
-            } else if (c instanceof SizeCondition) {
-                SizeCondition sc = (SizeCondition) c;
-                o.put("type",        "size");
-                o.put("threshold",   sc.threshold);
-                o.put("greaterThan", sc.greaterThan);
-                o.put("negate",      sc.negate);
-
-            } else if (c instanceof DateCondition) {
-                DateCondition dc = (DateCondition) c;
-                o.put("type",      "date");
-                o.put("days",      dc.days);
-                o.put("olderThan", dc.olderThan);
-                o.put("negate",    dc.negate);
-
-            } else if (c instanceof StatusCondition) {
-                StatusCondition sc = (StatusCondition) c;
-                o.put("type",   "status");
-                o.put("status", sc.status.name());
-                o.put("negate", sc.negate);
-
-            } else if (c instanceof FolderCondition) {
-                FolderCondition fc = (FolderCondition) c;
-                o.put("type",   "folder");
-                o.put("folder", fc.folderPath);
-                o.put("negate", fc.negate);
-            }
-            return o;
-        } catch (Exception e) { return null; }
+    private void deleteRule(int pos) {
+        new AlertDialog.Builder(this)
+            .setTitle("Delete rule?")
+            .setMessage(rules.get(pos).name)
+            .setPositiveButton("Delete", (d, w) -> {
+                rules.remove(pos);
+                organizer.setRules(rules);
+                refreshList();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
     }
 
-    private static Condition deserializeCondition(JSONObject o) {
-        try {
-            String type = o.getString("type");
-            switch (type) {
-                case "tag": {
-                    List<String> tags = jsonArrayToList(o.getJSONArray("tags"));
-                    boolean matchAny  = o.optBoolean("matchAny", true);
-                    boolean negate    = o.optBoolean("negate", false);
-                    return Condition.tagCondition(tags, matchAny, negate);
+    private void showRuleDialog(Rule existing, int position) {
+        final boolean isNew = (existing == null);
+        final Rule rule = isNew ? new Rule() : existing;
+        rule.name = isNew ? "" : rule.name;
+        rule.enabled = isNew ? true : rule.enabled;
+
+        // Build view
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(32, 16, 32, 16);
+
+        // Name
+        layout.addView(makeLabel("Rule name:"));
+        EditText nameEdit = new EditText(this);
+        nameEdit.setText(rule.name);
+        nameEdit.setTextColor(0xFFFFFFFF);
+        layout.addView(nameEdit);
+
+        // Enabled
+        CheckBox enabledCheck = new CheckBox(this);
+        enabledCheck.setText("Enabled");
+        enabledCheck.setTextColor(0xFFCCCCCC);
+        enabledCheck.setChecked(rule.enabled);
+        layout.addView(enabledCheck);
+
+        // Condition type
+        layout.addView(makeLabel("Condition type:"));
+        String[] condTypes = {"Has tag", "Name contains", "File type", "Size > MB", "Older than days"};
+        Spinner condSpinner = makeSpinner(condTypes);
+        layout.addView(condSpinner);
+
+        // Condition parameter
+        EditText condParamEdit = new EditText(this);
+        condParamEdit.setText(getConditionParam(rule));
+        condParamEdit.setHint("tag / text / IMAGE/VIDEO / size / days");
+        condParamEdit.setTextColor(0xFFFFFFFF);
+        layout.addView(condParamEdit);
+
+        // Action type
+        layout.addView(makeLabel("Action:"));
+        String[] actTypes = {"Move to folder", "Delete (trash)", "Add tags", "Set status"};
+        Spinner actSpinner = makeSpinner(actTypes);
+        layout.addView(actSpinner);
+
+        // Action parameter
+        EditText actParamEdit = new EditText(this);
+        actParamEdit.setText(getActionParam(rule));
+        actParamEdit.setHint("folder path / trash folder / tags / SKIPPED,FLAGGED,DONE");
+        actParamEdit.setTextColor(0xFFFFFFFF);
+        layout.addView(actParamEdit);
+
+        ScrollView sv = new ScrollView(this);
+        sv.addView(layout);
+
+        new AlertDialog.Builder(this)
+            .setTitle(isNew ? "Add Rule" : "Edit Rule")
+            .setView(sv)
+            .setPositiveButton("Save", (d, w) -> {
+                rule.name = nameEdit.getText().toString().trim();
+                if (rule.name.isEmpty()) rule.name = "Unnamed";
+                rule.enabled = enabledCheck.isChecked();
+
+                // Build condition
+                int condIdx = condSpinner.getSelectedItemPosition();
+                String condParam = condParamEdit.getText().toString().trim();
+                Condition cond = buildCondition(condIdx, condParam);
+                rule.conditions.clear();
+                if (cond != null) rule.conditions.add(cond);
+
+                // Build action
+                int actIdx = actSpinner.getSelectedItemPosition();
+                String actParam = actParamEdit.getText().toString().trim();
+                rule.action = buildAction(actIdx, actParam);
+
+                if (isNew) {
+                    rules.add(rule);
+                } else {
+                    rules.set(position, rule);
                 }
-                case "name": {
-                    String pattern    = o.getString("pattern");
-                    Condition.MatchType mt =
-                        Condition.MatchType.valueOf(o.optString("match", "CONTAINS"));
-                    boolean negate    = o.optBoolean("negate", false);
-                    return Condition.nameCondition(pattern, mt, negate);
-                }
-                case "filetype": {
-                    MediaFile.Type ft =
-                        MediaFile.Type.valueOf(o.getString("fileType"));
-                    boolean negate    = o.optBoolean("negate", false);
-                    return Condition.typeCondition(ft, negate);
-                }
-                case "size": {
-                    long threshold    = o.getLong("threshold");
-                    boolean gt        = o.optBoolean("greaterThan", true);
-                    boolean negate    = o.optBoolean("negate", false);
-                    return Condition.sizeCondition(threshold, gt, negate);
-                }
-                case "date": {
-                    int days          = o.getInt("days");
-                    boolean olderThan = o.optBoolean("olderThan", true);
-                    boolean negate    = o.optBoolean("negate", false);
-                    return Condition.dateCondition(days, olderThan, negate);
-                }
-                case "status": {
-                    FileStatus.Status st =
-                        FileStatus.Status.valueOf(o.getString("status"));
-                    boolean negate    = o.optBoolean("negate", false);
-                    return Condition.statusCondition(st, negate);
-                }
-                case "folder": {
-                    String folder     = o.getString("folder");
-                    boolean negate    = o.optBoolean("negate", false);
-                    return Condition.folderCondition(folder, negate);
-                }
-            }
-        } catch (Exception ignored) {}
+                organizer.setRules(rules);
+                refreshList();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void editRule(int pos) {
+        showRuleDialog(rules.get(pos), pos);
+    }
+
+    // ── Helper methods for parameter extraction from existing rule ────────
+    private String getConditionParam(Rule r) {
+        if (r.conditions.isEmpty()) return "";
+        Condition c = r.conditions.get(0);
+        if (c instanceof TagCondition) {
+            return ((TagCondition) c).tags.get(0);
+        } else if (c instanceof NameCondition) {
+            return ((NameCondition) c).pattern;
+        } else if (c instanceof TypeCondition) {
+            return ((TypeCondition) c).type.name();
+        } else if (c instanceof SizeCondition) {
+            return String.valueOf(((SizeCondition) c).threshold / (1024 * 1024));
+        } else if (c instanceof DateCondition) {
+            return String.valueOf(((DateCondition) c).days);
+        }
+        return "";
+    }
+
+    private String getActionParam(Rule r) {
+        if (r.action == null) return "";
+        if (r.action instanceof MoveAction) {
+            return ((MoveAction) c).destFolder;
+        } else if (r.action instanceof DeleteAction) {
+            return ((DeleteAction) c).trashFolder != null ? ((DeleteAction) c).trashFolder : "";
+        } else if (r.action instanceof TagAction) {
+            List<String> tags = ((TagAction) c).tagsToAdd;
+            return tags.isEmpty() ? "" : tags.get(0);
+        } else if (r.action instanceof StatusAction) {
+            return ((StatusAction) c).status.name();
+        }
+        return "";
+    }
+
+    // ── Build condition from dialog index ──────────────────────────────────
+    private Condition buildCondition(int index, String param) {
+        if (param.isEmpty()) return null;
+        switch (index) {
+            case 0: // Has tag
+                List<String> tags = new ArrayList<>();
+                tags.add(param);
+                return Condition.tagCondition(tags, true, false);
+            case 1: // Name contains
+                return Condition.nameCondition(param, Condition.MatchType.CONTAINS, false);
+            case 2: // File type
+                try {
+                    MediaFile.Type type = MediaFile.Type.valueOf(param.toUpperCase());
+                    return Condition.typeCondition(type, false);
+                } catch (Exception e) { return null; }
+            case 3: // Size > MB
+                try {
+                    long bytes = Long.parseLong(param) * 1024 * 1024;
+                    return Condition.sizeCondition(bytes, true, false);
+                } catch (Exception e) { return null; }
+            case 4: // Older than days
+                try {
+                    int days = Integer.parseInt(param);
+                    return Condition.dateCondition(days, true, false);
+                } catch (Exception e) { return null; }
+        }
         return null;
     }
 
-    // ── Action serialization ──────────────────────────────────────────────────
-
-    private static JSONObject serializeAction(Action a) {
-        try {
-            JSONObject o = new JSONObject();
-            if (a instanceof MoveAction) {
-                MoveAction ma = (MoveAction) a;
-                o.put("type",       "move");
-                o.put("destFolder", ma.destFolder);
-                o.put("conflict",   ma.conflict.name());
-
-            } else if (a instanceof DeleteAction) {
-                DeleteAction da = (DeleteAction) a;
-                o.put("type",        "delete");
-                o.put("useTrash",    da.useTrash);
-                o.put("trashFolder", da.trashFolder != null ? da.trashFolder : "");
-
-            } else if (a instanceof TagAction) {
-                TagAction ta = (TagAction) a;
-                o.put("type",          "tag");
-                o.put("tagsToAdd",     listToJsonArray(ta.tagsToAdd));
-                o.put("tagsToRemove",  listToJsonArray(ta.tagsToRemove));
-
-            } else if (a instanceof StatusAction) {
-                StatusAction sa = (StatusAction) a;
-                o.put("type",   "status");
-                o.put("status", sa.status != null ? sa.status.name() : "NONE");
-                o.put("clear",  sa.clear);
-
-            } else if (a instanceof RenameAction) {
-                RenameAction ra = (RenameAction) a;
-                o.put("type",    "rename");
-                o.put("pattern", ra.pattern);
-            }
-            return o;
-        } catch (Exception e) { return null; }
-    }
-
-    private static Action deserializeAction(JSONObject o) {
-        try {
-            String type = o.getString("type");
-            switch (type) {
-                case "move": {
-                    String dest      = o.getString("destFolder");
-                    Action.Conflict c =
-                        Action.Conflict.valueOf(o.optString("conflict", "SKIP"));
-                    return Action.moveAction(dest, c);
-                }
-                case "delete": {
-                    boolean useTrash    = o.optBoolean("useTrash", false);
-                    String trashFolder  = o.optString("trashFolder", null);
-                    return Action.deleteAction(useTrash,
-                        trashFolder != null && !trashFolder.isEmpty()
-                            ? trashFolder : null);
-                }
-                case "tag": {
-                    List<String> add    =
-                        jsonArrayToList(o.optJSONArray("tagsToAdd"));
-                    List<String> remove =
-                        jsonArrayToList(o.optJSONArray("tagsToRemove"));
-                    return Action.tagAction(add, remove);
-                }
-                case "status": {
-                    boolean clear = o.optBoolean("clear", false);
-                    FileStatus.Status st = clear ? FileStatus.Status.NONE
-                        : FileStatus.Status.valueOf(o.optString("status", "NONE"));
-                    return Action.statusAction(st, clear);
-                }
-                case "rename": {
-                    String pattern = o.getString("pattern");
-                    return Action.renameAction(pattern);
-                }
-            }
-        } catch (Exception ignored) {}
+    // ── Build action from dialog index ────────────────────────────────────
+    private Action buildAction(int index, String param) {
+        if (param.isEmpty()) return null;
+        switch (index) {
+            case 0: // Move to folder
+                return Action.moveAction(param, Action.Conflict.SKIP);
+            case 1: // Delete (trash)
+                return Action.deleteAction(true, param);
+            case 2: // Add tags
+                List<String> addTags = new ArrayList<>();
+                addTags.add(param);
+                return Action.tagAction(addTags, null);
+            case 3: // Set status
+                try {
+                    FileStatus.Status status = FileStatus.Status.valueOf(param.toUpperCase());
+                    return Action.statusAction(status, false);
+                } catch (Exception e) { return null; }
+        }
         return null;
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private static JSONArray listToJsonArray(List<String> list) {
-        JSONArray arr = new JSONArray();
-        if (list != null) for (String s : list) arr.put(s);
-        return arr;
+    // ── Simple UI helpers ─────────────────────────────────────────────────
+    private TextView makeLabel(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(0xFFCCCCCC);
+        tv.setTextSize(12f);
+        return tv;
     }
 
-    private static List<String> jsonArrayToList(JSONArray arr) {
-        List<String> list = new ArrayList<>();
-        if (arr == null) return list;
-        for (int i = 0; i < arr.length(); i++) {
-            try { list.add(arr.getString(i)); } catch (Exception ignored) {}
+    private Spinner makeSpinner(String[] options) {
+        Spinner sp = new Spinner(this);
+        ArrayAdapter<String> ad = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, options);
+        ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        sp.setAdapter(ad);
+        return sp;
+    }
+
+    // ── Organizer actions ─────────────────────────────────────────────────
+    private void runOrganizer() {
+        List<MediaFile> files = MainActivity.getLatestFullList();
+        if (files == null || files.isEmpty()) {
+            Toast.makeText(this, "No files to organize", Toast.LENGTH_SHORT).show();
+            return;
         }
-        return list;
+        int affected = organizer.applyTo(files);
+        Toast.makeText(this, "Rules applied. Files affected: " + affected, Toast.LENGTH_SHORT).show();
+    }
+
+    private void showLog() {
+        List<String> log = organizer.getLog();
+        if (log.isEmpty()) {
+            Toast.makeText(this, "Log is empty", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String line : log) sb.append(line).append("\n");
+        new AlertDialog.Builder(this)
+                .setTitle("Organizer Log")
+                .setMessage(sb.toString())
+                .setPositiveButton("OK", null)
+                .show();
     }
 }
