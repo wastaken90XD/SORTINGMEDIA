@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import android.widget.Spinner;
 import com.mediasorter.organizer.AutoOrganizer;
+import com.mediasorter.RulesActivity;
 
 public class MainActivity extends Activity
         implements FolderWatcher.Listener, MediaIndexer.IndexListener {
