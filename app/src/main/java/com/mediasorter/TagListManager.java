@@ -66,7 +66,7 @@ public class TagListManager {
             ed.putString(KEY_LISTS  + "_name_" + i,    list.getName());
             ed.putBoolean(KEY_LISTS + "_default_" + i, list.isDefault());
             ed.putString(KEY_LISTS  + "_tags_" + i,
-                String.join(",", list.getTags()));
+                joinTags(list.getTags()));
         }
         ed.apply();
     }
@@ -179,5 +179,16 @@ public class TagListManager {
     public TagList getList(int index) {
         if (index < 0 || index >= lists.size()) return null;
         return lists.get(index);
+    }
+
+    // API-21-safe replacement for String.join
+    private static String joinTags(List<String> tags) {
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        for (String tag : tags) {
+            if (i++ > 0) sb.append(",");
+            sb.append(tag);
+        }
+        return sb.toString();
     }
 }

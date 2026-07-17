@@ -821,7 +821,7 @@ public class MainActivity extends Activity
             batchRenameManager.setDateFormat(dateFmtEdit.getText().toString().trim());
 
             // Replacements
-            batchRenameManager.getReplacements().clear();
+            batchRenameManager.clearReplacements();
             String replText = replacementsEdit.getText().toString().trim();
             if (!replText.isEmpty()) {
                 for (String line : replText.split("\n")) {
@@ -924,8 +924,7 @@ public class MainActivity extends Activity
             batchRenameManager.setDateFormat(oldDateFormat);
             batchRenameManager.setNumberPosition(oldNumPos);
             batchRenameManager.setNumberSeparator(oldNumSep);
-            batchRenameManager.getReplacements().clear();
-            batchRenameManager.getReplacements().putAll(oldReplacements);
+            batchRenameManager.setReplacements(oldReplacements);
             batchRenameManager.setPattern(oldPattern);
         })
         .setNeutralButton("Undo", (d, w) -> {
