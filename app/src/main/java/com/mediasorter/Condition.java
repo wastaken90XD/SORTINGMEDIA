@@ -44,9 +44,9 @@ public abstract class Condition {
 // ── Concrete implementations (package‑private) ──────────────────────────
 
 class TagCondition extends Condition {
-    private final List<String> tags;
-    private final boolean matchAny;
-    private final boolean negate;
+    final List<String> tags;
+    final boolean matchAny;
+    final boolean negate;
 
     TagCondition(List<String> tags, boolean matchAny, boolean negate) {
         this.tags = tags;
@@ -74,10 +74,10 @@ class TagCondition extends Condition {
 }
 
 class NameCondition extends Condition {
-    private final String pattern;
-    private final MatchType type;
-    private final boolean negate;
-    private final Pattern regex;
+    final String pattern;
+    final MatchType type;
+    final boolean negate;
+    final Pattern regex;
 
     NameCondition(String pattern, MatchType type, boolean negate) {
         this.pattern = pattern;
@@ -102,8 +102,8 @@ class NameCondition extends Condition {
 }
 
 class TypeCondition extends Condition {
-    private final MediaFile.Type type;
-    private final boolean negate;
+    final MediaFile.Type type;
+    final boolean negate;
 
     TypeCondition(MediaFile.Type type, boolean negate) {
         this.type = type;
@@ -118,9 +118,9 @@ class TypeCondition extends Condition {
 }
 
 class SizeCondition extends Condition {
-    private final long threshold;
-    private final boolean greaterThan;
-    private final boolean negate;
+    final long threshold;
+    final boolean greaterThan;
+    final boolean negate;
 
     SizeCondition(long threshold, boolean greaterThan, boolean negate) {
         this.threshold = threshold;
@@ -136,9 +136,9 @@ class SizeCondition extends Condition {
 }
 
 class DateCondition extends Condition {
-    private final int days;
-    private final boolean olderThan;
-    private final boolean negate;
+    final int days;
+    final boolean olderThan;
+    final boolean negate;
 
     DateCondition(int days, boolean olderThan, boolean negate) {
         this.days = days;
@@ -157,8 +157,8 @@ class DateCondition extends Condition {
 }
 
 class StatusCondition extends Condition {
-    private final FileStatus.Status status;
-    private final boolean negate;
+    final FileStatus.Status status;
+    final boolean negate;
 
     StatusCondition(FileStatus.Status status, boolean negate) {
         this.status = status;
@@ -181,8 +181,8 @@ class StatusCondition extends Condition {
 }
 
 class FolderCondition extends Condition {
-    private final String folderPath;
-    private final boolean negate;
+    final String folderPath;
+    final boolean negate;
 
     FolderCondition(String folderPath, boolean negate) {
         this.folderPath = folderPath.endsWith("/") ? folderPath : folderPath + "/";
