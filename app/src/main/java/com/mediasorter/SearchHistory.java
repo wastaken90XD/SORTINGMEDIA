@@ -3,9 +3,7 @@ package com.mediasorter;
 import android.content.Context;
 import android.content.SharedPreferences;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Persists recent searches and saved (bookmarked) searches.

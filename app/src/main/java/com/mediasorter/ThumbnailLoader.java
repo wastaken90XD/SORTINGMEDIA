@@ -5,7 +5,6 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.media.MediaMetadataRetriever;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.widget.ImageView;
@@ -190,13 +189,11 @@ public class ThumbnailLoader {
                 opts.inMutable = true;
                 Bitmap result = BitmapFactory.decodeFile(path, opts);
 
-                // After successful decode, offer the old bitmap back for reuse
-                if (result != null && opts.inBitmap != null && result != opts.inBitmap) {
-                    // The decode created a new bitmap — the old one was truly reused
-                    offerForReuse(opts.inBitmap);
-                } else if (result != null) {
-                    // result IS the reused bitmap, offer it for next time
-                    offerForReuse(result);
+                // When inBitmap succeeds: result == opts.inBitmap (same object, reused in-place).
+                // When inBitmap fails (IllegalArgumentException): we catch below.
+                // Either way, the bitmap is now available for future reuse.
+                if (result != null) {
+                    tryOfferForReuse(result);
                 }
                 return result;
             }
@@ -221,14 +218,14 @@ public class ThumbnailLoader {
         return bmpBytes >= reqBytes;
     }
 
-    private void offerForReuse(Bitmap bmp) {
-        if (bmp == null || bmp.isRecycled()) return;
+    private boolean tryOfferForReuse(Bitmap bmp) {
+        if (bmp == null || bmp.isRecycled()) return false;
         synchronized (reuseLock) {
-            // Only keep one reusable bitmap to limit memory overhead
             if (reusableBitmap == null || reusableBitmap.isRecycled()) {
                 reusableBitmap = bmp;
+                return true;
             }
-            // else: discard — we already have one
+            return false; // pool full — caller should recycle
         }
     }
 
@@ -241,8 +238,10 @@ public class ThumbnailLoader {
             Bitmap old = memCache.remove(path);
             if (old != null) {
                 currentBytes -= old.getByteCount();
-                // Offer evicted bitmap for inBitmap reuse instead of discarding
-                offerForReuse(old);
+                // Offer for inBitmap reuse; recycle only if pool is full
+                if (!tryOfferForReuse(old)) {
+                    old.recycle();
+                }
             }
 
             // Evict by count first
@@ -268,12 +267,14 @@ public class ThumbnailLoader {
             Map.Entry<String, Bitmap> oldest = it.next();
             Bitmap bmp = oldest.getValue();
             currentBytes -= bmp.getByteCount();
-            // Offer for inBitmap reuse before recycling
-            offerForReuse(bmp);
-            if (bmp != null && !bmp.isRecycled()) {
-                bmp.recycle();
-            }
             it.remove();
+            if (bmp != null && !bmp.isRecycled()) {
+                // Try to keep for inBitmap reuse; recycle only if pool is full
+                boolean reused = tryOfferForReuse(bmp);
+                if (!reused) {
+                    bmp.recycle();
+                }
+            }
         }
     }
 
@@ -346,9 +347,12 @@ public class ThumbnailLoader {
                 if (!windowPaths.contains(entry.getKey())) {
                     Bitmap bmp = entry.getValue();
                     currentBytes -= bmp.getByteCount();
-                    offerForReuse(bmp);
-                    if (bmp != null && !bmp.isRecycled()) bmp.recycle();
                     it.remove();
+                    if (bmp != null && !bmp.isRecycled()) {
+                        if (!tryOfferForReuse(bmp)) {
+                            bmp.recycle();
+                        }
+                    }
                 }
             }
         }
@@ -406,13 +410,13 @@ public class ThumbnailLoader {
 
             try {
                 Bitmap result = BitmapFactory.decodeFile(path, opts);
-                if (result != null) offerForReuse(result);
+                if (result != null) tryOfferForReuse(result);
                 return result;
             } catch (IllegalArgumentException e) {
                 // inBitmap dimensions mismatch — retry without it
                 opts.inBitmap = null;
                 Bitmap result = BitmapFactory.decodeFile(path, opts);
-                if (result != null) offerForReuse(result);
+                if (result != null) tryOfferForReuse(result);
                 return result;
             }
         } catch (OutOfMemoryError e) {
