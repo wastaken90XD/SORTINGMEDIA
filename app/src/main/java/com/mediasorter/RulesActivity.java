@@ -272,7 +272,8 @@ public class RulesActivity extends Activity {
 
         layout.addView(makeLabel("Action type:"));
         String[] actTypes = {"Move", "Copy", "Delete (trash)", "Delete (permanent)",
-                "Add/Remove Tags", "Set/Clear Status", "Rename (pattern)"};
+                "Add/Remove Tags", "Set/Clear Status", "Rename (pattern)",
+                "Set/Change Date", "Change Extension", "Add Prefix/Suffix", "Strip Metadata"};
         Spinner actSpinner = makeSpinner(actTypes);
         layout.addView(actSpinner);
 
@@ -291,6 +292,10 @@ public class RulesActivity extends Activity {
         else if (rule.action instanceof TagAction) actSpinner.setSelection(4);
         else if (rule.action instanceof StatusAction) actSpinner.setSelection(5);
         else if (rule.action instanceof RenameAction) actSpinner.setSelection(6);
+        else if (rule.action instanceof SetDateAction) actSpinner.setSelection(7);
+        else if (rule.action instanceof ChangeExtensionAction) actSpinner.setSelection(8);
+        else if (rule.action instanceof AffixAction) actSpinner.setSelection(9);
+        else if (rule.action instanceof StripMetadataAction) actSpinner.setSelection(10);
 
         // Build initial action params
         final ActionParamHolder actHolder = new ActionParamHolder();
@@ -546,6 +551,13 @@ public class RulesActivity extends Activity {
         Spinner statusSpinner;
         CheckBox clearStatusCheck;
         EditText patternEdit;
+        // New action fields
+        Spinner dateModeSpinner;      // SetDateAction
+        EditText dateValueEdit;       // SetDateAction
+        EditText extensionEdit;       // ChangeExtensionAction
+        Spinner affixPositionSpinner; // AffixAction
+        EditText affixTextEdit;       // AffixAction
+        CheckBox keepOrientationCheck;// StripMetadataAction
     }
 
     private void buildActionParams(LinearLayout container, ActionParamHolder holder,
@@ -670,6 +682,80 @@ public class RulesActivity extends Activity {
                 hint.setTextSize(10f);
                 container.addView(hint);
                 break;
+
+            case 7: // Set/Change Date
+                container.addView(makeLabel("Mode:"));
+                String[] dateModes = {"Offset (add/subtract days)", "Absolute (specific date)"};
+                holder.dateModeSpinner = makeSpinner(dateModes);
+                if (existingAction instanceof SetDateAction) {
+                    holder.dateModeSpinner.setSelection(
+                            "ABSOLUTE".equals(((SetDateAction) existingAction).mode) ? 1 : 0);
+                }
+                container.addView(holder.dateModeSpinner);
+
+                container.addView(makeLabel("Value:"));
+                holder.dateValueEdit = new EditText(this);
+                holder.dateValueEdit.setTextColor(0xFFFFFFFF);
+                holder.dateValueEdit.setHint("days (+7, -3) or timestamp");
+                if (existingAction instanceof SetDateAction) {
+                    holder.dateValueEdit.setText(String.valueOf(((SetDateAction) existingAction).value));
+                }
+                container.addView(holder.dateValueEdit);
+
+                TextView dateHint = new TextView(this);
+                dateHint.setText("Offset: +7 means 7 days forward, -3 means 3 days back.\nAbsolute: Unix timestamp in milliseconds.");
+                dateHint.setTextColor(0xFF888888);
+                dateHint.setTextSize(10f);
+                container.addView(dateHint);
+                break;
+
+            case 8: // Change Extension
+                container.addView(makeLabel("New extension (without dot):"));
+                holder.extensionEdit = new EditText(this);
+                holder.extensionEdit.setTextColor(0xFFFFFFFF);
+                holder.extensionEdit.setHint("png, jpg, webp");
+                if (existingAction instanceof ChangeExtensionAction) {
+                    holder.extensionEdit.setText(((ChangeExtensionAction) existingAction).newExtension);
+                }
+                container.addView(holder.extensionEdit);
+                break;
+
+            case 9: // Add Prefix/Suffix
+                container.addView(makeLabel("Position:"));
+                String[] affixPositions = {"Prefix (before name)", "Suffix (after name, before ext)"};
+                holder.affixPositionSpinner = makeSpinner(affixPositions);
+                if (existingAction instanceof AffixAction) {
+                    holder.affixPositionSpinner.setSelection(
+                            "SUFFIX".equals(((AffixAction) existingAction).position) ? 1 : 0);
+                }
+                container.addView(holder.affixPositionSpinner);
+
+                container.addView(makeLabel("Text to insert:"));
+                holder.affixTextEdit = new EditText(this);
+                holder.affixTextEdit.setTextColor(0xFFFFFFFF);
+                holder.affixTextEdit.setHint("IMG_, _final");
+                if (existingAction instanceof AffixAction) {
+                    holder.affixTextEdit.setText(((AffixAction) existingAction).text);
+                }
+                container.addView(holder.affixTextEdit);
+                break;
+
+            case 10: // Strip Metadata
+                TextView stripWarn = new TextView(this);
+                stripWarn.setText("Removes all EXIF, XMP, and embedded metadata from JPEG/PNG files.");
+                stripWarn.setTextColor(0xFFFF8800);
+                stripWarn.setTextSize(12f);
+                container.addView(stripWarn);
+
+                holder.keepOrientationCheck = new CheckBox(this);
+                holder.keepOrientationCheck.setText("Keep orientation tag (recommended)");
+                holder.keepOrientationCheck.setTextColor(0xFFCCCCCC);
+                holder.keepOrientationCheck.setChecked(true);
+                if (existingAction instanceof StripMetadataAction) {
+                    holder.keepOrientationCheck.setChecked(((StripMetadataAction) existingAction).keepOrientation);
+                }
+                container.addView(holder.keepOrientationCheck);
+                break;
         }
     }
 
@@ -711,6 +797,30 @@ public class RulesActivity extends Activity {
                 String pattern = holder.patternEdit != null ? holder.patternEdit.getText().toString().trim() : "";
                 if (pattern.isEmpty()) return null;
                 return Action.renameAction(pattern);
+
+            case 7: // Set/Change Date
+                try {
+                    String dateMode = holder.dateModeSpinner != null && holder.dateModeSpinner.getSelectedItemPosition() == 1
+                            ? "ABSOLUTE" : "OFFSET";
+                    long dateVal = Long.parseLong(holder.dateValueEdit.getText().toString().trim());
+                    return Action.setDateAction(dateMode, dateVal);
+                } catch (Exception e) { return null; }
+
+            case 8: // Change Extension
+                String ext = holder.extensionEdit != null ? holder.extensionEdit.getText().toString().trim() : "";
+                if (ext.isEmpty()) return null;
+                return Action.changeExtensionAction(ext);
+
+            case 9: // Add Prefix/Suffix
+                String affixPos = holder.affixPositionSpinner != null && holder.affixPositionSpinner.getSelectedItemPosition() == 1
+                        ? "SUFFIX" : "PREFIX";
+                String affixText = holder.affixTextEdit != null ? holder.affixTextEdit.getText().toString() : "";
+                if (affixText.isEmpty()) return null;
+                return Action.affixAction(affixPos, affixText);
+
+            case 10: // Strip Metadata
+                boolean keepOrient = holder.keepOrientationCheck != null && holder.keepOrientationCheck.isChecked();
+                return Action.stripMetadataAction(keepOrient);
         }
         return null;
     }

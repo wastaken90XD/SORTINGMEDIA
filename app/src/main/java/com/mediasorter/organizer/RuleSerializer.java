@@ -121,6 +121,20 @@ public class RuleSerializer {
                     } else if ("RENAME".equals(aType)) {
                         String pattern = aObj.optString("pattern", "");
                         r.action = new RenameAction(pattern);
+                    } else if ("SETDATE".equals(aType)) {
+                        String mode = aObj.optString("mode", "OFFSET");
+                        long value = aObj.optLong("value", 0);
+                        r.action = new SetDateAction(mode, value);
+                    } else if ("EXTENSION".equals(aType)) {
+                        String ext = aObj.optString("newExtension", "");
+                        r.action = new ChangeExtensionAction(ext);
+                    } else if ("AFFIX".equals(aType)) {
+                        String pos = aObj.optString("position", "PREFIX");
+                        String txt = aObj.optString("text", "");
+                        r.action = new AffixAction(pos, txt);
+                    } else if ("STRIPMETA".equals(aType)) {
+                        boolean keepOrient = aObj.optBoolean("keepOrientation", false);
+                        r.action = new StripMetadataAction(keepOrient);
                     }
                 }
 
@@ -232,6 +246,24 @@ public class RuleSerializer {
                     RenameAction ra = (RenameAction) r.action;
                     aObj.put("actionType", "RENAME");
                     aObj.put("pattern", ra.pattern);
+                } else if (r.action instanceof SetDateAction) {
+                    SetDateAction sda = (SetDateAction) r.action;
+                    aObj.put("actionType", "SETDATE");
+                    aObj.put("mode", sda.mode);
+                    aObj.put("value", sda.value);
+                } else if (r.action instanceof ChangeExtensionAction) {
+                    ChangeExtensionAction cea = (ChangeExtensionAction) r.action;
+                    aObj.put("actionType", "EXTENSION");
+                    aObj.put("newExtension", cea.newExtension);
+                } else if (r.action instanceof AffixAction) {
+                    AffixAction aa = (AffixAction) r.action;
+                    aObj.put("actionType", "AFFIX");
+                    aObj.put("position", aa.position);
+                    aObj.put("text", aa.text);
+                } else if (r.action instanceof StripMetadataAction) {
+                    StripMetadataAction sma = (StripMetadataAction) r.action;
+                    aObj.put("actionType", "STRIPMETA");
+                    aObj.put("keepOrientation", sma.keepOrientation);
                 }
                 obj.put("action", aObj);
 

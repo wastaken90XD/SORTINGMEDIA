@@ -49,6 +49,22 @@ public abstract class Action {
         return new RenameAction(pattern);
     }
 
+    public static Action setDateAction(String mode, long value) {
+        return new SetDateAction(mode, value);
+    }
+
+    public static Action changeExtensionAction(String newExtension) {
+        return new ChangeExtensionAction(newExtension);
+    }
+
+    public static Action affixAction(String position, String text) {
+        return new AffixAction(position, text);
+    }
+
+    public static Action stripMetadataAction(boolean keepOrientation) {
+        return new StripMetadataAction(keepOrientation);
+    }
+
     public enum Conflict { SKIP, OVERWRITE, RENAME }
 }
 
@@ -313,5 +329,193 @@ class RenameAction extends Action {
             log.add("Rename failed: " + file.getName());
             return false;
         }
+    }
+}
+
+// ── New action types ───────────────────────────────────────────────────
+
+class SetDateAction extends Action {
+    public String mode;  // "ABSOLUTE" or "OFFSET"
+    public long value;   // timestamp for ABSOLUTE, days for OFFSET
+
+    SetDateAction(String mode, long value) {
+        this.mode = mode != null ? mode : "OFFSET";
+        this.value = value;
+    }
+
+    @Override
+    public String describe() {
+        if ("ABSOLUTE".equals(mode)) {
+            java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US);
+            return "Set date: " + sdf.format(new java.util.Date(value));
+        } else {
+            return "Set date: " + (value >= 0 ? "+" : "") + value + " days";
+        }
+    }
+
+    @Override
+    public boolean execute(MediaFile file, Context context,
+            TagManager tagManager, BatchRenameManager renamer, FileStatus fileStatus) {
+        File f = new File(file.getPath());
+        if (!f.exists()) {
+            log.add("File not found: " + file.getName());
+            return false;
+        }
+        long newTime;
+        if ("ABSOLUTE".equals(mode)) {
+            newTime = value;
+        } else {
+            // OFFSET: add/subtract days from current lastModified
+            long current = f.lastModified();
+            newTime = current + (value * 24L * 60L * 60L * 1000L);
+        }
+        if (f.setLastModified(newTime)) {
+            file.setDateAdded(newTime);
+            log.add("Set date: " + file.getName() + " -> " + new java.util.Date(newTime));
+            return true;
+        } else {
+            log.add("Failed to set date: " + file.getName());
+            return false;
+        }
+    }
+}
+
+class ChangeExtensionAction extends Action {
+    public String newExtension;
+
+    ChangeExtensionAction(String newExtension) {
+        // Normalize: strip leading dot if present
+        if (newExtension != null && newExtension.startsWith(".")) {
+            newExtension = newExtension.substring(1);
+        }
+        this.newExtension = newExtension != null ? newExtension : "";
+    }
+
+    @Override
+    public String describe() { return "Change extension to ." + newExtension; }
+
+    @Override
+    public boolean execute(MediaFile file, Context context,
+            TagManager tagManager, BatchRenameManager renamer, FileStatus fileStatus) {
+        if (newExtension.isEmpty()) {
+            log.add("No extension specified");
+            return false;
+        }
+        File original = new File(file.getPath());
+        String name = original.getName();
+        int dot = name.lastIndexOf('.');
+        String baseName = dot > 0 ? name.substring(0, dot) : name;
+        String newName = baseName + "." + newExtension;
+
+        if (newName.equals(name)) {
+            log.add("Extension unchanged: " + name);
+            return true; // already has the target extension
+        }
+
+        File renamed = new File(original.getParent(), newName);
+        if (renamed.exists()) {
+            log.add("Cannot change extension, target exists: " + newName);
+            return false;
+        }
+        if (original.renameTo(renamed)) {
+            file.setPath(renamed.getAbsolutePath());
+            log.add("Changed extension: " + name + " -> " + newName);
+            return true;
+        } else {
+            log.add("Failed to change extension: " + name);
+            return false;
+        }
+    }
+}
+
+class AffixAction extends Action {
+    public String position; // "PREFIX" or "SUFFIX"
+    public String text;
+
+    AffixAction(String position, String text) {
+        this.position = position != null ? position : "PREFIX";
+        this.text = text != null ? text : "";
+    }
+
+    @Override
+    public String describe() {
+        return "PREFIX".equals(position) ? "Add prefix '" + text + "'" : "Add suffix '" + text + "'";
+    }
+
+    @Override
+    public boolean execute(MediaFile file, Context context,
+            TagManager tagManager, BatchRenameManager renamer, FileStatus fileStatus) {
+        if (text.isEmpty()) {
+            log.add("No affix text specified");
+            return false;
+        }
+        File original = new File(file.getPath());
+        String name = original.getName();
+        int dot = name.lastIndexOf('.');
+        String baseName = dot > 0 ? name.substring(0, dot) : name;
+        String ext = dot > 0 ? name.substring(dot) : "";
+
+        String newName;
+        if ("PREFIX".equals(position)) {
+            newName = text + baseName + ext;
+        } else {
+            newName = baseName + text + ext;
+        }
+
+        if (newName.equals(name)) {
+            log.add("Affix unchanged: " + name);
+            return true;
+        }
+
+        File renamed = new File(original.getParent(), newName);
+        if (renamed.exists()) {
+            log.add("Cannot add affix, target exists: " + newName);
+            return false;
+        }
+        if (original.renameTo(renamed)) {
+            file.setPath(renamed.getAbsolutePath());
+            log.add(("PREFIX".equals(position) ? "Prefixed: " : "Suffixed: ") + name + " -> " + newName);
+            return true;
+        } else {
+            log.add("Failed to add affix: " + name);
+            return false;
+        }
+    }
+}
+
+class StripMetadataAction extends Action {
+    public boolean keepOrientation;
+
+    StripMetadataAction(boolean keepOrientation) {
+        this.keepOrientation = keepOrientation;
+    }
+
+    @Override
+    public String describe() {
+        return keepOrientation ? "Strip metadata (keep orientation)" : "Strip all metadata";
+    }
+
+    @Override
+    public boolean execute(MediaFile file, Context context,
+            TagManager tagManager, BatchRenameManager renamer, FileStatus fileStatus) {
+        String path = file.getPath();
+        String lower = path.toLowerCase();
+        boolean ok;
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+            ok = com.mediasorter.MetadataWriter.stripJpegMetadata(path, keepOrientation);
+        } else if (lower.endsWith(".png")) {
+            ok = com.mediasorter.MetadataWriter.stripPngMetadata(path);
+        } else {
+            log.add("Unsupported format for strip: " + file.getName());
+            return false;
+        }
+        if (ok) {
+            // Clear in-memory tags since metadata was stripped
+            if (file.getTags() != null) file.getTags().clear();
+            log.add("Stripped metadata: " + file.getName());
+        } else {
+            log.add("Failed to strip metadata: " + file.getName());
+        }
+        return ok;
     }
 }

@@ -50,6 +50,15 @@ public class RuleParamHelper {
             return ((StatusAction) a).status.name();
         } else if (a instanceof RenameAction) {
             return ((RenameAction) a).pattern;
+        } else if (a instanceof SetDateAction) {
+            SetDateAction sda = (SetDateAction) a;
+            return "ABSOLUTE".equals(sda.mode) ? String.valueOf(sda.value) : sda.value + "d";
+        } else if (a instanceof ChangeExtensionAction) {
+            return ((ChangeExtensionAction) a).newExtension;
+        } else if (a instanceof AffixAction) {
+            return ((AffixAction) a).text;
+        } else if (a instanceof StripMetadataAction) {
+            return ((StripMetadataAction) a).keepOrientation ? "keep orient" : "all";
         }
         return "";
     }
