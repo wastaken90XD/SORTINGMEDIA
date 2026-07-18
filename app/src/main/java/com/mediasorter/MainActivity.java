@@ -1339,8 +1339,8 @@ private Spinner makeSpinner(String[] options) {
                 String type = types.get(which);
                 if ("header".equals(type)) return;
 
-                String query = items.get(which);
-                if (query.startsWith("★ ")) query = query.substring(2);
+                String itemText = items.get(which);
+                final String query = itemText.startsWith("★ ") ? itemText.substring(2) : itemText;
 
                 if ("saved".equals(type)) {
                     // Long-press-like: offer to remove or re-run
