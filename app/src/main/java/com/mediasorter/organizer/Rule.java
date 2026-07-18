@@ -8,9 +8,11 @@ import java.util.List;
 public class Rule {
     public String name;
     public boolean enabled = true;
+    public boolean autoApply = false;
     public List<Condition> conditions = new ArrayList<>();
     public Action action;
 
+    /** AND logic by default – all conditions must match. */
     public boolean matchesFile(MediaFile file, FileStatus fileStatus) {
         if (conditions == null || conditions.isEmpty()) return false;
         for (Condition c : conditions) {

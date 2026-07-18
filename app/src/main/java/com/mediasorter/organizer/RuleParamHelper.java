@@ -3,8 +3,8 @@ package com.mediasorter.organizer;
 import java.util.List;
 
 /**
- * Helper to extract user‑friendly parameter strings from Condition and Action objects.
- * This class lives in the organizer package so it can access the package‑private subclasses.
+ * Helper to extract user-friendly parameter strings from Condition and Action objects.
+ * This class lives in the organizer package so it can access the package-private subclasses.
  */
 public class RuleParamHelper {
 
@@ -22,7 +22,6 @@ public class RuleParamHelper {
             com.mediasorter.models.MediaFile.Type t = ((TypeCondition) c).type;
             return t != null ? t.name() : "";
         } else if (c instanceof SizeCondition) {
-            // Display size in MB
             return String.valueOf(((SizeCondition) c).threshold / (1024L * 1024L));
         } else if (c instanceof DateCondition) {
             return String.valueOf(((DateCondition) c).days);
@@ -40,6 +39,8 @@ public class RuleParamHelper {
     public static String getActionParam(Action a) {
         if (a instanceof MoveAction) {
             return ((MoveAction) a).destFolder;
+        } else if (a instanceof CopyAction) {
+            return ((CopyAction) a).destFolder;
         } else if (a instanceof DeleteAction) {
             return ((DeleteAction) a).trashFolder != null ? ((DeleteAction) a).trashFolder : "";
         } else if (a instanceof TagAction) {
@@ -47,6 +48,8 @@ public class RuleParamHelper {
             return tags.isEmpty() ? "" : tags.get(0);
         } else if (a instanceof StatusAction) {
             return ((StatusAction) a).status.name();
+        } else if (a instanceof RenameAction) {
+            return ((RenameAction) a).pattern;
         }
         return "";
     }

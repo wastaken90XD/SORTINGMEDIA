@@ -2,7 +2,10 @@ package com.mediasorter;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.ProgressDialog;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.*;
@@ -10,14 +13,15 @@ import com.mediasorter.models.MediaFile;
 import com.mediasorter.organizer.*;
 import java.util.ArrayList;
 import java.util.List;
-import com.mediasorter.organizer.RuleParamHelper;
 
 public class RulesActivity extends Activity {
 
     private AutoOrganizer organizer;
+    private FileStatus fileStatus;
     private List<Rule> rules;
     private ArrayAdapter<String> adapter;
     private ListView listView;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -26,7 +30,7 @@ public class RulesActivity extends Activity {
         // Managers
         TagManager tagManager = new TagManager(this);
         BatchRenameManager renamer = new BatchRenameManager();
-        FileStatus fileStatus = new FileStatus(this);
+        fileStatus = new FileStatus(this);
         organizer = new AutoOrganizer(this, tagManager, renamer, fileStatus);
 
         rules = organizer.getRules();
@@ -36,7 +40,17 @@ public class RulesActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(0xFF121212);
+        root.setPadding(16, 16, 16, 16);
 
+        // Title
+        TextView title = new TextView(this);
+        title.setText("Organizer Rules");
+        title.setTextColor(0xFFFFFFFF);
+        title.setTextSize(20f);
+        title.setPadding(0, 0, 0, 16);
+        root.addView(title);
+
+        // Rule list
         listView = new ListView(this);
         adapter = new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1,
                 getRuleDescriptions()) {
@@ -44,46 +58,78 @@ public class RulesActivity extends Activity {
             public View getView(int position, View convertView, ViewGroup parent) {
                 TextView tv = (TextView) super.getView(position, convertView, parent);
                 tv.setTextColor(0xFFCCCCCC);
+                tv.setTextSize(13f);
                 return tv;
             }
         };
         listView.setAdapter(adapter);
-        listView.setOnItemClickListener((parent, view, pos, id) -> editRule(pos));
-        listView.setOnItemLongClickListener((parent, view, pos, id) -> {
-            deleteRule(pos);
-            return true;
-        });
+        listView.setOnItemClickListener((parent, view, pos, id) -> showRuleOptions(pos));
         root.addView(listView, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
 
-        // Button row
-        LinearLayout btnRow = new LinearLayout(this);
-        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        // Button row 1
+        LinearLayout btnRow1 = new LinearLayout(this);
+        btnRow1.setOrientation(LinearLayout.HORIZONTAL);
+        btnRow1.setPadding(0, 8, 0, 4);
 
-        Button addBtn = new Button(this);
-        addBtn.setText("+ Add Rule");
+        Button addBtn = makeButton("+ Add Rule");
         addBtn.setOnClickListener(v -> showRuleDialog(null, -1));
-        btnRow.addView(addBtn);
+        btnRow1.addView(addBtn, rowParam());
 
-        Button runBtn = new Button(this);
-        runBtn.setText("Run Now");
-        runBtn.setOnClickListener(v -> runOrganizer());
-        btnRow.addView(runBtn);
+        Button runBtn = makeButton("Run Now");
+        runBtn.setOnClickListener(v -> runOrganizerBackground());
+        btnRow1.addView(runBtn, rowParam());
 
-        Button logBtn = new Button(this);
-        logBtn.setText("Log");
+        Button previewBtn = makeButton("Preview");
+        previewBtn.setOnClickListener(v -> showPreview());
+        btnRow1.addView(previewBtn, rowParam());
+
+        root.addView(btnRow1);
+
+        // Button row 2
+        LinearLayout btnRow2 = new LinearLayout(this);
+        btnRow2.setOrientation(LinearLayout.HORIZONTAL);
+        btnRow2.setPadding(0, 4, 0, 8);
+
+        Button undoBtn = makeButton("Undo");
+        undoBtn.setOnClickListener(v -> doUndo());
+        btnRow2.addView(undoBtn, rowParam());
+
+        Button logBtn = makeButton("Log");
         logBtn.setOnClickListener(v -> showLog());
-        btnRow.addView(logBtn);
+        btnRow2.addView(logBtn, rowParam());
 
-        root.addView(btnRow);
+        // Spacer
+        View spacer = new View(this);
+        btnRow2.addView(spacer, rowParam());
+
+        root.addView(btnRow2);
+
         setContentView(root);
     }
+
+    // ── Rule list display ───────────────────────────────────────────────
 
     private List<String> getRuleDescriptions() {
         List<String> descs = new ArrayList<>();
         for (Rule r : rules) {
-            String status = r.enabled ? "✓ " : "✗ ";
-            descs.add(status + r.name + " — " + (r.action != null ? r.action.describe() : "no action"));
+            StringBuilder sb = new StringBuilder();
+            sb.append(r.enabled ? "[ON] " : "[OFF] ");
+            if (r.autoApply) sb.append("[AUTO] ");
+            sb.append(r.name != null ? r.name : "Unnamed");
+            sb.append("\n  ");
+            // Show condition summary
+            if (r.conditions != null && !r.conditions.isEmpty()) {
+                for (int i = 0; i < r.conditions.size(); i++) {
+                    if (i > 0) sb.append(" AND ");
+                    sb.append(r.conditions.get(i).describe());
+                }
+            } else {
+                sb.append("no conditions");
+            }
+            sb.append(" -> ");
+            sb.append(r.action != null ? r.action.describe() : "no action");
+            descs.add(sb.toString());
         }
         return descs;
     }
@@ -91,6 +137,60 @@ public class RulesActivity extends Activity {
     private void refreshList() {
         adapter.clear();
         adapter.addAll(getRuleDescriptions());
+        adapter.notifyDataSetChanged();
+    }
+
+    // ── Rule options (tap) ──────────────────────────────────────────────
+
+    private void showRuleOptions(int pos) {
+        Rule rule = rules.get(pos);
+        String[] options = {"Edit", "Move Up", "Move Down",
+                rule.enabled ? "Disable" : "Enable",
+                rule.autoApply ? "Auto-apply OFF" : "Auto-apply ON",
+                "Delete"};
+        new AlertDialog.Builder(this)
+            .setTitle(rule.name)
+            .setItems(options, (d, which) -> {
+                switch (which) {
+                    case 0: showRuleDialog(rule, pos); break;
+                    case 1: moveRuleUp(pos); break;
+                    case 2: moveRuleDown(pos); break;
+                    case 3: toggleRule(pos); break;
+                    case 4: toggleAutoApply(pos); break;
+                    case 5: deleteRule(pos); break;
+                }
+            })
+            .show();
+    }
+
+    private void moveRuleUp(int pos) {
+        if (pos <= 0) return;
+        Rule tmp = rules.get(pos);
+        rules.set(pos, rules.get(pos - 1));
+        rules.set(pos - 1, tmp);
+        organizer.setRules(rules);
+        refreshList();
+    }
+
+    private void moveRuleDown(int pos) {
+        if (pos >= rules.size() - 1) return;
+        Rule tmp = rules.get(pos);
+        rules.set(pos, rules.get(pos + 1));
+        rules.set(pos + 1, tmp);
+        organizer.setRules(rules);
+        refreshList();
+    }
+
+    private void toggleRule(int pos) {
+        rules.get(pos).enabled = !rules.get(pos).enabled;
+        organizer.setRules(rules);
+        refreshList();
+    }
+
+    private void toggleAutoApply(int pos) {
+        rules.get(pos).autoApply = !rules.get(pos).autoApply;
+        organizer.setRules(rules);
+        refreshList();
     }
 
     private void deleteRule(int pos) {
@@ -106,13 +206,12 @@ public class RulesActivity extends Activity {
             .show();
     }
 
+    // ── Full rule editor dialog ─────────────────────────────────────────
+
     private void showRuleDialog(Rule existing, int position) {
         final boolean isNew = (existing == null);
         final Rule rule = isNew ? new Rule() : existing;
-        rule.name = isNew ? "" : rule.name;
-        rule.enabled = isNew ? true : rule.enabled;
 
-        // Build view
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(32, 16, 32, 16);
@@ -120,42 +219,91 @@ public class RulesActivity extends Activity {
         // Name
         layout.addView(makeLabel("Rule name:"));
         EditText nameEdit = new EditText(this);
-        nameEdit.setText(rule.name);
+        nameEdit.setText(rule.name != null ? rule.name : "");
         nameEdit.setTextColor(0xFFFFFFFF);
         layout.addView(nameEdit);
 
-        // Enabled
+        // Enabled + Auto-apply
+        LinearLayout checkRow = new LinearLayout(this);
+        checkRow.setOrientation(LinearLayout.HORIZONTAL);
         CheckBox enabledCheck = new CheckBox(this);
         enabledCheck.setText("Enabled");
         enabledCheck.setTextColor(0xFFCCCCCC);
         enabledCheck.setChecked(rule.enabled);
-        layout.addView(enabledCheck);
+        checkRow.addView(enabledCheck);
 
-        // Condition type
-        layout.addView(makeLabel("Condition type:"));
-        String[] condTypes = {"Has tag", "Name contains", "File type", "Size > MB", "Older than days"};
-        Spinner condSpinner = makeSpinner(condTypes);
-        layout.addView(condSpinner);
+        CheckBox autoCheck = new CheckBox(this);
+        autoCheck.setText("Auto-apply");
+        autoCheck.setTextColor(0xFFCCCCCC);
+        autoCheck.setChecked(rule.autoApply);
+        checkRow.addView(autoCheck);
+        layout.addView(checkRow);
 
-        // Condition parameter
-        EditText condParamEdit = new EditText(this);
-        condParamEdit.setText(getConditionParam(rule));
-        condParamEdit.setHint("tag / text / IMAGE/VIDEO / size / days");
-        condParamEdit.setTextColor(0xFFFFFFFF);
-        layout.addView(condParamEdit);
+        // ── Conditions section ───────────────────────────────────────────
+        layout.addView(makeSectionHeader("Conditions"));
 
-        // Action type
-        layout.addView(makeLabel("Action:"));
-        String[] actTypes = {"Move to folder", "Delete (trash)", "Add tags", "Set status"};
+        // Container for condition rows
+        LinearLayout condContainer = new LinearLayout(this);
+        condContainer.setOrientation(LinearLayout.VERTICAL);
+        condContainer.setId(View.generateViewId());
+        layout.addView(condContainer);
+
+        // Temp list to hold condition edits
+        final List<ConditionEdit> condEdits = new ArrayList<>();
+
+        // Add existing conditions
+        if (rule.conditions != null) {
+            for (Condition c : rule.conditions) {
+                addConditionRow(condContainer, condEdits, c);
+            }
+        }
+        // Start with one empty condition if none exist
+        if (condEdits.isEmpty()) {
+            addConditionRow(condContainer, condEdits, null);
+        }
+
+        Button addCondBtn = new Button(this);
+        addCondBtn.setText("+ Add Condition (AND)");
+        addCondBtn.setOnClickListener(v -> addConditionRow(condContainer, condEdits, null));
+        layout.addView(addCondBtn);
+
+        // ── Action section ───────────────────────────────────────────────
+        layout.addView(makeSectionHeader("Action"));
+
+        layout.addView(makeLabel("Action type:"));
+        String[] actTypes = {"Move", "Copy", "Delete (trash)", "Delete (permanent)",
+                "Add/Remove Tags", "Set/Clear Status", "Rename (pattern)"};
         Spinner actSpinner = makeSpinner(actTypes);
         layout.addView(actSpinner);
 
-        // Action parameter
-        EditText actParamEdit = new EditText(this);
-        actParamEdit.setText(getActionParam(rule));
-        actParamEdit.setHint("folder path / trash folder / tags / SKIPPED,FLAGGED,DONE");
-        actParamEdit.setTextColor(0xFFFFFFFF);
-        layout.addView(actParamEdit);
+        // Action parameters container (dynamically changes based on type)
+        LinearLayout actParamsContainer = new LinearLayout(this);
+        actParamsContainer.setOrientation(LinearLayout.VERTICAL);
+        actParamsContainer.setPadding(0, 8, 0, 8);
+        layout.addView(actParamsContainer);
+
+        // Pre-select current action type
+        if (rule.action instanceof MoveAction) actSpinner.setSelection(0);
+        else if (rule.action instanceof CopyAction) actSpinner.setSelection(1);
+        else if (rule.action instanceof DeleteAction) {
+            actSpinner.setSelection(((DeleteAction) rule.action).useTrash ? 2 : 3);
+        }
+        else if (rule.action instanceof TagAction) actSpinner.setSelection(4);
+        else if (rule.action instanceof StatusAction) actSpinner.setSelection(5);
+        else if (rule.action instanceof RenameAction) actSpinner.setSelection(6);
+
+        // Build initial action params
+        final ActionParamHolder actHolder = new ActionParamHolder();
+        buildActionParams(actParamsContainer, actHolder, rule.action, actSpinner.getSelectedItemPosition());
+
+        actSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                buildActionParams(actParamsContainer, actHolder, rule.action, pos);
+            }
+            @Override
+            public void onNothingSelected(AdapterView<?> p) {}
+        });
 
         ScrollView sv = new ScrollView(this);
         sv.addView(layout);
@@ -167,23 +315,20 @@ public class RulesActivity extends Activity {
                 rule.name = nameEdit.getText().toString().trim();
                 if (rule.name.isEmpty()) rule.name = "Unnamed";
                 rule.enabled = enabledCheck.isChecked();
+                rule.autoApply = autoCheck.isChecked();
 
-                // Build condition
-                int condIdx = condSpinner.getSelectedItemPosition();
-                String condParam = condParamEdit.getText().toString().trim();
-                Condition cond = buildCondition(condIdx, condParam);
+                // Build conditions from edits
                 rule.conditions.clear();
-                if (cond != null) rule.conditions.add(cond);
+                for (ConditionEdit ce : condEdits) {
+                    Condition c = ce.buildCondition();
+                    if (c != null) rule.conditions.add(c);
+                }
 
                 // Build action
-                int actIdx = actSpinner.getSelectedItemPosition();
-                String actParam = actParamEdit.getText().toString().trim();
-                rule.action = buildAction(actIdx, actParam);
+                rule.action = buildAction(actSpinner.getSelectedItemPosition(), actHolder);
 
                 if (isNew) {
                     rules.add(rule);
-                } else {
-                    rules.set(position, rule);
                 }
                 organizer.setRules(rules);
                 refreshList();
@@ -192,98 +337,476 @@ public class RulesActivity extends Activity {
             .show();
     }
 
-    private void editRule(int pos) {
-        showRuleDialog(rules.get(pos), pos);
+    // ── Condition row builder ───────────────────────────────────────────
+
+    private static class ConditionEdit {
+        Spinner typeSpinner;
+        EditText paramEdit;
+        CheckBox negateCheck;
+        // Extra params for specific types
+        Spinner matchTypeSpinner;   // for Name
+        CheckBox matchAnyCheck;     // for Tag
+        Spinner greaterLessSpinner; // for Size
+        Spinner olderNewerSpinner;  // for Date
+        Spinner statusSpinner;      // for Status
+
+        Condition buildCondition() {
+            String param = paramEdit.getText().toString().trim();
+            boolean negate = negateCheck.isChecked();
+            int typeIdx = typeSpinner.getSelectedItemPosition();
+            if (param.isEmpty() && typeIdx != 5 /*Status can use spinner*/) return null;
+
+            switch (typeIdx) {
+                case 0: // Tag
+                    List<String> tags = new ArrayList<>();
+                    for (String t : param.split(",")) {
+                        String s = t.trim();
+                        if (!s.isEmpty()) tags.add(s);
+                    }
+                    if (tags.isEmpty()) return null;
+                    return Condition.tagCondition(tags, matchAnyCheck.isChecked(), negate);
+                case 1: // Name
+                    Condition.MatchType mt;
+                    switch (matchTypeSpinner.getSelectedItemPosition()) {
+                        case 1: mt = Condition.MatchType.STARTS_WITH; break;
+                        case 2: mt = Condition.MatchType.ENDS_WITH; break;
+                        case 3: mt = Condition.MatchType.REGEX; break;
+                        default: mt = Condition.MatchType.CONTAINS;
+                    }
+                    return Condition.nameCondition(param, mt, negate);
+                case 2: // File type
+                    try {
+                        MediaFile.Type ft = MediaFile.Type.valueOf(param.toUpperCase());
+                        return Condition.typeCondition(ft, negate);
+                    } catch (Exception e) { return null; }
+                case 3: // Size
+                    try {
+                        long bytes = Long.parseLong(param) * 1024 * 1024;
+                        boolean gt = greaterLessSpinner.getSelectedItemPosition() == 0;
+                        return Condition.sizeCondition(bytes, gt, negate);
+                    } catch (Exception e) { return null; }
+                case 4: // Date
+                    try {
+                        int days = Integer.parseInt(param);
+                        boolean older = olderNewerSpinner.getSelectedItemPosition() == 0;
+                        return Condition.dateCondition(days, older, negate);
+                    } catch (Exception e) { return null; }
+                case 5: // Status
+                    FileStatus.Status[] vals = {FileStatus.Status.SKIPPED, FileStatus.Status.FLAGGED, FileStatus.Status.DONE};
+                    return Condition.statusCondition(vals[statusSpinner.getSelectedItemPosition()], negate);
+                case 6: // Folder
+                    return Condition.folderCondition(param, negate);
+            }
+            return null;
+        }
     }
 
-    // ── Helper methods for parameter extraction from existing rule ────────
-    private String getConditionParam(Rule r) {
-    if (r.conditions.isEmpty()) return "";
-    return RuleParamHelper.getConditionParam(r.conditions.get(0));
-}
+    private void addConditionRow(LinearLayout container, List<ConditionEdit> edits, Condition existing) {
+        ConditionEdit ce = new ConditionEdit();
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(0, 8, 0, 8);
 
-    private String getActionParam(Rule r) {
-    if (r.action == null) return "";
-    return RuleParamHelper.getActionParam(r.action);
-}
+        // Type spinner
+        String[] condTypes = {"Tag", "Name", "File type", "Size (MB)", "Date (days)", "Status", "Folder"};
+        ce.typeSpinner = makeSpinner(condTypes);
+        row.addView(ce.typeSpinner);
 
-    // ── Build condition from dialog index ──────────────────────────────────
-    private Condition buildCondition(int index, String param) {
-        if (param.isEmpty()) return null;
-        switch (index) {
-            case 0: // Has tag
-                List<String> tags = new ArrayList<>();
-                tags.add(param);
-                return Condition.tagCondition(tags, true, false);
-            case 1: // Name contains
-                return Condition.nameCondition(param, Condition.MatchType.CONTAINS, false);
-            case 2: // File type
-                try {
-                    MediaFile.Type type = MediaFile.Type.valueOf(param.toUpperCase());
-                    return Condition.typeCondition(type, false);
-                } catch (Exception e) { return null; }
-            case 3: // Size > MB
-                try {
-                    long bytes = Long.parseLong(param) * 1024 * 1024;
-                    return Condition.sizeCondition(bytes, true, false);
-                } catch (Exception e) { return null; }
-            case 4: // Older than days
-                try {
-                    int days = Integer.parseInt(param);
-                    return Condition.dateCondition(days, true, false);
-                } catch (Exception e) { return null; }
+        // Param
+        ce.paramEdit = new EditText(this);
+        ce.paramEdit.setTextColor(0xFFFFFFFF);
+        ce.paramEdit.setHint("parameter");
+        row.addView(ce.paramEdit);
+
+        // Negate
+        ce.negateCheck = new CheckBox(this);
+        ce.negateCheck.setText("Negate (NOT)");
+        ce.negateCheck.setTextColor(0xFFCCCCCC);
+        row.addView(ce.negateCheck);
+
+        // Extra spinners (hidden by default, shown based on type)
+        ce.matchAnyCheck = new CheckBox(this);
+        ce.matchAnyCheck.setText("Match any (vs all)");
+        ce.matchAnyCheck.setTextColor(0xFFCCCCCC);
+        ce.matchAnyCheck.setChecked(true);
+        row.addView(ce.matchAnyCheck);
+
+        String[] matchTypes = {"Contains", "Starts with", "Ends with", "Regex"};
+        ce.matchTypeSpinner = makeSpinner(matchTypes);
+        row.addView(ce.matchTypeSpinner);
+
+        String[] glOptions = {"Greater than", "Less than"};
+        ce.greaterLessSpinner = makeSpinner(glOptions);
+        row.addView(ce.greaterLessSpinner);
+
+        String[] onOptions = {"Older than", "Newer than"};
+        ce.olderNewerSpinner = makeSpinner(onOptions);
+        row.addView(ce.olderNewerSpinner);
+
+        String[] statusOpts = {"SKIPPED", "FLAGGED", "DONE"};
+        ce.statusSpinner = makeSpinner(statusOpts);
+        row.addView(ce.statusSpinner);
+
+        // Show/hide extras based on type
+        ce.typeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                ce.matchAnyCheck.setVisibility(pos == 0 ? View.VISIBLE : View.GONE);
+                ce.matchTypeSpinner.setVisibility(pos == 1 ? View.VISIBLE : View.GONE);
+                ce.greaterLessSpinner.setVisibility(pos == 3 ? View.VISIBLE : View.GONE);
+                ce.olderNewerSpinner.setVisibility(pos == 4 ? View.VISIBLE : View.GONE);
+                ce.statusSpinner.setVisibility(pos == 5 ? View.VISIBLE : View.GONE);
+                ce.paramEdit.setVisibility(pos == 5 ? View.GONE : View.VISIBLE);
+            }
+            @Override
+            public void onNothingSelected(AdapterView<?> p) {}
+        });
+
+        // Populate from existing
+        if (existing instanceof TagCondition) {
+            TagCondition tc = (TagCondition) existing;
+            ce.typeSpinner.setSelection(0);
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < tc.tags.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(tc.tags.get(i));
+            }
+            ce.paramEdit.setText(sb.toString());
+            ce.matchAnyCheck.setChecked(tc.matchAny);
+            ce.negateCheck.setChecked(tc.negate);
+        } else if (existing instanceof NameCondition) {
+            NameCondition nc = (NameCondition) existing;
+            ce.typeSpinner.setSelection(1);
+            ce.paramEdit.setText(nc.pattern);
+            ce.matchTypeSpinner.setSelection(nc.type != null ? nc.type.ordinal() : 0);
+            ce.negateCheck.setChecked(nc.negate);
+        } else if (existing instanceof TypeCondition) {
+            ce.typeSpinner.setSelection(2);
+            ce.paramEdit.setText(((TypeCondition) existing).type.name());
+            ce.negateCheck.setChecked(((TypeCondition) existing).negate);
+        } else if (existing instanceof SizeCondition) {
+            SizeCondition sc = (SizeCondition) existing;
+            ce.typeSpinner.setSelection(3);
+            ce.paramEdit.setText(String.valueOf(sc.threshold / (1024L * 1024L)));
+            ce.greaterLessSpinner.setSelection(sc.greaterThan ? 0 : 1);
+            ce.negateCheck.setChecked(sc.negate);
+        } else if (existing instanceof DateCondition) {
+            DateCondition dc = (DateCondition) existing;
+            ce.typeSpinner.setSelection(4);
+            ce.paramEdit.setText(String.valueOf(dc.days));
+            ce.olderNewerSpinner.setSelection(dc.olderThan ? 0 : 1);
+            ce.negateCheck.setChecked(dc.negate);
+        } else if (existing instanceof StatusCondition) {
+            StatusCondition sc = (StatusCondition) existing;
+            ce.typeSpinner.setSelection(5);
+            switch (sc.status) {
+                case SKIPPED: ce.statusSpinner.setSelection(0); break;
+                case FLAGGED: ce.statusSpinner.setSelection(1); break;
+                case DONE:    ce.statusSpinner.setSelection(2); break;
+                default: break;
+            }
+            ce.negateCheck.setChecked(sc.negate);
+        } else if (existing instanceof FolderCondition) {
+            ce.typeSpinner.setSelection(6);
+            ce.paramEdit.setText(((FolderCondition) existing).folderPath.replaceFirst("/$", ""));
+            ce.negateCheck.setChecked(((FolderCondition) existing).negate);
+        }
+
+        // Trigger initial visibility
+        ce.typeSpinner.setSelection(ce.typeSpinner.getSelectedItemPosition());
+
+        // Remove button
+        Button removeBtn = new Button(this);
+        removeBtn.setText("Remove");
+        removeBtn.setOnClickListener(v -> {
+            container.removeView(row);
+            edits.remove(ce);
+        });
+        row.addView(removeBtn);
+
+        // Divider
+        View divider = new View(this);
+        divider.setBackgroundColor(0xFF333333);
+        row.addView(divider, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 2));
+
+        container.addView(row);
+        edits.add(ce);
+    }
+
+    // ── Action params builder ───────────────────────────────────────────
+
+    private static class ActionParamHolder {
+        EditText destEdit;
+        Spinner conflictSpinner;
+        EditText trashEdit;
+        CheckBox useTrashCheck;
+        EditText tagsToAddEdit;
+        EditText tagsToRemoveEdit;
+        Spinner statusSpinner;
+        CheckBox clearStatusCheck;
+        EditText patternEdit;
+    }
+
+    private void buildActionParams(LinearLayout container, ActionParamHolder holder,
+                                   Action existingAction, int actionType) {
+        container.removeAllViews();
+
+        switch (actionType) {
+            case 0: // Move
+            case 1: // Copy
+                container.addView(makeLabel("Destination folder:"));
+                holder.destEdit = new EditText(this);
+                holder.destEdit.setTextColor(0xFFFFFFFF);
+                holder.destEdit.setHint("/sdcard/destination");
+                if (actionType == 0 && existingAction instanceof MoveAction) {
+                    holder.destEdit.setText(((MoveAction) existingAction).destFolder);
+                } else if (actionType == 1 && existingAction instanceof CopyAction) {
+                    holder.destEdit.setText(((CopyAction) existingAction).destFolder);
+                }
+                container.addView(holder.destEdit);
+
+                container.addView(makeLabel("Conflict resolution:"));
+                String[] conflicts = {"Skip if exists", "Overwrite", "Auto-rename"};
+                holder.conflictSpinner = makeSpinner(conflicts);
+                // Pre-select
+                Action.Conflict c = Action.Conflict.SKIP;
+                if (actionType == 0 && existingAction instanceof MoveAction) c = ((MoveAction) existingAction).conflict;
+                else if (actionType == 1 && existingAction instanceof CopyAction) c = ((CopyAction) existingAction).conflict;
+                if (c != null) holder.conflictSpinner.setSelection(c.ordinal());
+                container.addView(holder.conflictSpinner);
+                break;
+
+            case 2: // Delete (trash)
+                container.addView(makeLabel("Trash folder:"));
+                holder.trashEdit = new EditText(this);
+                holder.trashEdit.setTextColor(0xFFFFFFFF);
+                holder.trashEdit.setHint("/sdcard/.trash");
+                if (existingAction instanceof DeleteAction) {
+                    holder.trashEdit.setText(((DeleteAction) existingAction).trashFolder);
+                }
+                container.addView(holder.trashEdit);
+                break;
+
+            case 3: // Delete (permanent)
+                // No extra params needed
+                TextView warn = new TextView(this);
+                warn.setText("WARNING: Files will be permanently deleted!");
+                warn.setTextColor(0xFFFF4444);
+                container.addView(warn);
+                break;
+
+            case 4: // Tags
+                container.addView(makeLabel("Tags to add (comma-separated):"));
+                holder.tagsToAddEdit = new EditText(this);
+                holder.tagsToAddEdit.setTextColor(0xFFFFFFFF);
+                holder.tagsToAddEdit.setHint("vacation, family");
+                if (existingAction instanceof TagAction) {
+                    TagAction ta = (TagAction) existingAction;
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < ta.tagsToAdd.size(); i++) {
+                        if (i > 0) sb.append(", ");
+                        sb.append(ta.tagsToAdd.get(i));
+                    }
+                    holder.tagsToAddEdit.setText(sb.toString());
+                }
+                container.addView(holder.tagsToAddEdit);
+
+                container.addView(makeLabel("Tags to remove (comma-separated):"));
+                holder.tagsToRemoveEdit = new EditText(this);
+                holder.tagsToRemoveEdit.setTextColor(0xFFFFFFFF);
+                holder.tagsToRemoveEdit.setHint("old_tag");
+                if (existingAction instanceof TagAction) {
+                    TagAction ta = (TagAction) existingAction;
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < ta.tagsToRemove.size(); i++) {
+                        if (i > 0) sb.append(", ");
+                        sb.append(ta.tagsToRemove.get(i));
+                    }
+                    holder.tagsToRemoveEdit.setText(sb.toString());
+                }
+                container.addView(holder.tagsToRemoveEdit);
+                break;
+
+            case 5: // Status
+                container.addView(makeLabel("Status:"));
+                String[] statusOpts = {"SKIPPED", "FLAGGED", "DONE"};
+                holder.statusSpinner = makeSpinner(statusOpts);
+                if (existingAction instanceof StatusAction) {
+                    StatusAction sa = (StatusAction) existingAction;
+                    if (!sa.clear) {
+                        switch (sa.status) {
+                            case SKIPPED: holder.statusSpinner.setSelection(0); break;
+                            case FLAGGED: holder.statusSpinner.setSelection(1); break;
+                            case DONE:    holder.statusSpinner.setSelection(2); break;
+                            default: break;
+                        }
+                    }
+                }
+                container.addView(holder.statusSpinner);
+
+                holder.clearStatusCheck = new CheckBox(this);
+                holder.clearStatusCheck.setText("Clear status instead");
+                holder.clearStatusCheck.setTextColor(0xFFCCCCCC);
+                if (existingAction instanceof StatusAction) {
+                    holder.clearStatusCheck.setChecked(((StatusAction) existingAction).clear);
+                }
+                container.addView(holder.clearStatusCheck);
+                break;
+
+            case 6: // Rename
+                container.addView(makeLabel("Rename pattern:"));
+                holder.patternEdit = new EditText(this);
+                holder.patternEdit.setTextColor(0xFFFFFFFF);
+                holder.patternEdit.setHint("{ORIGINAL}_{TAGS}{EXT}");
+                if (existingAction instanceof RenameAction) {
+                    holder.patternEdit.setText(((RenameAction) existingAction).pattern);
+                }
+                container.addView(holder.patternEdit);
+
+                TextView hint = new TextView(this);
+                hint.setText("Placeholders: {ORIGINAL}, {TAGS}, {EXT}, {DATE}, {COUNTER}, {PREFIX}, {SUFFIX}");
+                hint.setTextColor(0xFF888888);
+                hint.setTextSize(10f);
+                container.addView(hint);
+                break;
+        }
+    }
+
+    private Action buildAction(int actionType, ActionParamHolder holder) {
+        switch (actionType) {
+            case 0: // Move
+                String dest0 = holder.destEdit != null ? holder.destEdit.getText().toString().trim() : "";
+                if (dest0.isEmpty()) return null;
+                Action.Conflict c0 = conflictFromSpinner(holder.conflictSpinner);
+                return Action.moveAction(dest0, c0);
+
+            case 1: // Copy
+                String dest1 = holder.destEdit != null ? holder.destEdit.getText().toString().trim() : "";
+                if (dest1.isEmpty()) return null;
+                Action.Conflict c1 = conflictFromSpinner(holder.conflictSpinner);
+                return Action.copyAction(dest1, c1);
+
+            case 2: // Delete (trash)
+                String trash = holder.trashEdit != null ? holder.trashEdit.getText().toString().trim() : "";
+                return Action.deleteAction(true, trash);
+
+            case 3: // Delete (permanent)
+                return Action.deleteAction(false, "");
+
+            case 4: // Tags
+                List<String> addTags = parseCommaList(
+                        holder.tagsToAddEdit != null ? holder.tagsToAddEdit.getText().toString() : "");
+                List<String> remTags = parseCommaList(
+                        holder.tagsToRemoveEdit != null ? holder.tagsToRemoveEdit.getText().toString() : "");
+                return Action.tagAction(addTags, remTags);
+
+            case 5: // Status
+                boolean clear = holder.clearStatusCheck != null && holder.clearStatusCheck.isChecked();
+                FileStatus.Status[] statuses = {FileStatus.Status.SKIPPED, FileStatus.Status.FLAGGED, FileStatus.Status.DONE};
+                int sIdx = holder.statusSpinner != null ? holder.statusSpinner.getSelectedItemPosition() : 0;
+                return Action.statusAction(statuses[sIdx], clear);
+
+            case 6: // Rename
+                String pattern = holder.patternEdit != null ? holder.patternEdit.getText().toString().trim() : "";
+                if (pattern.isEmpty()) return null;
+                return Action.renameAction(pattern);
         }
         return null;
     }
 
-    // ── Build action from dialog index ────────────────────────────────────
-    private Action buildAction(int index, String param) {
-        if (param.isEmpty()) return null;
-        switch (index) {
-            case 0: // Move to folder
-                return Action.moveAction(param, Action.Conflict.SKIP);
-            case 1: // Delete (trash)
-                return Action.deleteAction(true, param);
-            case 2: // Add tags
-                List<String> addTags = new ArrayList<>();
-                addTags.add(param);
-                return Action.tagAction(addTags, null);
-            case 3: // Set status
-                try {
-                    FileStatus.Status status = FileStatus.Status.valueOf(param.toUpperCase());
-                    return Action.statusAction(status, false);
-                } catch (Exception e) { return null; }
+    private Action.Conflict conflictFromSpinner(Spinner sp) {
+        if (sp == null) return Action.Conflict.SKIP;
+        switch (sp.getSelectedItemPosition()) {
+            case 1: return Action.Conflict.OVERWRITE;
+            case 2: return Action.Conflict.RENAME;
+            default: return Action.Conflict.SKIP;
         }
-        return null;
     }
 
-    // ── Simple UI helpers ─────────────────────────────────────────────────
-    private TextView makeLabel(String text) {
-        TextView tv = new TextView(this);
-        tv.setText(text);
-        tv.setTextColor(0xFFCCCCCC);
-        tv.setTextSize(12f);
-        return tv;
+    private List<String> parseCommaList(String text) {
+        List<String> result = new ArrayList<>();
+        if (text == null || text.trim().isEmpty()) return result;
+        for (String s : text.split(",")) {
+            String trimmed = s.trim();
+            if (!trimmed.isEmpty()) result.add(trimmed);
+        }
+        return result;
     }
 
-    private Spinner makeSpinner(String[] options) {
-        Spinner sp = new Spinner(this);
-        ArrayAdapter<String> ad = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, options);
-        ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        sp.setAdapter(ad);
-        return sp;
+    // ── Preview / Dry-Run ───────────────────────────────────────────────
+
+    private void showPreview() {
+        List<MediaFile> files = MainActivity.getLatestFullList();
+        if (files == null || files.isEmpty()) {
+            Toast.makeText(this, "No files to preview against", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        AutoOrganizer.PreviewResult result = organizer.preview(files);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Matched ").append(result.matchedFiles).append(" files:\n\n");
+        int shown = Math.min(result.entries.size(), 30);
+        for (int i = 0; i < shown; i++) {
+            AutoOrganizer.PreviewEntry e = result.entries.get(i);
+            sb.append("[").append(e.ruleName).append("] ")
+              .append(e.fileName).append(" -> ").append(e.actionDescription).append("\n");
+        }
+        if (result.entries.size() > 30) {
+            sb.append("... and ").append(result.entries.size() - 30).append(" more");
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Preview (Dry Run)")
+                .setMessage(sb.toString())
+                .setPositiveButton("OK", null)
+                .show();
     }
 
-    // ── Organizer actions ─────────────────────────────────────────────────
-    private void runOrganizer() {
+    // ── Run Now (background thread) ─────────────────────────────────────
+
+    private void runOrganizerBackground() {
         List<MediaFile> files = MainActivity.getLatestFullList();
         if (files == null || files.isEmpty()) {
             Toast.makeText(this, "No files to organize", Toast.LENGTH_SHORT).show();
             return;
         }
-        int affected = organizer.applyTo(files);
-        Toast.makeText(this, "Rules applied. Files affected: " + affected, Toast.LENGTH_SHORT).show();
+
+        ProgressDialog progress = new ProgressDialog(this);
+        progress.setTitle("Running rules...");
+        progress.setMessage("Applying " + rules.size() + " rules to " + files.size() + " files");
+        progress.setCancelable(false);
+        progress.show();
+
+        new Thread(() -> {
+            final int affected = organizer.applyTo(files);
+            mainHandler.post(() -> {
+                progress.dismiss();
+                Toast.makeText(this, "Rules applied. Files affected: " + affected, Toast.LENGTH_SHORT).show();
+            });
+        }).start();
     }
+
+    // ── Undo ────────────────────────────────────────────────────────────
+
+    private void doUndo() {
+        if (!organizer.canUndo()) {
+            Toast.makeText(this, "Nothing to undo", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+            .setTitle("Undo last run?")
+            .setMessage("This will reverse the last batch of actions (move, delete, tags, status).")
+            .setPositiveButton("Undo", (d, w) -> {
+                int restored = organizer.undoLastRun();
+                Toast.makeText(this, "Undone: " + restored + " operations", Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    // ── Log ─────────────────────────────────────────────────────────────
 
     private void showLog() {
         List<String> log = organizer.getLog();
@@ -298,5 +821,43 @@ public class RulesActivity extends Activity {
                 .setMessage(sb.toString())
                 .setPositiveButton("OK", null)
                 .show();
+    }
+
+    // ── UI helpers ──────────────────────────────────────────────────────
+
+    private TextView makeLabel(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(0xFFCCCCCC);
+        tv.setTextSize(12f);
+        return tv;
+    }
+
+    private TextView makeSectionHeader(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(0xFFE94560);
+        tv.setTextSize(14f);
+        tv.setPadding(0, 16, 0, 8);
+        return tv;
+    }
+
+    private Spinner makeSpinner(String[] options) {
+        Spinner sp = new Spinner(this);
+        ArrayAdapter<String> ad = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, options);
+        ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        sp.setAdapter(ad);
+        return sp;
+    }
+
+    private Button makeButton(String text) {
+        Button btn = new Button(this);
+        btn.setText(text);
+        btn.setTextSize(12f);
+        return btn;
+    }
+
+    private LinearLayout.LayoutParams rowParam() {
+        return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
     }
 }
