@@ -9,13 +9,16 @@ import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.GestureDetector;
+import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ListView;
 import android.widget.PopupMenu;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.LinearLayout;
 import android.widget.Toast;
@@ -55,12 +58,13 @@ public class MainActivity extends Activity
     private GestureSettings gestureSettings;
     private WindowManager   windowManager;
     private AutoOrganizer autoOrganizer;
+    private SearchHistory searchHistory;
     private MediaAdapter mediaAdapter;
     private TagAdapter   tagAdapter;
 
     private List<MediaFile> fullList     = new ArrayList<>();
     private List<MediaFile> currentFiles = new ArrayList<>();
-    private static List<MediaFile> sLatestFullList = new ArrayList<>();            
+    private static List<MediaFile> sLatestFullList = new ArrayList<>();
     private int             currentIndex = -1;
 
     private boolean refreshPending = false;
@@ -70,6 +74,7 @@ public class MainActivity extends Activity
     private Button   btnSort;
     private Button   btnFilter;
     private Button   btnScan;
+    private ProgressBar scanProgress;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());           
 
@@ -137,6 +142,7 @@ public class MainActivity extends Activity
         gestureSettings = new GestureSettings(this);
         windowManager   = new WindowManager(getWindowSize());
         autoOrganizer = new AutoOrganizer(this, tagManager, batchRenameManager, fileStatus);
+        searchHistory  = new SearchHistory(this);
         indexer.setListener(this);
 
         // Auto-refresh tag list on any change
@@ -154,6 +160,10 @@ public class MainActivity extends Activity
         mediaAdapter = new MediaAdapter(thumbnailLoader, this::onFileSelected);
         tagAdapter   = new TagAdapter(this::onTagToggled);
 
+        // Long-press in file list shows quick tag popup
+        mediaAdapter.setOnFileLongClickListener((file, anchor) ->
+                showQuickTagPopup(anchor, file));
+
         mediaAdapter.setSelectionListener(count -> {
             mainHandler.post(() -> {
                 if (count > 0) {
@@ -168,6 +178,7 @@ public class MainActivity extends Activity
                                                     "Tag selected",
                                                     "Rename selected",
                                                     "Analyze colors",
+                                                    "Delete selected",
                                                     "Cancel"
                                             },
                                             (d, which) -> {
@@ -176,6 +187,7 @@ public class MainActivity extends Activity
                                                 else if (which == 2) showBatchTagDialog();
                                                 else if (which == 3) showBatchRenameDialog();
                                                 else if (which == 4) showColorAnalysisDialog();
+                                                else if (which == 5) showBatchDeleteDialog();
                                                 else                 mediaAdapter.exitSelectMode();
                                             })
                                     .show());
@@ -265,6 +277,12 @@ public class MainActivity extends Activity
             }
         });
 
+        // Long-press search bar to show search history
+        searchBar.setOnLongClickListener(v -> {
+            showSearchHistoryDialog();
+            return true;
+        });
+
         ((EditText) findViewById(R.id.tagSearch)).addTextChangedListener(
                 new TextWatcher() {
                     @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
@@ -274,14 +292,48 @@ public class MainActivity extends Activity
                     }
                 });
 
+        // Tag auto-suggest
+        EditText newTagInput = findViewById(R.id.newTagInput);
+        final TextView tagSuggestView = new TextView(this);
+        tagSuggestView.setTextColor(0xFF888888);
+        tagSuggestView.setTextSize(11f);
+        tagSuggestView.setPadding(8, 4, 8, 4);
+        LinearLayout tagPanel = findViewById(R.id.tagPanel);
+        if (tagPanel != null) {
+            int btnIdx = tagPanel.indexOfChild(findViewById(R.id.btnAddTag));
+            if (btnIdx >= 0) tagPanel.addView(tagSuggestView, btnIdx);
+        }
+
+        newTagInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+            @Override public void afterTextChanged(Editable s) {}
+            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                String q = s.toString().trim().toLowerCase();
+                if (q.isEmpty()) {
+                    tagSuggestView.setText("");
+                    return;
+                }
+                List<Tag> matches = tagManager.searchTags(q);
+                StringBuilder sb = new StringBuilder("Suggest: ");
+                int shown = 0;
+                for (Tag t : matches) {
+                    if (shown >= 5) { sb.append("..."); break; }
+                    if (shown > 0) sb.append(", ");
+                    sb.append(t.getName());
+                    shown++;
+                }
+                tagSuggestView.setText(shown > 0 ? sb.toString() : "No matches (Enter to create)");
+            }
+        });
+
         Button btnAddTag = findViewById(R.id.btnAddTag);
         btnAddTag.setOnClickListener(v -> {
-            EditText input = findViewById(R.id.newTagInput);
-            String name = input.getText().toString().trim();
+            String name = newTagInput.getText().toString().trim();
             if (name.isEmpty()) return;
             tagManager.createTag(name);
             tagAdapter.setTags(tagManager.getAllTags());
-            input.setText("");
+            newTagInput.setText("");
+            tagSuggestView.setText("");
         });
 
         // Tag panel toggle with initialisation fix
@@ -297,6 +349,17 @@ public class MainActivity extends Activity
 
         btnScan = findViewById(R.id.btnScan);
         btnScan.setOnClickListener(v -> startScan());
+
+        // Scan progress bar (initially hidden)
+        scanProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        scanProgress.setMax(100);
+        scanProgress.setVisibility(View.GONE);
+        // Add it below the button bar
+        LinearLayout buttonBar = (LinearLayout) btnScan.getParent();
+        if (buttonBar != null) {
+            buttonBar.addView(scanProgress, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 8));
+        }
 
         findViewById(R.id.btnRescan).setOnClickListener(v -> {
             for (String folder : folderManager.getFolders()) {
@@ -403,6 +466,9 @@ public class MainActivity extends Activity
         String query = searchBar != null
                 ? searchBar.getText().toString().trim()
                 : "";
+
+        // Save non-empty searches to history
+        if (!query.isEmpty()) saveSearchToHistory(query);
 
         List<MediaFile> base = indexer.getIndex();
         if (base == null) base = new ArrayList<>();
@@ -589,6 +655,7 @@ public class MainActivity extends Activity
         currentIndex = (currentIndex + 1) % fullList.size();
         shiftWindowIfNeeded(currentIndex);
         loadFileAtIndex(currentIndex);
+        precacheAdjacent();
     }
 
     private void navigatePrev() {
@@ -596,6 +663,18 @@ public class MainActivity extends Activity
         currentIndex = (currentIndex - 1 + fullList.size()) % fullList.size();
         shiftWindowIfNeeded(currentIndex);
         loadFileAtIndex(currentIndex);
+        precacheAdjacent();
+    }
+
+    /** Pre-cache thumbnails for the previous and next files. */
+    private void precacheAdjacent() {
+        if (fullList.isEmpty()) return;
+        List<MediaFile> toCache = new ArrayList<>();
+        int nextIdx = (currentIndex + 1) % fullList.size();
+        int prevIdx = (currentIndex - 1 + fullList.size()) % fullList.size();
+        if (nextIdx != currentIndex && nextIdx < fullList.size()) toCache.add(fullList.get(nextIdx));
+        if (prevIdx != currentIndex && prevIdx < fullList.size()) toCache.add(fullList.get(prevIdx));
+        if (!toCache.isEmpty()) thumbnailLoader.precache(toCache);
     }
 
     private void loadFileAtIndex(int absoluteIndex) {
@@ -1196,6 +1275,182 @@ private Spinner makeSpinner(String[] options) {
                 .show();
     }
 
+    // ── Batch delete ─────────────────────────────────────────────────────────
+
+    private void showBatchDeleteDialog() {
+        List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
+        if (selectedFiles.isEmpty()) return;
+
+        new AlertDialog.Builder(this)
+            .setTitle("Delete " + selectedFiles.size() + " files?")
+            .setMessage("This cannot be undone. Files will be permanently deleted.")
+            .setPositiveButton("Delete", (d, w) -> {
+                int deleted = 0;
+                for (MediaFile file : selectedFiles) {
+                    if (indexer.deleteFile(file.getPath())) deleted++;
+                }
+                mediaAdapter.exitSelectMode();
+                btnScan.setText("SCAN");
+                btnScan.setOnClickListener(v -> startScan());
+                scheduleRefresh();
+                Toast.makeText(this, "Deleted " + deleted + " files", Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    // ── Search history / saved searches ─────────────────────────────────────
+
+    private void showSearchHistoryDialog() {
+        List<String> recent = searchHistory.getRecentSearches();
+        List<String> saved  = searchHistory.getSavedSearches();
+
+        List<String> items = new ArrayList<>();
+        List<String> types = new ArrayList<>(); // "recent" or "saved"
+
+        if (!saved.isEmpty()) {
+            items.add("--- Saved Searches ---");
+            types.add("header");
+            for (String s : saved) {
+                items.add("★ " + s);
+                types.add("saved");
+            }
+        }
+        if (!recent.isEmpty()) {
+            items.add("--- Recent ---");
+            types.add("header");
+            for (String s : recent) {
+                items.add(s);
+                types.add("recent");
+            }
+        }
+
+        if (items.isEmpty()) {
+            Toast.makeText(this, "No search history yet", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("Search History")
+            .setItems(items.toArray(new String[0]), (d, which) -> {
+                if (which >= types.size()) return;
+                String type = types.get(which);
+                if ("header".equals(type)) return;
+
+                String query = items.get(which);
+                if (query.startsWith("★ ")) query = query.substring(2);
+
+                if ("saved".equals(type)) {
+                    // Long-press-like: offer to remove or re-run
+                    new AlertDialog.Builder(this)
+                        .setTitle(query)
+                        .setItems(new String[]{"Run search", "Remove from saved"}, (d2, w2) -> {
+                            if (w2 == 0) {
+                                searchBar.setText(query);
+                            } else {
+                                searchHistory.removeSavedSearch(query);
+                                Toast.makeText(this, "Removed", Toast.LENGTH_SHORT).show();
+                            }
+                        })
+                        .show();
+                } else {
+                    searchBar.setText(query);
+                }
+            })
+            .setNeutralButton("Save current", (d, w) -> {
+                String current = searchBar.getText().toString().trim();
+                if (!current.isEmpty()) {
+                    searchHistory.saveSearch(current);
+                    Toast.makeText(this, "Search saved", Toast.LENGTH_SHORT).show();
+                }
+            })
+            .setNegativeButton("Close", null)
+            .show();
+    }
+
+    /** Save search to history when user submits (presses enter or refreshes). */
+    private void saveSearchToHistory(String query) {
+        if (query != null && !query.trim().isEmpty()) {
+            searchHistory.addRecentSearch(query.trim());
+        }
+    }
+
+    // ── Duplicate finder ────────────────────────────────────────────────────
+
+    private void showDuplicateFinderDialog() {
+        List<MediaFile> files = indexer.getIndex();
+        if (files.isEmpty()) {
+            Toast.makeText(this, "No files to check", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Toast.makeText(this, "Scanning for duplicates...", Toast.LENGTH_SHORT).show();
+
+        new Thread(() -> {
+            List<DuplicateFinder.DuplicateGroup> dupes =
+                    DuplicateFinder.findDuplicates(files, (scanned, total, name) -> {});
+            mainHandler.post(() -> showDuplicateResults(dupes));
+        }).start();
+    }
+
+    private void showDuplicateResults(List<DuplicateFinder.DuplicateGroup> groups) {
+        if (groups.isEmpty()) {
+            Toast.makeText(this, "No duplicates found", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        int totalDupes = 0;
+        for (DuplicateFinder.DuplicateGroup g : groups) totalDupes += g.files.size() - 1;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Found ").append(groups.size()).append(" duplicate groups");
+        sb.append(" (").append(totalDupes).append(" extra copies)\n\n");
+
+        int shown = Math.min(groups.size(), 10);
+        for (int i = 0; i < shown; i++) {
+            DuplicateFinder.DuplicateGroup g = groups.get(i);
+            long mb = g.size / (1024 * 1024);
+            sb.append("Group ").append(i + 1).append(": ").append(mb).append(" MB (")
+              .append(g.files.size()).append(" files)\n");
+            for (MediaFile f : g.files) {
+                sb.append("  ").append(f.getName()).append("\n");
+            }
+            sb.append("\n");
+        }
+        if (groups.size() > 10) sb.append("... and ").append(groups.size() - 10).append(" more groups");
+
+        new AlertDialog.Builder(this)
+            .setTitle("Duplicates Found")
+            .setMessage(sb.toString())
+            .setPositiveButton("OK", null)
+            .show();
+    }
+
+    // ── Quick tag toggle from file list (long-press popup) ──────────────────
+
+    private void showQuickTagPopup(View anchor, MediaFile file) {
+        List<Tag> topTags = tagManager.getTopTags(10);
+        if (topTags.isEmpty()) {
+            Toast.makeText(this, "No tags yet", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        PopupMenu popup = new PopupMenu(this, anchor);
+        for (int i = 0; i < topTags.size(); i++) {
+            Tag t = topTags.get(i);
+            boolean applied = file.hasTag(t.getName());
+            popup.getMenu().add(0, i, 0, (applied ? "✓ " : "  ") + t.getName());
+        }
+        popup.setOnMenuItemClickListener(item -> {
+            Tag t = topTags.get(item.getItemId());
+            tagManager.toggleTag(file, t.getName());
+            mediaAdapter.updateFile(file);
+            updateProgress();
+            return true;
+        });
+        popup.show();
+    }
+
     // ── FolderWatcher callbacks ──────────────────────────────────────────────
 
     @Override
@@ -1234,6 +1489,20 @@ private Spinner makeSpinner(String[] options) {
     public void onFileFound(MediaFile file) {}
 
     @Override
+    public void onScanProgress(int scanned, int total, String currentFile) {
+        mainHandler.post(() -> {
+            if (scanProgress != null) {
+                scanProgress.setVisibility(View.VISIBLE);
+                scanProgress.setMax(total > 0 ? total : 100);
+                scanProgress.setProgress(scanned);
+            }
+            if (btnScan != null) {
+                btnScan.setText(scanned + "/" + total);
+            }
+        });
+    }
+
+    @Override
     public void onPageLoaded(List<MediaFile> page) {
         mainHandler.post(this::scheduleRefresh);
     }
@@ -1243,6 +1512,7 @@ private Spinner makeSpinner(String[] options) {
         mainHandler.post(() -> {
             btnScan.setEnabled(true);
             btnScan.setText("SCAN");
+            if (scanProgress != null) scanProgress.setVisibility(View.GONE);
 
             // Import all tags found in scanned files into TagManager
             List<String> allTagsFromFiles = indexer.getAllTagsFromIndex();

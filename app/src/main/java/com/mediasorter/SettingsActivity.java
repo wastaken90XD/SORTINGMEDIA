@@ -22,6 +22,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 import com.mediasorter.models.Tag;
 import com.mediasorter.models.TagList;
+import com.mediasorter.models.MediaFile;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -276,6 +278,90 @@ root.addView(btnBulkActive);
             Toast.makeText(this, "Full rescan started", Toast.LENGTH_SHORT).show();
         });
         root.addView(btnFullRescan);
+
+        // ── Export / Import ────────────────────────────────────────────────────
+        root.addView(makeTitle("Backup & Restore"));
+
+        Button btnExport = makeButton("Export Settings");
+        btnExport.setOnClickListener(v -> {
+            String path = SettingsExporter.exportSettings(this);
+            if (path != null) {
+                Toast.makeText(this, "Exported to:\n" + path, Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "Export failed", Toast.LENGTH_SHORT).show();
+            }
+        });
+        root.addView(btnExport);
+
+        Button btnImport = makeButton("Import Settings");
+        btnImport.setOnClickListener(v -> {
+            File[] backups = SettingsExporter.listBackups(this);
+            if (backups.length == 0) {
+                Toast.makeText(this, "No backups found", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String[] names = new String[backups.length];
+            for (int i = 0; i < backups.length; i++) names[i] = backups[i].getName();
+            new AlertDialog.Builder(this)
+                .setTitle("Select backup to import")
+                .setItems(names, (d, w) -> {
+                    new AlertDialog.Builder(this)
+                        .setTitle("Import?")
+                        .setMessage("This will overwrite all current settings. Continue?")
+                        .setPositiveButton("Import", (d2, w2) -> {
+                            boolean ok = SettingsExporter.importSettings(this, backups[w].getAbsolutePath());
+                            Toast.makeText(this, ok ? "Imported! Restart app." : "Import failed",
+                                    Toast.LENGTH_LONG).show();
+                            if (ok) recreate();
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show();
+                })
+                .show();
+        });
+        root.addView(btnImport);
+
+        // ── Duplicate Finder ──────────────────────────────────────────────────
+        root.addView(makeTitle("Duplicate Files"));
+
+        Button btnDupes = makeButton("Find Duplicates");
+        btnDupes.setOnClickListener(v -> {
+            List<MediaFile> files = MainActivity.getLatestFullList();
+            if (files.isEmpty()) {
+                Toast.makeText(this, "No files scanned yet", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Toast.makeText(this, "Scanning for duplicates...", Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                List<DuplicateFinder.DuplicateGroup> dupes =
+                        DuplicateFinder.findDuplicates(files, (scanned, total, name) -> {});
+                runOnUiThread(() -> {
+                    if (dupes.isEmpty()) {
+                        Toast.makeText(this, "No duplicates found", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    int totalDupes = 0;
+                    for (DuplicateFinder.DuplicateGroup g : dupes) totalDupes += g.files.size() - 1;
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(dupes.size()).append(" groups, ").append(totalDupes).append(" extra copies\n\n");
+                    int shown = Math.min(dupes.size(), 15);
+                    for (int i = 0; i < shown; i++) {
+                        DuplicateFinder.DuplicateGroup g = dupes.get(i);
+                        sb.append("[").append(g.files.size()).append(" files, ")
+                          .append(g.size / 1024).append(" KB]\n");
+                        for (MediaFile f : g.files) sb.append("  ").append(f.getName()).append("\n");
+                        sb.append("\n");
+                    }
+                    if (dupes.size() > 15) sb.append("... and ").append(dupes.size() - 15).append(" more");
+                    new AlertDialog.Builder(this)
+                        .setTitle("Duplicates")
+                        .setMessage(sb.toString())
+                        .setPositiveButton("OK", null)
+                        .show();
+                });
+            }).start();
+        });
+        root.addView(btnDupes);
 
         // ── Crash log ─────────────────────────────────────────────────────────
         root.addView(makeTitle("Crash Log"));

@@ -22,12 +22,17 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         void onFileClick(MediaFile file);
     }
 
+    public interface OnFileLongClickListener {
+        void onFileLongClick(MediaFile file, View anchor);
+    }
+
     public interface OnSelectionChangedListener {
         void onSelectionChanged(int count);
     }
 
     private List<MediaFile>            files     = new ArrayList<>();
     private OnFileClickListener        listener;
+    private OnFileLongClickListener    longClickListener;
     private OnSelectionChangedListener selectionListener;
     private ThumbnailLoader            loader;
     private String                     selectedPath = null;
@@ -41,6 +46,10 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
 
     public void setSelectionListener(OnSelectionChangedListener l) {
         this.selectionListener = l;
+    }
+
+    public void setOnFileLongClickListener(OnFileLongClickListener l) {
+        this.longClickListener = l;
     }
 
     // ── Data ──────────────────────────────────────────────────────────────────
@@ -191,8 +200,12 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
 
         holder.itemView.setOnLongClickListener(v -> {
             if (!selectMode) {
-                enterSelectMode();
-                toggleSelection(file.getPath(), holder);
+                if (longClickListener != null) {
+                    longClickListener.onFileLongClick(file, v);
+                } else {
+                    enterSelectMode();
+                    toggleSelection(file.getPath(), holder);
+                }
             }
             return true;
         });

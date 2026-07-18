@@ -207,6 +207,39 @@ public class ThumbnailLoader {
         }
     }
 
+    /**
+     * Pre-cache thumbnails for adjacent files (e.g., previous and next)
+     * so they're ready instantly when the user swipes.
+     */
+    public void precache(List<MediaFile> files) {
+        if (files == null || files.isEmpty()) return;
+        for (MediaFile file : files) {
+            String path = file.getPath();
+            // Skip if already in memory cache or in-flight
+            synchronized (memCache) {
+                if (memCache.containsKey(path)) continue;
+            }
+            if (inFlight.containsKey(path)) continue;
+
+            Future<?> task = executor.submit(() -> {
+                int quality = getQuality();
+                File thumbFile = diskCache.getThumbnailFile(path);
+                Bitmap bmp = null;
+
+                if (thumbFile.exists()) {
+                    bmp = BitmapFactory.decodeFile(thumbFile.getAbsolutePath());
+                }
+                if (bmp == null) {
+                    bmp = generate(file, quality);
+                    if (bmp != null) saveToDisk(bmp, thumbFile);
+                }
+                if (bmp != null) putInMemCache(path, bmp);
+                inFlight.remove(path);
+            });
+            inFlight.put(path, task);
+        }
+    }
+
     public void clearMemCache() {
         synchronized (memCache) {
             for (Bitmap bmp : memCache.values()) {

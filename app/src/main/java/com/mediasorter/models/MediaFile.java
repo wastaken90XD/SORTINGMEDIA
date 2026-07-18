@@ -16,6 +16,8 @@ public class MediaFile implements Serializable {
     private Type   type;
     private List<String> tags;
     private byte[] partialHash;
+    private int width;
+    private int height;
 
     public MediaFile(String path, long size) {
         this.path    = path;
@@ -40,11 +42,15 @@ public class MediaFile implements Serializable {
     public Type         getType()      { return type; }
     public List<String> getTags()      { return tags; }
     public byte[]       getPartialHash() { return partialHash; }
+    public int          getWidth()     { return width; }
+    public int          getHeight()    { return height; }
 
     // Setters
     public void setDateAdded(long d)      { dateAdded    = d; }
     public void setTags(List<String> t)   { tags         = t; }
     public void setPartialHash(byte[] h)  { partialHash  = h; }
+    public void setWidth(int w)           { width        = w; }
+    public void setHeight(int h)          { height       = h; }
 
     public void addTag(String tag) {
         if (!tags.contains(tag)) tags.add(tag);
