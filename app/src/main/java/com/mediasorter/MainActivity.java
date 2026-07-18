@@ -143,6 +143,7 @@ public class MainActivity extends Activity
         windowManager   = new WindowManager(getWindowSize());
         autoOrganizer = new AutoOrganizer(this, tagManager, batchRenameManager, fileStatus);
         searchHistory  = new SearchHistory(this);
+        indexer.init(this);
         indexer.setListener(this);
 
         // Auto-refresh tag list on any change
@@ -554,7 +555,7 @@ public class MainActivity extends Activity
                 MediaFile file = fullList.get(currentIndex);
                 tagManager.applyOrUndo(file, step.tag);
                 fullList.set(currentIndex, file);
-                mediaAdapter.updateFile(file);
+                mediaAdapter.updateFileTags(file);
                 refreshSidePanel();
                 updateProgress();
             } else {
@@ -571,7 +572,7 @@ public class MainActivity extends Activity
                 MediaFile file = fullList.get(currentIndex);
                 tagManager.applyOrUndo(file, step.tag);
                 fullList.set(currentIndex, file);
-                mediaAdapter.updateFile(file);
+                mediaAdapter.updateFileTags(file);
                 refreshSidePanel();
                 updateProgress();
             } else {
@@ -637,7 +638,8 @@ public class MainActivity extends Activity
         else         tagManager.removeTag(file, tagName);
 
         fullList.set(currentIndex, file);
-        mediaAdapter.updateFile(file);
+        // Partial update — only rebind tags text, skip thumbnail reload
+        mediaAdapter.updateFileTags(file);
         tagAdapter.setCurrentFile(file);
         tagAdapter.setTags(tagManager.getAllTags());
         refreshSidePanel();

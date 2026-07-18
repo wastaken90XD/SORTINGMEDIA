@@ -2,6 +2,7 @@ package com.mediasorter;
 
 import com.mediasorter.models.MediaFile;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class WindowManager {
@@ -44,11 +45,13 @@ public class WindowManager {
 
     public List<MediaFile> getWindow() {
         synchronized (lock) {
-            if (fullIndex.isEmpty()) return new ArrayList<>();
+            if (fullIndex.isEmpty()) return Collections.emptyList();
             int start = Math.max(0, windowStart);
             int end   = Math.min(fullIndex.size(), start + windowSize);
-            // Return a safe copy
-            return new ArrayList<>(fullIndex.subList(start, end));
+            // Return an unmodifiable view — no copy, no GC pressure.
+            // Callers must not mutate the list; individual MediaFile objects
+            // are still mutable (tags, path, etc.) which is what we want.
+            return Collections.unmodifiableList(fullIndex.subList(start, end));
         }
     }
 

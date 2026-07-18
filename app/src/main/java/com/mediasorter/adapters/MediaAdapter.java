@@ -14,6 +14,7 @@ import com.mediasorter.models.MediaFile;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> {
@@ -83,6 +84,20 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
             if (files.get(i).getPath().equals(file.getPath())) {
                 files.set(i, file);
                 notifyItemChanged(i);
+                return;
+            }
+        }
+    }
+
+    /**
+     * Partial update — only rebinds tags text, not the thumbnail.
+     * Called during rapid tagging to avoid re-decoding bitmaps.
+     */
+    public void updateFileTags(MediaFile file) {
+        for (int i = 0; i < files.size(); i++) {
+            if (files.get(i).getPath().equals(file.getPath())) {
+                files.set(i, file);
+                notifyItemChanged(i, "tags");
                 return;
             }
         }
@@ -159,6 +174,19 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     }
 
     @Override
+    public void onBindViewHolder(@NonNull ViewHolder holder, int position,
+                                  @NonNull List<Object> payloads) {
+        if (!payloads.isEmpty() && "tags".equals(payloads.get(0))) {
+            // Partial update — only rebind tags text, skip thumbnail reload
+            MediaFile file = files.get(position);
+            bindTags(holder, file);
+            return;
+        }
+        // Full bind
+        onBindViewHolder(holder, position);
+    }
+
+    @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         MediaFile file    = files.get(position);
         boolean   isSel   = selected.contains(file.getPath());
@@ -168,14 +196,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
             file.getFormattedSize()
             + "  •  " + file.getType().name().toLowerCase());
 
-        List<String> tags = file.getTags();
-        if (tags.isEmpty()) {
-            holder.fileTags.setText("No tags");
-            holder.fileTags.setTextColor(0xFF666666);
-        } else {
-            holder.fileTags.setText(join("  ", tags));
-            holder.fileTags.setTextColor(0xFFE94560);
-        }
+        bindTags(holder, file);
 
         if (selectMode) {
             holder.checkBox.setVisibility(View.VISIBLE);
@@ -209,6 +230,18 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
             }
             return true;
         });
+    }
+
+    /** Extracted so partial-update can call just this. */
+    private void bindTags(ViewHolder holder, MediaFile file) {
+        List<String> tags = file.getTags();
+        if (tags.isEmpty()) {
+            holder.fileTags.setText("No tags");
+            holder.fileTags.setTextColor(0xFF666666);
+        } else {
+            holder.fileTags.setText(join("  ", tags));
+            holder.fileTags.setTextColor(0xFFE94560);
+        }
     }
 
     private static String join(CharSequence delimiter, Iterable<? extends CharSequence> elements) {
