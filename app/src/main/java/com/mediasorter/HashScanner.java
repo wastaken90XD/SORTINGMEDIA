@@ -44,4 +44,18 @@ public class HashScanner {
         }
         return true;
     }
+
+    /** Convert a hex string back to bytes (inverse of hashToHex). */
+    public static byte[] hashToBytes(String hex) {
+        if (hex == null || hex.isEmpty() || hex.length() % 2 != 0) return null;
+        try {
+            byte[] bytes = new byte[hex.length() / 2];
+            for (int i = 0; i < bytes.length; i++) {
+                bytes[i] = (byte) Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+            }
+            return bytes;
+        } catch (Exception e) {
+            return null;
+        }
+    }
 }

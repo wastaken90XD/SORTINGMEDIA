@@ -9,7 +9,6 @@ public class SearchManager {
     private volatile List<MediaFile> fullList = new ArrayList<>();
 
     public void setFullList(List<MediaFile> files) {
-        // Always store a snapshot to avoid external modification
         this.fullList = new ArrayList<>(files);
     }
 
@@ -55,7 +54,7 @@ public class SearchManager {
             return f.getType().name().toLowerCase().contains(type);
         }
 
-        // Extension filter (case‑insensitive)
+        // Extension filter
         if (term.startsWith("ext:")) {
             String ext = term.substring(4).toLowerCase();
             return f.getName().toLowerCase().endsWith("." + ext);
@@ -66,10 +65,34 @@ public class SearchManager {
             return matchesSize(f, term.substring(5));
         }
 
+        // Width filter (width:>1920, width:1920, width:<1920)
+        if (term.startsWith("width:")) {
+            return matchesDimension(f.getWidth(), term.substring(6));
+        }
+
+        // Height filter (height:>1080, height:1080, height:<1080)
+        if (term.startsWith("height:")) {
+            return matchesDimension(f.getHeight(), term.substring(7));
+        }
+
         // Tagged/untagged
         if (term.equals("tagged"))   return !f.getTags().isEmpty();
         if (term.equals("untagged")) return f.getTags().isEmpty();
 
+        return false;
+    }
+
+    private boolean matchesDimension(int actual, String expr) {
+        try {
+            boolean gt = expr.startsWith(">");
+            boolean lt = expr.startsWith("<");
+            String val = expr;
+            if (gt || lt) val = expr.substring(1);
+            int target = Integer.parseInt(val.trim());
+            if (gt) return actual > target;
+            if (lt) return actual < target;
+            return actual == target;
+        } catch (Exception ignored) {}
         return false;
     }
 

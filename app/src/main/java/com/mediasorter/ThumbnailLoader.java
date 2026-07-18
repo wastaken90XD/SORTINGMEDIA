@@ -31,23 +31,29 @@ public class ThumbnailLoader {
     public static final int QUALITY_MEDIUM = 256;
     public static final int QUALITY_HIGH   = 512;
 
-    // Default: 1/8 of the device's max heap – safe for low‑RAM phones
+    // Default: 1/8 of the device's max heap – safe for low-RAM phones
     private static final long DEFAULT_MAX_BYTES = Runtime.getRuntime().maxMemory() / 8;
 
     private final Context           context;
     private final SharedPreferences prefs;
     private final CacheManager      diskCache;
     private final Handler           mainHandler = new Handler(Looper.getMainLooper());
-    private final ExecutorService   executor    = Executors.newFixedThreadPool(2);
+    // Separate pools: 2 for display loads, 1 for precache/background
+    private final ExecutorService   displayExecutor = Executors.newFixedThreadPool(2);
+    private final ExecutorService   precacheExecutor = Executors.newFixedThreadPool(1);
 
     // LRU bitmap cache with byte budget
     private final LinkedHashMap<String, Bitmap> memCache =
         new LinkedHashMap<String, Bitmap>(16, 0.75f, true);
     private long currentBytes = 0;
 
+    // inBitmap reuse pool — holds one recycled bitmap for reuse
+    private volatile Bitmap reusableBitmap = null;
+    private final Object reuseLock = new Object();
+
     private int maxCount = 100;
 
-    // Thread‑safe map of in‑flight loads
+    // Thread-safe map of in-flight loads
     private final Map<String, Future<?>> inFlight = new ConcurrentHashMap<>();
 
     public ThumbnailLoader(Context context) {
@@ -106,7 +112,7 @@ public class ThumbnailLoader {
         // Memory hit
         synchronized (memCache) {
             Bitmap cached = memCache.get(path);
-            if (cached != null) {
+            if (cached != null && !cached.isRecycled()) {
                 target.setImageBitmap(cached);
                 return;
             }
@@ -117,14 +123,14 @@ public class ThumbnailLoader {
 
         cancel(path);
 
-        Future<?> task = executor.submit(() -> {
+        Future<?> task = displayExecutor.submit(() -> {
             Bitmap bmp     = null;
             int    quality = getQuality();
 
             // Disk cache
             File thumbFile = diskCache.getThumbnailFile(path);
             if (thumbFile.exists()) {
-                bmp = BitmapFactory.decodeFile(thumbFile.getAbsolutePath());
+                bmp = decodeWithReuse(thumbFile.getAbsolutePath());
             }
 
             // Generate
@@ -138,7 +144,7 @@ public class ThumbnailLoader {
             final Bitmap finalBmp = bmp;
             mainHandler.post(() -> {
                 if (path.equals(target.getTag())) {
-                    if (finalBmp != null) {
+                    if (finalBmp != null && !finalBmp.isRecycled()) {
                         target.setImageBitmap(finalBmp);
                         target.setBackgroundColor(0x00000000);
                     } else {
@@ -154,15 +160,88 @@ public class ThumbnailLoader {
         inFlight.put(path, task);
     }
 
+    // ── inBitmap reuse ────────────────────────────────────────────────────────
+
+    /**
+     * Try to decode a file reusing an existing bitmap via opts.inBitmap.
+     * On API 19+ the decoder will write into the existing bitmap's buffer
+     * instead of allocating a new one — big win for consecutive same-size thumbs.
+     */
+    private Bitmap decodeWithReuse(String path) {
+        try {
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(path, opts);
+
+            // Only reuse for standard ARGB_8888 with matching dimensions
+            if (opts.outWidth > 0 && opts.outHeight > 0) {
+                opts.inSampleSize = 1; // disk cache should already be thumbnail-sized
+                opts.inJustDecodeBounds = false;
+
+                // Try to grab a reusable bitmap
+                synchronized (reuseLock) {
+                    if (reusableBitmap != null && !reusableBitmap.isRecycled()
+                            && canReuse(reusableBitmap, opts)) {
+                        opts.inBitmap = reusableBitmap;
+                    }
+                }
+
+                opts.inMutable = true;
+                Bitmap result = BitmapFactory.decodeFile(path, opts);
+
+                // When inBitmap succeeds: result == opts.inBitmap (same object, reused in-place).
+                // When inBitmap fails (IllegalArgumentException): we catch below.
+                // Either way, the bitmap is now available for future reuse.
+                if (result != null) {
+                    tryOfferForReuse(result);
+                }
+                return result;
+            }
+            return BitmapFactory.decodeFile(path);
+        } catch (IllegalArgumentException e) {
+            // inBitmap failed — dimensions don't match, fall back to normal decode
+            try {
+                return BitmapFactory.decodeFile(path);
+            } catch (OutOfMemoryError oom) {
+                return null;
+            }
+        } catch (OutOfMemoryError e) {
+            return null;
+        }
+    }
+
+    private boolean canReuse(Bitmap bitmap, BitmapFactory.Options opts) {
+        if (bitmap.isRecycled()) return false;
+        // API 19+: exact size match required
+        int bmpBytes = bitmap.getByteCount();
+        int reqBytes = opts.outWidth * opts.outHeight * 4; // ARGB_8888
+        return bmpBytes >= reqBytes;
+    }
+
+    private boolean tryOfferForReuse(Bitmap bmp) {
+        if (bmp == null || bmp.isRecycled()) return false;
+        synchronized (reuseLock) {
+            if (reusableBitmap == null || reusableBitmap.isRecycled()) {
+                reusableBitmap = bmp;
+                return true;
+            }
+            return false; // pool full — caller should recycle
+        }
+    }
+
     // ── Memory cache ─────────────────────────────────────────────────────────
 
     private void putInMemCache(String path, Bitmap bmp) {
+        if (bmp == null || bmp.isRecycled()) return;
         long bmpBytes = bmp.getByteCount();
         synchronized (memCache) {
             Bitmap old = memCache.remove(path);
             if (old != null) {
                 currentBytes -= old.getByteCount();
-                // Do NOT recycle here – it might still be displayed elsewhere
+                // Offer for inBitmap reuse; recycle only if pool is full
+                if (!tryOfferForReuse(old)) {
+                    old.recycle();
+                }
             }
 
             // Evict by count first
@@ -187,11 +266,15 @@ public class ThumbnailLoader {
         if (it.hasNext()) {
             Map.Entry<String, Bitmap> oldest = it.next();
             Bitmap bmp = oldest.getValue();
-            if (bmp != null && !bmp.isRecycled()) {
-                bmp.recycle();                     // ← release native memory
-            }
             currentBytes -= bmp.getByteCount();
             it.remove();
+            if (bmp != null && !bmp.isRecycled()) {
+                // Try to keep for inBitmap reuse; recycle only if pool is full
+                boolean reused = tryOfferForReuse(bmp);
+                if (!reused) {
+                    bmp.recycle();
+                }
+            }
         }
     }
 
@@ -207,6 +290,38 @@ public class ThumbnailLoader {
         }
     }
 
+    /**
+     * Pre-cache thumbnails for adjacent files (e.g., previous and next)
+     * so they're ready instantly when the user swipes.
+     */
+    public void precache(List<MediaFile> files) {
+        if (files == null || files.isEmpty()) return;
+        for (MediaFile file : files) {
+            String path = file.getPath();
+            synchronized (memCache) {
+                if (memCache.containsKey(path)) continue;
+            }
+            if (inFlight.containsKey(path)) continue;
+
+            Future<?> task = precacheExecutor.submit(() -> {
+                int quality = getQuality();
+                File thumbFile = diskCache.getThumbnailFile(path);
+                Bitmap bmp = null;
+
+                if (thumbFile.exists()) {
+                    bmp = decodeWithReuse(thumbFile.getAbsolutePath());
+                }
+                if (bmp == null) {
+                    bmp = generate(file, quality);
+                    if (bmp != null) saveToDisk(bmp, thumbFile);
+                }
+                if (bmp != null) putInMemCache(path, bmp);
+                inFlight.remove(path);
+            });
+            inFlight.put(path, task);
+        }
+    }
+
     public void clearMemCache() {
         synchronized (memCache) {
             for (Bitmap bmp : memCache.values()) {
@@ -214,6 +329,12 @@ public class ThumbnailLoader {
             }
             memCache.clear();
             currentBytes = 0;
+        }
+        synchronized (reuseLock) {
+            if (reusableBitmap != null && !reusableBitmap.isRecycled()) {
+                reusableBitmap.recycle();
+            }
+            reusableBitmap = null;
         }
     }
 
@@ -225,9 +346,13 @@ public class ThumbnailLoader {
                 Map.Entry<String, Bitmap> entry = it.next();
                 if (!windowPaths.contains(entry.getKey())) {
                     Bitmap bmp = entry.getValue();
-                    if (bmp != null && !bmp.isRecycled()) bmp.recycle();
                     currentBytes -= bmp.getByteCount();
                     it.remove();
+                    if (bmp != null && !bmp.isRecycled()) {
+                        if (!tryOfferForReuse(bmp)) {
+                            bmp.recycle();
+                        }
+                    }
                 }
             }
         }
@@ -262,7 +387,6 @@ public class ThumbnailLoader {
                 default:    return null;
             }
         } catch (OutOfMemoryError e) {
-            // Single bad file won't crash the whole app
             return null;
         }
     }
@@ -274,7 +398,27 @@ public class ThumbnailLoader {
             BitmapFactory.decodeFile(path, opts);
             opts.inSampleSize       = calcSampleSize(opts, size, size);
             opts.inJustDecodeBounds = false;
-            return BitmapFactory.decodeFile(path, opts);
+
+            // Try inBitmap reuse for the actual decode
+            synchronized (reuseLock) {
+                if (reusableBitmap != null && !reusableBitmap.isRecycled()
+                        && canReuse(reusableBitmap, opts)) {
+                    opts.inBitmap = reusableBitmap;
+                }
+            }
+            opts.inMutable = true;
+
+            try {
+                Bitmap result = BitmapFactory.decodeFile(path, opts);
+                if (result != null) tryOfferForReuse(result);
+                return result;
+            } catch (IllegalArgumentException e) {
+                // inBitmap dimensions mismatch — retry without it
+                opts.inBitmap = null;
+                Bitmap result = BitmapFactory.decodeFile(path, opts);
+                if (result != null) tryOfferForReuse(result);
+                return result;
+            }
         } catch (OutOfMemoryError e) {
             return null;
         }
@@ -311,6 +455,7 @@ public class ThumbnailLoader {
 
     public void shutdown() {
         cancelAll();
-        executor.shutdown();
+        displayExecutor.shutdown();
+        precacheExecutor.shutdown();
     }
 }

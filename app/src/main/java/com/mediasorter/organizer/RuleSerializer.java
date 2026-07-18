@@ -22,6 +22,7 @@ public class RuleSerializer {
                 Rule r = new Rule();
                 r.name = obj.optString("name", "Unnamed");
                 r.enabled = obj.optBoolean("enabled", true);
+                r.autoApply = obj.optBoolean("autoApply", false);
 
                 // Conditions
                 r.conditions = new ArrayList<>();
@@ -89,6 +90,12 @@ public class RuleSerializer {
                         Action.Conflict conflict = Action.Conflict.SKIP;
                         try { conflict = Action.Conflict.valueOf(conflictStr); } catch (Exception ignored) {}
                         r.action = new MoveAction(dest, conflict);
+                    } else if ("COPY".equals(aType)) {
+                        String dest = aObj.optString("destFolder", "");
+                        String conflictStr = aObj.optString("conflict", "SKIP");
+                        Action.Conflict conflict = Action.Conflict.SKIP;
+                        try { conflict = Action.Conflict.valueOf(conflictStr); } catch (Exception ignored) {}
+                        r.action = new CopyAction(dest, conflict);
                     } else if ("DELETE".equals(aType)) {
                         boolean useTrash = aObj.optBoolean("useTrash", true);
                         String trashFolder = aObj.optString("trashFolder", "");
@@ -114,6 +121,20 @@ public class RuleSerializer {
                     } else if ("RENAME".equals(aType)) {
                         String pattern = aObj.optString("pattern", "");
                         r.action = new RenameAction(pattern);
+                    } else if ("SETDATE".equals(aType)) {
+                        String mode = aObj.optString("mode", "OFFSET");
+                        long value = aObj.optLong("value", 0);
+                        r.action = new SetDateAction(mode, value);
+                    } else if ("EXTENSION".equals(aType)) {
+                        String ext = aObj.optString("newExtension", "");
+                        r.action = new ChangeExtensionAction(ext);
+                    } else if ("AFFIX".equals(aType)) {
+                        String pos = aObj.optString("position", "PREFIX");
+                        String txt = aObj.optString("text", "");
+                        r.action = new AffixAction(pos, txt);
+                    } else if ("STRIPMETA".equals(aType)) {
+                        boolean keepOrient = aObj.optBoolean("keepOrientation", false);
+                        r.action = new StripMetadataAction(keepOrient);
                     }
                 }
 
@@ -130,6 +151,7 @@ public class RuleSerializer {
             try {
                 obj.put("name", r.name != null ? r.name : "Unnamed");
                 obj.put("enabled", r.enabled);
+                obj.put("autoApply", r.autoApply);
 
                 // Conditions
                 JSONArray condArr = new JSONArray();
@@ -192,11 +214,16 @@ public class RuleSerializer {
                     aObj.put("actionType", "MOVE");
                     aObj.put("destFolder", ma.destFolder);
                     aObj.put("conflict", ma.conflict != null ? ma.conflict.name() : "SKIP");
+                } else if (r.action instanceof CopyAction) {
+                    CopyAction ca = (CopyAction) r.action;
+                    aObj.put("actionType", "COPY");
+                    aObj.put("destFolder", ca.destFolder);
+                    aObj.put("conflict", ca.conflict != null ? ca.conflict.name() : "SKIP");
                 } else if (r.action instanceof DeleteAction) {
                     DeleteAction da = (DeleteAction) r.action;
                     aObj.put("actionType", "DELETE");
                     aObj.put("useTrash", da.useTrash);
-                    aObj.put("trashFolder", da.trashFolder);
+                    aObj.put("trashFolder", da.trashFolder != null ? da.trashFolder : "");
                 } else if (r.action instanceof TagAction) {
                     TagAction ta = (TagAction) r.action;
                     aObj.put("actionType", "TAG");
@@ -219,6 +246,24 @@ public class RuleSerializer {
                     RenameAction ra = (RenameAction) r.action;
                     aObj.put("actionType", "RENAME");
                     aObj.put("pattern", ra.pattern);
+                } else if (r.action instanceof SetDateAction) {
+                    SetDateAction sda = (SetDateAction) r.action;
+                    aObj.put("actionType", "SETDATE");
+                    aObj.put("mode", sda.mode);
+                    aObj.put("value", sda.value);
+                } else if (r.action instanceof ChangeExtensionAction) {
+                    ChangeExtensionAction cea = (ChangeExtensionAction) r.action;
+                    aObj.put("actionType", "EXTENSION");
+                    aObj.put("newExtension", cea.newExtension);
+                } else if (r.action instanceof AffixAction) {
+                    AffixAction aa = (AffixAction) r.action;
+                    aObj.put("actionType", "AFFIX");
+                    aObj.put("position", aa.position);
+                    aObj.put("text", aa.text);
+                } else if (r.action instanceof StripMetadataAction) {
+                    StripMetadataAction sma = (StripMetadataAction) r.action;
+                    aObj.put("actionType", "STRIPMETA");
+                    aObj.put("keepOrientation", sma.keepOrientation);
                 }
                 obj.put("action", aObj);
 

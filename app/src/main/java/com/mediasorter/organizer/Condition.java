@@ -2,13 +2,16 @@ package com.mediasorter.organizer;
 
 import com.mediasorter.models.MediaFile;
 import com.mediasorter.FileStatus;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
 public abstract class Condition {
     public abstract boolean matches(MediaFile file, FileStatus fileStatus);
 
-    // ── Static factories (hide subclass types) ────────────────────────────
+    public abstract String describe();
+
+    // ── Static factories ────────────────────────────────────────────────
 
     public static Condition tagCondition(List<String> tags, boolean matchAny, boolean negate) {
         return new TagCondition(tags, matchAny, negate);
@@ -41,15 +44,15 @@ public abstract class Condition {
     public enum MatchType { CONTAINS, STARTS_WITH, ENDS_WITH, REGEX }
 }
 
-// ── Concrete implementations (package‑private) ──────────────────────────
+// ── Concrete implementations (public for UI access) ────────────────────
 
 class TagCondition extends Condition {
-    final List<String> tags;
-    final boolean matchAny;
-    final boolean negate;
+    public List<String> tags;
+    public boolean matchAny;
+    public boolean negate;
 
     TagCondition(List<String> tags, boolean matchAny, boolean negate) {
-        this.tags = tags != null ? new java.util.ArrayList<>(tags) : new java.util.ArrayList<>();
+        this.tags = tags != null ? new ArrayList<>(tags) : new ArrayList<>();
         this.matchAny = matchAny;
         this.negate = negate;
     }
@@ -57,7 +60,7 @@ class TagCondition extends Condition {
     @Override
     public boolean matches(MediaFile file, FileStatus fileStatus) {
         List<String> fileTags = file.getTags();
-        if (fileTags == null) fileTags = new java.util.ArrayList<>();
+        if (fileTags == null) fileTags = new ArrayList<>();
         boolean result;
         if (matchAny) {
             result = false;
@@ -72,19 +75,29 @@ class TagCondition extends Condition {
         }
         return negate ? !result : result;
     }
+
+    @Override
+    public String describe() {
+        StringBuilder sb = new StringBuilder();
+        if (negate) sb.append("NOT ");
+        sb.append(matchAny ? "any tag in " : "all tags in ");
+        sb.append(tags);
+        return sb.toString();
+    }
 }
 
 class NameCondition extends Condition {
-    final String pattern;
-    final MatchType type;
-    final boolean negate;
-    final Pattern regex;
+    public String pattern;
+    public Condition.MatchType type;
+    public boolean negate;
+    public Pattern regex;
 
-    NameCondition(String pattern, MatchType type, boolean negate) {
+    NameCondition(String pattern, Condition.MatchType type, boolean negate) {
         this.pattern = pattern != null ? pattern : "";
-        this.type = type != null ? type : MatchType.CONTAINS;
+        this.type = type != null ? type : Condition.MatchType.CONTAINS;
         this.negate = negate;
-        this.regex = (this.type == MatchType.REGEX && !this.pattern.isEmpty()) ? Pattern.compile(this.pattern) : null;
+        this.regex = (this.type == Condition.MatchType.REGEX && !this.pattern.isEmpty())
+                ? Pattern.compile(this.pattern) : null;
     }
 
     @Override
@@ -101,11 +114,19 @@ class NameCondition extends Condition {
         }
         return negate ? !result : result;
     }
+
+    @Override
+    public String describe() {
+        StringBuilder sb = new StringBuilder();
+        if (negate) sb.append("NOT ");
+        sb.append(type.name()).append(" ").append(pattern);
+        return sb.toString();
+    }
 }
 
 class TypeCondition extends Condition {
-    final MediaFile.Type type;
-    final boolean negate;
+    public MediaFile.Type type;
+    public boolean negate;
 
     TypeCondition(MediaFile.Type type, boolean negate) {
         this.type = type != null ? type : MediaFile.Type.UNSUPPORTED;
@@ -117,12 +138,17 @@ class TypeCondition extends Condition {
         boolean result = file.getType() == type;
         return negate ? !result : result;
     }
+
+    @Override
+    public String describe() {
+        return (negate ? "NOT " : "") + "type " + type.name();
+    }
 }
 
 class SizeCondition extends Condition {
-    final long threshold;
-    final boolean greaterThan;
-    final boolean negate;
+    public long threshold;
+    public boolean greaterThan;
+    public boolean negate;
 
     SizeCondition(long threshold, boolean greaterThan, boolean negate) {
         this.threshold = threshold;
@@ -135,12 +161,19 @@ class SizeCondition extends Condition {
         boolean result = greaterThan ? (file.getSize() > threshold) : (file.getSize() < threshold);
         return negate ? !result : result;
     }
+
+    @Override
+    public String describe() {
+        String op = greaterThan ? ">" : "<";
+        long mb = threshold / (1024L * 1024L);
+        return (negate ? "NOT " : "") + "size " + op + " " + mb + "MB";
+    }
 }
 
 class DateCondition extends Condition {
-    final int days;
-    final boolean olderThan;
-    final boolean negate;
+    public int days;
+    public boolean olderThan;
+    public boolean negate;
 
     DateCondition(int days, boolean olderThan, boolean negate) {
         this.days = days;
@@ -156,11 +189,17 @@ class DateCondition extends Condition {
         boolean result = olderThan ? (diffDays > days) : (diffDays < days);
         return negate ? !result : result;
     }
+
+    @Override
+    public String describe() {
+        String op = olderThan ? "older" : "newer";
+        return (negate ? "NOT " : "") + op + " than " + days + " days";
+    }
 }
 
 class StatusCondition extends Condition {
-    final FileStatus.Status status;
-    final boolean negate;
+    public FileStatus.Status status;
+    public boolean negate;
 
     StatusCondition(FileStatus.Status status, boolean negate) {
         this.status = status != null ? status : FileStatus.Status.NONE;
@@ -180,11 +219,16 @@ class StatusCondition extends Condition {
         }
         return negate ? !result : result;
     }
+
+    @Override
+    public String describe() {
+        return (negate ? "NOT " : "") + "status " + status.name();
+    }
 }
 
 class FolderCondition extends Condition {
-    final String folderPath;
-    final boolean negate;
+    public String folderPath;
+    public boolean negate;
 
     FolderCondition(String folderPath, boolean negate) {
         String safe = folderPath != null ? folderPath : "";
@@ -198,5 +242,10 @@ class FolderCondition extends Condition {
         if (path == null) path = "";
         boolean result = path.startsWith(folderPath);
         return negate ? !result : result;
+    }
+
+    @Override
+    public String describe() {
+        return (negate ? "NOT " : "") + "in " + folderPath.replaceFirst("/$", "");
     }
 }
