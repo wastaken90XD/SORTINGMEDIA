@@ -21,6 +21,7 @@ public class RulesActivity extends Activity {
     private List<Rule> rules;
     private ArrayAdapter<String> adapter;
     private ListView listView;
+    private TextView titleView;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
@@ -43,12 +44,12 @@ public class RulesActivity extends Activity {
         root.setPadding(16, 16, 16, 16);
 
         // Title
-        TextView title = new TextView(this);
-        title.setText("Organizer Rules");
-        title.setTextColor(0xFFFFFFFF);
-        title.setTextSize(20f);
-        title.setPadding(0, 0, 0, 16);
-        root.addView(title);
+        titleView = new TextView(this);
+        titleView.setTextColor(0xFFFFFFFF);
+        titleView.setTextSize(20f);
+        titleView.setPadding(0, 0, 0, 16);
+        root.addView(titleView);
+        updateRuleCount();
 
         // Rule list
         listView = new ListView(this);
@@ -99,9 +100,9 @@ public class RulesActivity extends Activity {
         logBtn.setOnClickListener(v -> showLog());
         btnRow2.addView(logBtn, rowParam());
 
-        // Spacer
-        View spacer = new View(this);
-        btnRow2.addView(spacer, rowParam());
+        Button removeBtn = makeButton("Remove Rules");
+        removeBtn.setOnClickListener(v -> showRemoveRulesDialog());
+        btnRow2.addView(removeBtn, rowParam());
 
         root.addView(btnRow2);
 
@@ -138,6 +139,46 @@ public class RulesActivity extends Activity {
         adapter.clear();
         adapter.addAll(getRuleDescriptions());
         adapter.notifyDataSetChanged();
+        updateRuleCount();
+    }
+
+    private void updateRuleCount() {
+        if (titleView == null) return;
+        int enabled = 0;
+        if (rules != null) for (Rule rule : rules) if (rule != null && rule.enabled) enabled++;
+        int total = rules == null ? 0 : rules.size();
+        titleView.setText("Organizer Rules (" + total + ") — " + enabled + " enabled");
+    }
+
+    /** Select and remove several rules without opening every rule separately. */
+    private void showRemoveRulesDialog() {
+        if (rules == null || rules.isEmpty()) {
+            Toast.makeText(this, "No rules to remove", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] names = new String[rules.size()];
+        boolean[] selected = new boolean[rules.size()];
+        for (int i = 0; i < rules.size(); i++) {
+            String name = rules.get(i).name;
+            names[i] = name == null || name.trim().isEmpty() ? "Unnamed" : name;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Remove rules")
+                .setMultiChoiceItems(names, selected,
+                        (dialog, which, checked) -> selected[which] = checked)
+                .setPositiveButton("Remove", (dialog, which) -> {
+                    int removed = 0;
+                    for (int i = selected.length - 1; i >= 0; i--) {
+                        if (selected[i]) { rules.remove(i); removed++; }
+                    }
+                    if (removed > 0) {
+                        organizer.setRules(rules);
+                        refreshList();
+                        Toast.makeText(this, "Removed " + removed + " rules", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     // ── Rule options (tap) ──────────────────────────────────────────────
