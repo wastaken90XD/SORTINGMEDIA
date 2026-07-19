@@ -1437,20 +1437,29 @@ private Spinner makeSpinner(String[] options) {
             return;
         }
 
-        PopupMenu popup = new PopupMenu(this, anchor);
+        String[] names = new String[topTags.size()];
+        boolean[] checked = new boolean[topTags.size()];
         for (int i = 0; i < topTags.size(); i++) {
-            Tag t = topTags.get(i);
-            boolean applied = file.hasTag(t.getName());
-            popup.getMenu().add(0, i, 0, (applied ? "✓ " : "  ") + t.getName());
+            names[i] = topTags.get(i).getName();
+            checked[i] = file.hasTag(names[i]);
         }
-        popup.setOnMenuItemClickListener(item -> {
-            Tag t = topTags.get(item.getItemId());
-            tagManager.toggleTag(file, t.getName());
-            mediaAdapter.updateFile(file);
-            updateProgress();
-            return true;
-        });
-        popup.show();
+
+        // Keep the chooser open while several tags are selected. Applying the
+        // final checked state also allows tags to be removed in the same pass.
+        new AlertDialog.Builder(this)
+                .setTitle("Quick tags — " + file.getName())
+                .setMultiChoiceItems(names, checked,
+                        (dialog, which, isChecked) -> checked[which] = isChecked)
+                .setPositiveButton("Apply", (dialog, which) -> {
+                    for (int i = 0; i < names.length; i++) {
+                        if (checked[i]) tagManager.applyTag(file, names[i]);
+                        else tagManager.removeTag(file, names[i]);
+                    }
+                    mediaAdapter.updateFileTags(file);
+                    updateProgress();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     // ── FolderWatcher callbacks ──────────────────────────────────────────────

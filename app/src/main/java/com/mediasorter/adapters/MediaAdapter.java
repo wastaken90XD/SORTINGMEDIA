@@ -217,15 +217,24 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
                 if (listener != null) listener.onFileClick(file);
             }
         });
+        holder.checkBox.setOnClickListener(v -> {
+            if (selectMode) toggleSelection(file.getPath(), holder);
+        });
+
+        // Quick tags live on the tag text so long-press remains dedicated to
+        // multi-selection (the batch workflow users expect).
+        holder.fileTags.setOnClickListener(v -> {
+            if (selectMode) {
+                toggleSelection(file.getPath(), holder);
+            } else if (longClickListener != null) {
+                longClickListener.onFileLongClick(file, holder.fileTags);
+            }
+        });
 
         holder.itemView.setOnLongClickListener(v -> {
-            if (!selectMode) {
-                if (longClickListener != null) {
-                    longClickListener.onFileLongClick(file, v);
-                } else {
-                    enterSelectMode();
-                    toggleSelection(file.getPath(), holder);
-                }
+            if (!selectMode) enterSelectMode();
+            if (!selected.contains(file.getPath())) {
+                toggleSelection(file.getPath(), holder);
             }
             return true;
         });
