@@ -1,5 +1,6 @@
 package com.mediasorter.adapters;
 
+import android.graphics.drawable.GradientDrawable;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -12,9 +13,8 @@ import com.mediasorter.R;
 import com.mediasorter.ThumbnailLoader;
 import com.mediasorter.models.MediaFile;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> {
 
@@ -37,7 +37,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     private ThumbnailLoader            loader;
     private String                     selectedPath = null;
     private boolean                    selectMode   = false;
-    private final Set<String>          selected     = new HashSet<>();
+    private final LinkedHashSet<String> selected     = new LinkedHashSet<>();
 
     public MediaAdapter(ThumbnailLoader loader, OnFileClickListener listener) {
         this.loader   = loader;
@@ -131,8 +131,14 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
 
     public List<MediaFile> getSelectedFiles() {
         List<MediaFile> result = new ArrayList<>();
-        for (MediaFile f : files) {
-            if (selected.contains(f.getPath())) result.add(f);
+        // Use selection order from LinkedHashSet for deterministic ordering
+        for (String path : selected) {
+            for (MediaFile f : files) {
+                if (f.getPath().equals(path)) {
+                    result.add(f);
+                    break;
+                }
+            }
         }
         return result;
     }
@@ -160,6 +166,20 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
             holder.checkBox.setChecked(true);
         }
         if (selectionListener != null) selectionListener.onSelectionChanged(selected.size());
+        // Refresh all visible items so selection order badges update
+        notifyDataSetChanged();
+    }
+
+    /**
+     * Returns the 1-based selection order for the given path, or -1 if not selected.
+     */
+    private int getSelectionOrder(String path) {
+        int order = 1;
+        for (String p : selected) {
+            if (p.equals(path)) return order;
+            order++;
+        }
+        return -1;
     }
 
     // ── RecyclerView ──────────────────────────────────────────────────────────
@@ -201,8 +221,23 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
             holder.checkBox.setVisibility(View.VISIBLE);
             holder.checkBox.setChecked(isSel);
             holder.itemView.setBackgroundColor(isSel ? 0xFF2A2A6E : 0x00000000);
+
+            // Show selection order badge
+            if (isSel) {
+                int order = getSelectionOrder(file.getPath());
+                holder.selectionOrder.setVisibility(View.VISIBLE);
+                holder.selectionOrder.setText(String.valueOf(order));
+                // Make it circular
+                GradientDrawable bg = new GradientDrawable();
+                bg.setShape(GradientDrawable.OVAL);
+                bg.setColor(0xFFE94560);
+                holder.selectionOrder.setBackground(bg);
+            } else {
+                holder.selectionOrder.setVisibility(View.GONE);
+            }
         } else {
             holder.checkBox.setVisibility(View.GONE);
+            holder.selectionOrder.setVisibility(View.GONE);
             holder.itemView.setBackgroundColor(
                 file.getPath().equals(selectedPath) ? 0xFF1A1A4E : 0x00000000);
         }
@@ -280,14 +315,16 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         TextView  fileDetails;
         TextView  fileTags;
         CheckBox  checkBox;
+        TextView  selectionOrder;
 
         ViewHolder(View v) {
             super(v);
-            thumbnail   = v.findViewById(R.id.thumbnail);
-            fileName    = v.findViewById(R.id.fileName);
-            fileDetails = v.findViewById(R.id.fileDetails);
-            fileTags    = v.findViewById(R.id.fileTags);
-            checkBox    = v.findViewById(R.id.fileCheckbox);
+            thumbnail      = v.findViewById(R.id.thumbnail);
+            fileName       = v.findViewById(R.id.fileName);
+            fileDetails    = v.findViewById(R.id.fileDetails);
+            fileTags       = v.findViewById(R.id.fileTags);
+            checkBox       = v.findViewById(R.id.fileCheckbox);
+            selectionOrder = v.findViewById(R.id.selectionOrder);
         }
     }
 }
