@@ -927,7 +927,7 @@ public class MainActivity extends Activity
             int shown = Math.min(previews.size(), 5);
             for (int i = 0; i < shown; i++) {
                 BatchRenameManager.RenamePreview p = previews.get(i);
-                psb.append(p.originalName).append(" → ").append(p.newName);
+                psb.append(i + 1).append(". ").append(p.originalName).append(" → ").append(p.newName);
                 if (p.hasConflict) psb.append(" ⚠ conflict");
                 psb.append("\n");
             }
