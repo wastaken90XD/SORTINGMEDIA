@@ -270,6 +270,9 @@ public class PreviewManager {
                 case MotionEvent.ACTION_DOWN:
                     lastTouchX = event.getX();
                     lastTouchY = event.getY();
+                    if (scaleFactor > 1.0f) {
+                        imagePreview.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                    }
                     break;
                 case MotionEvent.ACTION_MOVE:
                     if (!scaleDetector.isInProgress() && scaleFactor > 1.0f) {
@@ -281,7 +284,10 @@ public class PreviewManager {
                     lastTouchY = event.getY();
                     break;
                 case MotionEvent.ACTION_UP:
-                    if (scaleFactor <= MIN_ZOOM) resetZoom();
+                    if (scaleFactor <= MIN_ZOOM) {
+                        resetZoom();
+                        imagePreview.setLayerType(View.LAYER_TYPE_NONE, null);
+                    }
                     break;
             }
             return true;
@@ -353,6 +359,7 @@ public class PreviewManager {
                     imagePreview.setVisibility(View.VISIBLE);
                     imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
                     imagePreview.setImageBitmap(bmp);
+                    imagePreview.setLayerType(View.LAYER_TYPE_HARDWARE, null);
                     imagePreview.post(() -> {
                         imagePreview.setScaleType(ImageView.ScaleType.MATRIX);
                         Matrix m = new Matrix(imagePreview.getImageMatrix());

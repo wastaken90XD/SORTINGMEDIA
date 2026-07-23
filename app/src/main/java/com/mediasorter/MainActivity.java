@@ -207,10 +207,13 @@ public class MainActivity extends Activity
         fileBrowser = findViewById(R.id.fileBrowser);
         fileBrowser.setLayoutManager(new LinearLayoutManager(this));
         fileBrowser.setAdapter(mediaAdapter);
+        fileBrowser.setHasFixedSize(true);
+        fileBrowser.setItemViewCacheSize(30);
 
         RecyclerView tagList = findViewById(R.id.tagList);
         tagList.setLayoutManager(new LinearLayoutManager(this));
         tagList.setAdapter(tagAdapter);
+        tagList.setHasFixedSize(true);
 
         FrameLayout previewContainer = findViewById(R.id.previewPanel);
         getLayoutInflater().inflate(R.layout.panel_preview, previewContainer, true);
