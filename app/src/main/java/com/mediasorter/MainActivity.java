@@ -94,6 +94,7 @@ public class MainActivity extends Activity
     @Override
     protected void onResume() {
         super.onResume();
+        if (indexer.isScanning()) return;
         if (!indexer.getIndex().isEmpty()) {
             for (String folder : folderManager.getFolders()) {
                 indexer.rescan(folder);
@@ -362,11 +363,38 @@ public class MainActivity extends Activity
                     LinearLayout.LayoutParams.MATCH_PARENT, 8));
         }
 
-        findViewById(R.id.btnRescan).setOnClickListener(v -> {
+        View btnRescanView = findViewById(R.id.btnRescan);
+        btnRescanView.setOnClickListener(v -> {
+            if (folderManager.isEmpty()) {
+                Toast.makeText(this, "No folder set", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            // If a scan is already running, our new indexer will queue the rescan
+            // instead of dropping it or crashing.
+            boolean wasScanning = indexer.isScanning();
             for (String folder : folderManager.getFolders()) {
                 indexer.rescanClean(folder);
             }
-            Toast.makeText(this, "Rescanning…", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this,
+                    wasScanning ? "Scan in progress — rescan queued" : "Rescanning…",
+                    Toast.LENGTH_SHORT).show();
+        });
+        // Long-press to repair a folder that got corrupted by the old bug
+        // (manifest contains file but index missing, folder appears empty).
+        btnRescanView.setOnLongClickListener(v -> {
+            if (folderManager.isEmpty()) return false;
+            new AlertDialog.Builder(this)
+                .setTitle("Repair folder?")
+                .setMessage("A previous crash could leave a folder with cached hashes but no visible files. Repair clears the stale cache for its folders and forces a full rescan.")
+                .setPositiveButton("Repair", (d, w) -> {
+                    for (String folder : folderManager.getFolders()) {
+                        indexer.repairFolder(folder);
+                    }
+                    Toast.makeText(this, "Repairing…", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+            return true;
         });
 
         findViewById(R.id.btnGroupBy).setOnClickListener(v -> showGroupMenu(v));
@@ -535,6 +563,10 @@ public class MainActivity extends Activity
     private void startScan() {
         if (folderManager.isEmpty()) {
             showAddFolderDialog();
+            return;
+        }
+        if (indexer.isScanning()) {
+            Toast.makeText(this, "Scan already in progress…", Toast.LENGTH_SHORT).show();
             return;
         }
         btnScan.setEnabled(false);
