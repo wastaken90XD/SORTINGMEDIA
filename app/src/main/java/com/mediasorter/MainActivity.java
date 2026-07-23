@@ -76,6 +76,8 @@ public class MainActivity extends Activity
     private Button   btnScan;
     private ProgressBar scanProgress;
 
+    private RecyclerView fileBrowser;   // reference for scrolling to keep list in sync with preview
+
     private final Handler mainHandler = new Handler(Looper.getMainLooper());           
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -202,7 +204,7 @@ public class MainActivity extends Activity
     }
 
     private void initViews() {
-        RecyclerView fileBrowser = findViewById(R.id.fileBrowser);
+        fileBrowser = findViewById(R.id.fileBrowser);
         fileBrowser.setLayoutManager(new LinearLayoutManager(this));
         fileBrowser.setAdapter(mediaAdapter);
 
@@ -546,6 +548,14 @@ public class MainActivity extends Activity
         thumbnailLoader.evictOutsideWindow(windowPaths);
 
         mediaAdapter.setFiles(currentFiles);
+
+        // If we have a current preview file, re-select it in the (new) window
+        if (currentIndex >= 0 && currentIndex < fullList.size()) {
+            MediaFile current = fullList.get(currentIndex);
+            mediaAdapter.setSelected(current.getPath());
+            // Also try to keep it visible in the list
+            scrollFileListToCurrent(currentIndex);
+        }
     }
 
     private void shiftWindowIfNeeded(int absoluteIndex) {
@@ -721,6 +731,41 @@ public class MainActivity extends Activity
         tagAdapter.setTags(tagManager.getAllTags());
         mediaAdapter.setSelected(file.getPath());
         refreshSidePanel();
+
+        // Keep the file list in sync with the preview (bidirectional)
+        scrollFileListToCurrent(absoluteIndex);
+    }
+
+    /** Scrolls the file browser so the currently previewed file is visible. */
+    private void scrollFileListToCurrent(int absoluteIndex) {
+        if (fileBrowser == null || currentFiles.isEmpty()) return;
+
+        // Find the position of this file inside the *current window* (currentFiles)
+        int windowPos = -1;
+        String targetPath = fullList.get(absoluteIndex).getPath();
+        for (int i = 0; i < currentFiles.size(); i++) {
+            if (currentFiles.get(i).getPath().equals(targetPath)) {
+                windowPos = i;
+                break;
+            }
+        }
+
+        if (windowPos >= 0) {
+            // Smooth scroll so the item is nicely centered
+            LinearLayoutManager llm = (LinearLayoutManager) fileBrowser.getLayoutManager();
+            if (llm != null) {
+                int first = llm.findFirstVisibleItemPosition();
+                int last  = llm.findLastVisibleItemPosition();
+                int center = (first + last) / 2;
+
+                if (Math.abs(windowPos - center) > 2) {
+                    fileBrowser.smoothScrollToPosition(windowPos);
+                } else {
+                    // Already near the center — just ensure it's visible
+                    fileBrowser.scrollToPosition(windowPos);
+                }
+            }
+        }
     }
 
     private void onFileSelected(MediaFile file) {
