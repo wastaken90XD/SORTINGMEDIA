@@ -154,6 +154,46 @@ public class ThumbnailLoader {
         inFlight.put(path, task);
     }
 
+    /**
+ * Pre‑load thumbnails for the given files into the memory cache.
+ * Safe to call from any thread. If the file’s thumbnail is already in memory
+ * or currently being loaded, it is skipped.
+ */
+public void precache(List<MediaFile> files) {
+    for (MediaFile file : files) {
+        String path = file.getPath();
+        // Already in memory? skip
+        synchronized (memCache) {
+            if (memCache.containsKey(path)) continue;
+        }
+        // Already being loaded? skip
+        if (inFlight.containsKey(path)) continue;
+
+        Future<?> task = executor.submit(() -> {
+            Bitmap bmp = null;
+            int quality = getQuality();
+
+            // Try disk cache first
+            File thumbFile = diskCache.getThumbnailFile(path);
+            if (thumbFile.exists()) {
+                bmp = BitmapFactory.decodeFile(thumbFile.getAbsolutePath());
+            }
+
+            // Generate if needed
+            if (bmp == null) {
+                bmp = generate(file, quality);
+                if (bmp != null) saveToDisk(bmp, thumbFile);
+            }
+
+            // Store in memory cache (does not recycle, safe)
+            if (bmp != null) putInMemCache(path, bmp);
+
+            inFlight.remove(path);
+        });
+
+        inFlight.put(path, task);
+    }
+}
     // ── Memory cache ─────────────────────────────────────────────────────────
 
     private void putInMemCache(String path, Bitmap bmp) {
