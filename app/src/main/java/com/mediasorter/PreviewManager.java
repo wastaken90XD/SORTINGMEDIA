@@ -254,8 +254,17 @@ public class PreviewManager {
             });
 
         imagePreview.setOnTouchListener((v, event) -> {
-            scaleDetector.onTouchEvent(event);
-            if (swipeDetector != null) swipeDetector.onTouchEvent(event);
+            boolean scaleHandled = scaleDetector.onTouchEvent(event);
+
+            // Only forward to swipe detector when NOT zooming and NOT zoomed in.
+            // This prevents gestures (flings) from registering/navigating while pinching or viewing zoomed.
+            boolean shouldHandleSwipe = swipeDetector != null
+                    && !scaleDetector.isInProgress()
+                    && scaleFactor <= MIN_ZOOM + 0.01f;
+
+            if (shouldHandleSwipe) {
+                swipeDetector.onTouchEvent(event);
+            }
 
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:

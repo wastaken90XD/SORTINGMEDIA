@@ -689,7 +689,8 @@ public class MainActivity extends Activity
         currentIndex = (currentIndex + 1) % fullList.size();
         shiftWindowIfNeeded(currentIndex);
         loadFileAtIndex(currentIndex);
-        precacheAdjacent();
+        // Defer precaching slightly to avoid jank during rapid file switching
+        mainHandler.postDelayed(this::precacheAdjacent, 120);
     }
 
     private void navigatePrev() {
@@ -697,7 +698,7 @@ public class MainActivity extends Activity
         currentIndex = (currentIndex - 1 + fullList.size()) % fullList.size();
         shiftWindowIfNeeded(currentIndex);
         loadFileAtIndex(currentIndex);
-        precacheAdjacent();
+        mainHandler.postDelayed(this::precacheAdjacent, 120);
     }
 
     /** Pre-cache thumbnails for the previous and next files. */
