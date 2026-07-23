@@ -38,7 +38,7 @@ public class ThumbnailLoader {
     private final SharedPreferences prefs;
     private final CacheManager      diskCache;
     private final Handler           mainHandler = new Handler(Looper.getMainLooper());
-    private final ExecutorService   executor    = Executors.newFixedThreadPool(2);
+    private final ExecutorService   executor    = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors()));
 
     // LRU bitmap cache with byte budget
     private final LinkedHashMap<String, Bitmap> memCache =
