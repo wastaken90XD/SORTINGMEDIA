@@ -6,8 +6,10 @@ import com.mediasorter.models.MediaFile;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -40,15 +42,14 @@ public class MediaIndexer {
         }
     }
 
-    // Thread pools: single-thread for ordered scans, cached for rescans
+    // Single thread for ALL indexing operations – serialized, no race
     private final ExecutorService scanExecutor = Executors.newSingleThreadExecutor();
-    private final ExecutorService rescanExecutor = Executors.newCachedThreadPool();
     private final ConcurrentHashMap<String, ManifestEntry> manifest = new ConcurrentHashMap<>();
-    private final List<MediaFile>               index    = new ArrayList<>();
-    private       IndexListener                 listener;
-    private       Context                       appContext;
-    private final AtomicBoolean                 scanning = new AtomicBoolean(false);
-    private final List<String> folderQueue = new ArrayList<>();
+    private final List<MediaFile> index = new ArrayList<>();
+    private IndexListener listener;
+    private Context appContext;
+    private final AtomicBoolean scanning = new AtomicBoolean(false);
+    private final LinkedList<String> folderQueue = new LinkedList<>();
 
     // Hash disk cache — persists hashes across app restarts
     private static final String HASH_PREFS = "hash_cache_prefs";
@@ -57,10 +58,6 @@ public class MediaIndexer {
     public void setListener(IndexListener l) { this.listener = l; }
     public boolean isScanning()              { return scanning.get(); }
 
-    /**
-     * Initialize with application context for hash persistence.
-     * Call once from initManagers().
-     */
     public void init(Context context) {
         this.appContext = context.getApplicationContext();
         this.hashPrefs = appContext.getSharedPreferences(HASH_PREFS, Context.MODE_PRIVATE);
@@ -69,10 +66,6 @@ public class MediaIndexer {
 
     // ── Hash disk cache ──────────────────────────────────────────────────────
 
-    /**
-     * Load persisted hashes into the manifest.
-     * Format: "size|lastModified|hexHash" per file path.
-     */
     private void loadHashCache() {
         if (hashPrefs == null) return;
         Map<String, ?> all = hashPrefs.getAll();
@@ -97,277 +90,414 @@ public class MediaIndexer {
         if (hashPrefs == null) return;
         String hex = HashScanner.hashToHex(hash);
         if (hex.isEmpty()) return;
-        hashPrefs.edit().putString(path, size + "|" + lastModified + "|" + hex).apply();
+        try {
+            hashPrefs.edit().putString(path, size + "|" + lastModified + "|" + hex).apply();
+        } catch (Exception ignored) {}
     }
 
     private void removePersistedHash(String path) {
         if (hashPrefs == null) return;
-        hashPrefs.edit().remove(path).apply();
+        try { hashPrefs.edit().remove(path).apply(); } catch (Exception ignored) {}
     }
 
-    /**
-     * Get or compute hash for a file, using the disk cache when possible.
-     * If the file's size and lastModified match the cache, skip the 64KB read.
-     */
     private byte[] getOrComputeHash(String path, long size, long lastModified) {
         ManifestEntry existing = manifest.get(path);
         if (existing != null && existing.size == size
                 && existing.lastModified == lastModified && existing.hash != null) {
-            // Cache hit — no disk read needed
             return existing.hash;
         }
-        // Cache miss — read 64KB and compute
         return HashScanner.partialHash(path);
     }
 
-    // ── Full scan ─────────────────────────────────────────────────────────────
-
-    public void scanFolder(String folderPath) {
-    if (!scanning.compareAndSet(false, true)) return;
-
-    scanExecutor.submit(() -> {
-        try {
-            File folder = new File(folderPath);
-            if (!folder.exists() || !folder.isDirectory()) return;
-
-            File[] files = folder.listFiles();
-            if (files == null) return;
-
-            // Count eligible files for progress
-            int totalMedia = 0;
-            for (File f : files) {
-                if (!f.isDirectory()) {
-                    String n = f.getName().toLowerCase();
-                    if (n.matches(".*\\.(jpg|jpeg|png|bmp|webp|gif)")
-                            || n.matches(".*\\.(mp4|3gp|avi|mkv|mov|webm)")) {
-                        totalMedia++;
-                    }
-                }
-            }
-
-            List<MediaFile> page     = new ArrayList<>();
-            List<MediaFile> allFound = new ArrayList<>();
-            int scanned = 0;
-
-            for (File f : files) {
-                if (f.isDirectory()) continue;
-                String absPath = f.getAbsolutePath();
-                long size = f.length();
-                long mod = f.lastModified();
-
-                ManifestEntry existing = manifest.get(absPath);
-                // Skip if already in manifest with same size+mod
-                if (existing != null && existing.size == size && existing.lastModified == mod) continue;
-
-                MediaFile mf = buildLight(f);
-                if (mf.getType() != MediaFile.Type.UNSUPPORTED) {
-                    scanned++;
-                    if (listener != null) listener.onScanProgress(scanned, totalMedia, f.getName());
-
-                    page.add(mf);
-                    allFound.add(mf);
-
-                    // Compute hash (uses cache if size+mod match)
-                    byte[] hash = getOrComputeHash(absPath, size, mod);
-                    manifest.put(absPath, new ManifestEntry(size, mod, hash));
-                    persistHash(absPath, size, mod, hash);
-
-                    if (page.size() >= PAGE_SIZE) {
-                        final List<MediaFile> batch = new ArrayList<>(page);
-                        if (listener != null) listener.onPageLoaded(batch);
-                        page.clear();
-                        try { Thread.sleep(PAGE_DELAY_MS); }
-                        catch (InterruptedException ignored) {}
-                    }
-                }
-            }
-
-            if (!page.isEmpty() && listener != null) {
-                listener.onPageLoaded(new ArrayList<>(page));
-            }
-
-            synchronized (index) { index.addAll(allFound); }
-
-            if (listener != null) {
-                listener.onScanComplete(new ArrayList<>(index));
-            }
-
-        } finally {
-            scanNextInQueue();
-            scanning.set(false);
-        }
-    });
-}
+    // ── Public API – queue based, never drops folders ───────────────────────
 
     public void scanFolders(List<String> folders) {
+        if (folders == null || folders.isEmpty()) return;
         synchronized (folderQueue) {
-            folderQueue.clear();
-            folderQueue.addAll(folders);
+            // Avoid duplicate entries but keep order
+            for (String f : folders) {
+                if (f != null && !folderQueue.contains(f)) {
+                    folderQueue.add(f);
+                }
+            }
         }
-        scanNextInQueue();
+        scheduleNext();
     }
 
-    private void scanNextInQueue() {
+    public void scanFolder(String folderPath) {
+        if (folderPath == null) return;
+        synchronized (folderQueue) {
+            if (!folderQueue.contains(folderPath)) {
+                folderQueue.add(folderPath);
+            }
+        }
+        scheduleNext();
+    }
+
+    /**
+     * Try to start next scan from queue if not already scanning.
+     * This is the only place that sets scanning=true and submits a full scan.
+     */
+    private void scheduleNext() {
+        if (scanning.get()) return; // busy – will be rescheduled when current finishes
+
         String next = null;
         synchronized (folderQueue) {
-            if (!folderQueue.isEmpty()) next = folderQueue.remove(0);
+            if (!folderQueue.isEmpty()) {
+                next = folderQueue.poll();
+            }
         }
-        if (next != null) scanFolder(next);
-    }
+        if (next == null) return;
 
-    // ── Lightweight rescan (uses cached thread pool, doesn't block scans) ────
-
-    public void rescan(String folderPath) {
-        if (!scanning.compareAndSet(false, true)) return;
-
-        rescanExecutor.submit(() -> {
+        scanning.set(true);
+        final String folderToScan = next;
+        scanExecutor.submit(() -> {
             try {
-                File folder = new File(folderPath);
-                if (!folder.exists()) return;
-
-                File[] files = folder.listFiles();
-                if (files == null) return;
-
-                boolean changed = false;
-
-                // 1. Check for new/changed files
-                for (File f : files) {
-                    if (f.isDirectory()) continue;
-
-                    String path = f.getAbsolutePath();
-                    long   size = f.length();
-                    long   mod  = f.lastModified();
-                    ManifestEntry existing = manifest.get(path);
-
-                    if (existing == null) {
-                        MediaFile mf = buildLight(f);
-                        addToIndex(mf);
-                        byte[] hash = getOrComputeHash(path, size, mod);
-                        manifest.put(path, new ManifestEntry(size, mod, hash));
-                        persistHash(path, size, mod, hash);
-                        if (listener != null) listener.onFileFound(mf);
-                        changed = true;
-
-                    } else if (existing.size != size || existing.lastModified != mod) {
-                        // File changed — recompute hash
-                        MediaFile mf = buildLight(f);
-                        updateInIndex(mf);
-                        byte[] hash = HashScanner.partialHash(path);
-                        manifest.put(path, new ManifestEntry(size, mod, hash));
-                        persistHash(path, size, mod, hash);
-                        if (listener != null) listener.onFileChanged(mf);
-                        changed = true;
-
-                    } else {
-                        // Size + mod match — use cached hash, only recompute
-                        // if hash was somehow null
-                        if (existing.hash == null) {
-                            byte[] hash = HashScanner.partialHash(path);
-                            manifest.put(path, new ManifestEntry(size, mod, hash));
-                            persistHash(path, size, mod, hash);
-                        }
-                        // Otherwise: no-op, hash is cached and valid
+                doFullScan(folderToScan);
+            } catch (Throwable t) {
+                t.printStackTrace();
+                try {
+                    // Ensure we still notify completion to unblock UI
+                    if (listener != null) {
+                        listener.onScanComplete(new ArrayList<>(getIndex()));
                     }
-                }
-
-                // 2. Build complete on-disk set AFTER the loop
-                Set<String> onDisk = new HashSet<>();
-                for (File f : files) {
-                    if (!f.isDirectory()) onDisk.add(f.getAbsolutePath());
-                }
-
-                // 3. Remove stale entries
-                String normalizedFolder = folderPath.endsWith("/") ? folderPath : folderPath + "/";
-                List<String> toRemove = new ArrayList<>();
-                synchronized (index) {
-                    for (MediaFile mf : index) {
-                        if (mf.getPath().startsWith(normalizedFolder)
-                                && !onDisk.contains(mf.getPath())) {
-                            toRemove.add(mf.getPath());
-                        }
-                    }
-                }
-                for (String path : toRemove) {
-                    removeFromIndex(path);
-                    removePersistedHash(path);
-                    if (listener != null) listener.onFileRemoved(path);
-                    changed = true;
-                }
+                } catch (Exception ignored) {}
             } finally {
                 scanning.set(false);
+                // Schedule next in queue on same executor thread to avoid stack overflow
+                // post a new check
+                scheduleNext();
             }
         });
+    }
+
+    // ── Full scan (internal, runs inside scanExecutor) ──────────────────────
+
+    private void doFullScan(String folderPath) {
+        File folder = new File(folderPath);
+        if (!folder.exists() || !folder.isDirectory()) return;
+
+        File[] files = folder.listFiles();
+        if (files == null) return;
+
+        // Count eligible for progress
+        int totalMedia = 0;
+        for (File f : files) {
+            if (!f.isDirectory() && isMediaFile(f.getName())) totalMedia++;
+        }
+
+        List<MediaFile> page = new ArrayList<>();
+        int scanned = 0;
+
+        for (File f : files) {
+            if (f.isDirectory()) continue;
+            if (!isMediaFile(f.getName())) continue;
+
+            String absPath = f.getAbsolutePath();
+            long size = f.length();
+            long mod = f.lastModified();
+
+            // FIX: manifest alone must NOT cause skip. If index doesn't contain file,
+            // we must re-add (recovers from previous crash where manifest was written
+            // but index.addAll never happened).
+            ManifestEntry existingManifest = manifest.get(absPath);
+            MediaFile existingIndex = findInIndex(absPath);
+
+            if (existingIndex != null && existingManifest != null
+                    && existingManifest.size == size
+                    && existingManifest.lastModified == mod) {
+                // Already indexed and up to date – skip
+                continue;
+            }
+
+            try {
+                MediaFile mf = buildLight(f);
+                if (mf.getType() == MediaFile.Type.UNSUPPORTED) continue;
+
+                scanned++;
+                if (listener != null) {
+                    try { listener.onScanProgress(scanned, totalMedia, f.getName()); }
+                    catch (Exception ignored) {}
+                }
+
+                byte[] hash = getOrComputeHash(absPath, size, mod);
+                // Update both index and manifest atomically from this thread's perspective
+                if (existingIndex != null) {
+                    updateInIndex(mf);
+                } else {
+                    addToIndex(mf);
+                }
+                manifest.put(absPath, new ManifestEntry(size, mod, hash));
+                persistHash(absPath, size, mod, hash);
+
+                page.add(mf);
+
+                if (page.size() >= PAGE_SIZE) {
+                    final List<MediaFile> batch = new ArrayList<>(page);
+                    if (listener != null) {
+                        try { listener.onPageLoaded(batch); } catch (Exception ignored) {}
+                    }
+                    page.clear();
+                    try { Thread.sleep(PAGE_DELAY_MS); } catch (InterruptedException ignored) {}
+                }
+            } catch (Throwable t) {
+                t.printStackTrace();
+                // Continue with next file – don't abort whole folder because one file failed
+            }
+        }
+
+        if (!page.isEmpty() && listener != null) {
+            try { listener.onPageLoaded(new ArrayList<>(page)); } catch (Exception ignored) {}
+        }
+
+        if (listener != null) {
+            try { listener.onScanComplete(new ArrayList<>(getIndex())); }
+            catch (Exception ignored) {}
+        }
+    }
+
+    private boolean isMediaFile(String name) {
+        String n = name.toLowerCase();
+        return n.matches(".*\\.(jpg|jpeg|png|bmp|webp|gif)")
+                || n.matches(".*\\.(mp4|3gp|avi|mkv|mov|webm)");
+    }
+
+    // ── Rescan (lightweight) – serialized through same executor, never dropped ─
+
+    public void rescan(String folderPath) {
+        if (folderPath == null) return;
+        scanExecutor.submit(() -> {
+            // If a full scan is queued, we still run rescan; set scanning flag for UI
+            boolean prev = scanning.getAndSet(true);
+            try {
+                doRescan(folderPath);
+            } catch (Throwable t) {
+                t.printStackTrace();
+            } finally {
+                scanning.set(false);
+                scheduleNext();
+            }
+        });
+    }
+
+    private void doRescan(String folderPath) {
+        File folder = new File(folderPath);
+        if (!folder.exists()) return;
+        File[] files = folder.listFiles();
+        if (files == null) return;
+
+        // 1. New / changed / recovered (manifest but not in index) files
+        for (File f : files) {
+            if (f.isDirectory()) continue;
+            if (!isMediaFile(f.getName())) continue;
+
+            String path = f.getAbsolutePath();
+            long size = f.length();
+            long mod = f.lastModified();
+            ManifestEntry existing = manifest.get(path);
+            boolean inIndex = isInIndex(path);
+
+            boolean needsAdd = (existing == null)
+                    || (existing.size != size || existing.lastModified != mod)
+                    || !inIndex; // RECOVERY: was in manifest but missing from index
+
+            if (needsAdd) {
+                try {
+                    MediaFile mf = buildLight(f);
+                    if (mf.getType() == MediaFile.Type.UNSUPPORTED) continue;
+
+                    if (inIndex) {
+                        updateInIndex(mf);
+                        if (listener != null) listener.onFileChanged(mf);
+                    } else {
+                        addToIndex(mf);
+                        if (listener != null) listener.onFileFound(mf);
+                    }
+
+                    byte[] hash;
+                    if (existing != null && existing.size == size && existing.lastModified == mod && existing.hash != null) {
+                        hash = existing.hash;
+                    } else {
+                        hash = HashScanner.partialHash(path);
+                    }
+                    manifest.put(path, new ManifestEntry(size, mod, hash));
+                    persistHash(path, size, mod, hash);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                }
+            } else {
+                if (existing.hash == null) {
+                    byte[] hash = HashScanner.partialHash(path);
+                    manifest.put(path, new ManifestEntry(size, mod, hash));
+                    persistHash(path, size, mod, hash);
+                }
+            }
+        }
+
+        // 2. Deleted files
+        Set<String> onDisk = new HashSet<>();
+        for (File f : files) {
+            if (!f.isDirectory()) onDisk.add(f.getAbsolutePath());
+        }
+
+        String normalizedFolder = folderPath.endsWith("/") ? folderPath : folderPath + "/";
+        List<String> toRemove = new ArrayList<>();
+        synchronized (index) {
+            for (MediaFile mf : index) {
+                if (mf.getPath().startsWith(normalizedFolder) && !onDisk.contains(mf.getPath())) {
+                    toRemove.add(mf.getPath());
+                }
+            }
+        }
+        for (String path : toRemove) {
+            removeFromIndex(path);
+            removePersistedHash(path);
+            if (listener != null) {
+                try { listener.onFileRemoved(path); } catch (Exception ignored) {}
+            }
+        }
     }
 
     // ── Clean rescan ──────────────────────────────────────────────────────────
 
     public void rescanClean(String folderPath) {
-        if (!scanning.compareAndSet(false, true)) return;
-
-        rescanExecutor.submit(() -> {
+        if (folderPath == null) return;
+        scanExecutor.submit(() -> {
+            scanning.getAndSet(true);
             try {
-                File folder = new File(folderPath);
-                if (!folder.exists()) return;
-
-                File[] files = folder.listFiles();
-                if (files == null) return;
-
-                Set<String> onDisk = new HashSet<>();
-                for (File f : files) {
-                    if (!f.isDirectory()) onDisk.add(f.getAbsolutePath());
-                }
-
-                String normalizedFolder = folderPath.endsWith("/") ? folderPath : folderPath + "/";
-                List<String> toRemove = new ArrayList<>();
-                synchronized (index) {
-                    for (MediaFile mf : index) {
-                        if (mf.getPath().startsWith(normalizedFolder)
-                                && !onDisk.contains(mf.getPath())) {
-                            toRemove.add(mf.getPath());
-                        }
-                    }
-                }
-                for (String path : toRemove) {
-                    removeFromIndex(path);
-                    removePersistedHash(path);
-                    if (listener != null) listener.onFileRemoved(path);
-                }
-
-                for (File f : files) {
-                    if (f.isDirectory()) continue;
-                    if (!manifest.containsKey(f.getAbsolutePath())) {
-                        MediaFile mf = buildLight(f);
-                        if (mf.getType() != MediaFile.Type.UNSUPPORTED) {
-                            addToIndex(mf);
-                            long size = f.length();
-                            long mod = f.lastModified();
-                            byte[] hash = getOrComputeHash(f.getAbsolutePath(), size, mod);
-                            manifest.put(f.getAbsolutePath(), new ManifestEntry(size, mod, hash));
-                            persistHash(f.getAbsolutePath(), size, mod, hash);
-                            if (listener != null) listener.onFileFound(mf);
-                        }
-                    }
-                }
-
-                if (listener != null) {
-                    listener.onScanComplete(new ArrayList<>(index));
-                }
+                doRescanClean(folderPath);
+            } catch (Throwable t) {
+                t.printStackTrace();
             } finally {
                 scanning.set(false);
+                scheduleNext();
             }
         });
     }
 
-    // ── Full reset ────────────────────────────────────────────────────────────
+    private void doRescanClean(String folderPath) {
+        File folder = new File(folderPath);
+        if (!folder.exists()) return;
+        File[] files = folder.listFiles();
+        if (files == null) return;
+
+        Set<String> onDisk = new HashSet<>();
+        for (File f : files) {
+            if (!f.isDirectory()) onDisk.add(f.getAbsolutePath());
+        }
+
+        String normalizedFolder = folderPath.endsWith("/") ? folderPath : folderPath + "/";
+
+        // Remove stale
+        List<String> toRemove = new ArrayList<>();
+        synchronized (index) {
+            for (MediaFile mf : index) {
+                if (mf.getPath().startsWith(normalizedFolder) && !onDisk.contains(mf.getPath())) {
+                    toRemove.add(mf.getPath());
+                }
+            }
+        }
+        for (String path : toRemove) {
+            removeFromIndex(path);
+            removePersistedHash(path);
+            if (listener != null) {
+                try { listener.onFileRemoved(path); } catch (Exception ignored) {}
+            }
+        }
+
+        // Add missing – recovery fix: check both manifest AND index
+        for (File f : files) {
+            if (f.isDirectory()) continue;
+            if (!isMediaFile(f.getName())) continue;
+            String abs = f.getAbsolutePath();
+            boolean inIndex = isInIndex(abs);
+            // If not in index, force re-add even if manifest says it exists
+            if (!inIndex || !manifest.containsKey(abs)) {
+                try {
+                    MediaFile mf = buildLight(f);
+                    if (mf.getType() == MediaFile.Type.UNSUPPORTED) continue;
+                    addToIndex(mf);
+                    long size = f.length();
+                    long mod = f.lastModified();
+                    byte[] hash = getOrComputeHash(abs, size, mod);
+                    manifest.put(abs, new ManifestEntry(size, mod, hash));
+                    persistHash(abs, size, mod, hash);
+                    if (listener != null) listener.onFileFound(mf);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                }
+            }
+        }
+
+        if (listener != null) {
+            try { listener.onScanComplete(new ArrayList<>(getIndex())); }
+            catch (Exception ignored) {}
+        }
+    }
+
+    // ── Full reset (clears corrupted state) ───────────────────────────────────
 
     public void fullReset(List<String> folders) {
-        synchronized (index) { index.clear(); }
-        manifest.clear();
-        if (hashPrefs != null) hashPrefs.edit().clear().apply();
-        scanning.set(false);
-        for (String folder : folders) {
-            scanFolder(folder);
-        }
+        // Stop queue
+        synchronized (folderQueue) { folderQueue.clear(); }
+        scanExecutor.submit(() -> {
+            scanning.set(true);
+            try {
+                synchronized (index) { index.clear(); }
+                manifest.clear();
+                if (hashPrefs != null) {
+                    try { hashPrefs.edit().clear().apply(); } catch (Exception ignored) {}
+                }
+            } finally {
+                scanning.set(false);
+            }
+            // Re-queue folders after clearing
+            if (folders != null) {
+                synchronized (folderQueue) {
+                    folderQueue.addAll(folders);
+                }
+                scheduleNext();
+            }
+        });
+    }
+
+    /**
+     * Force repair a specific folder that got stuck due to manifest/index desync.
+     * Clears manifest entries for that folder and forces re-scan.
+     */
+    public void repairFolder(String folderPath) {
+        if (folderPath == null) return;
+        scanExecutor.submit(() -> {
+            scanning.set(true);
+            try {
+                String norm = folderPath.endsWith("/") ? folderPath : folderPath + "/";
+                // Remove manifest entries for this folder
+                List<String> keysToRemove = new ArrayList<>();
+                for (String key : manifest.keySet()) {
+                    if (key.startsWith(norm)) keysToRemove.add(key);
+                }
+                for (String k : keysToRemove) {
+                    manifest.remove(k);
+                    removePersistedHash(k);
+                }
+                // Remove index entries for this folder (will be re-added)
+                List<String> idxToRemove = new ArrayList<>();
+                synchronized (index) {
+                    for (MediaFile mf : index) {
+                        if (mf.getPath().startsWith(norm)) idxToRemove.add(mf.getPath());
+                    }
+                }
+                for (String p : idxToRemove) removeFromIndex(p);
+
+                // Now do a clean scan
+                doFullScan(folderPath);
+            } catch (Throwable t) {
+                t.printStackTrace();
+            } finally {
+                scanning.set(false);
+                scheduleNext();
+            }
+        });
     }
 
     // ── Delete file ───────────────────────────────────────────────────────────
@@ -378,7 +508,9 @@ public class MediaIndexer {
         if (deleted) {
             removeFromIndex(path);
             removePersistedHash(path);
-            if (listener != null) listener.onFileRemoved(path);
+            if (listener != null) {
+                try { listener.onFileRemoved(path); } catch (Exception ignored) {}
+            }
         }
         return deleted;
     }
@@ -388,12 +520,11 @@ public class MediaIndexer {
     private MediaFile buildLight(File f) {
         MediaFile mf = new MediaFile(f.getAbsolutePath(), f.length());
         mf.setDateAdded(f.lastModified());
-
-        List<String> existingTags = XmpReader.readTags(f.getAbsolutePath());
-        for (String tag : existingTags) mf.addTag(tag);
-
+        try {
+            List<String> existingTags = XmpReader.readTags(f.getAbsolutePath());
+            for (String tag : existingTags) mf.addTag(tag);
+        } catch (Exception ignored) {}
         readDimensions(mf);
-
         return mf;
     }
 
@@ -430,7 +561,13 @@ public class MediaIndexer {
     // ── Index helpers (thread-safe) ──────────────────────────────────────────
 
     private void addToIndex(MediaFile mf) {
-        synchronized (index) { index.add(mf); }
+        synchronized (index) {
+            // Avoid duplicates
+            for (MediaFile existing : index) {
+                if (existing.getPath().equals(mf.getPath())) return;
+            }
+            index.add(mf);
+        }
     }
 
     private void updateInIndex(MediaFile mf) {
@@ -455,6 +592,19 @@ public class MediaIndexer {
             }
         }
         manifest.remove(path);
+    }
+
+    private MediaFile findInIndex(String path) {
+        synchronized (index) {
+            for (MediaFile mf : index) {
+                if (mf.getPath().equals(path)) return mf;
+            }
+        }
+        return null;
+    }
+
+    private boolean isInIndex(String path) {
+        return findInIndex(path) != null;
     }
 
     // ── Query helpers ─────────────────────────────────────────────────────────
