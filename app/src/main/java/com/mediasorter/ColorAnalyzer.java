@@ -79,6 +79,9 @@ public class ColorAnalyzer {
                                        Options opts,
                                        TagManager tagManager,
                                        BatchRenameManager renamer) {
+        if (files == null || files.isEmpty()) return new ArrayList<>();
+        if (opts == null) opts = new Options();
+
         List<Result> results = new ArrayList<>();
 
         // Step 1 – extract colors for every file
