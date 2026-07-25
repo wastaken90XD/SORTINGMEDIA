@@ -7,9 +7,7 @@ import com.mediasorter.models.MediaFile;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 public class ColorAnalyzer {
 
@@ -148,15 +146,15 @@ public class ColorAnalyzer {
             if (!r.success || r.colors.isEmpty()) continue;
 
             // Tagging
-            if (mode == Mode.TAG || mode == Mode.TAG_AND_RENAME || mode == Mode.ALL) {
+            if (opts.mode == Mode.TAG || opts.mode == Mode.TAG_AND_RENAME || opts.mode == Mode.ALL) {
                 if (tagManager != null) {   // guard against null
                     for (String color : r.colors) tagManager.applyTag(f, color);
-                    if (r.groupId >= 0) tagManager.applyTag(f, "GRP" + r.groupId);
+                    if (r.groupId >= 0 && opts.includeGroupTag) tagManager.applyTag(f, "GRP" + r.groupId);
                 }
             }
 
             // Renaming
-            if (mode == Mode.RENAME || mode == Mode.TAG_AND_RENAME || mode == Mode.ALL) {
+            if (opts.mode == Mode.RENAME || opts.mode == Mode.TAG_AND_RENAME || opts.mode == Mode.ALL) {
                 String prefix = join("-", r.colors);
                 if (r.groupId >= 0) prefix = "GRP" + r.groupId + "-" + prefix;
 
@@ -229,29 +227,6 @@ public class ColorAnalyzer {
         Options o = new Options();
         o.topN = topN;
         return extractLabColors(path, o);
-    }
-        BitmapFactory.Options opts = new BitmapFactory.Options();
-        opts.inSampleSize = 4;
-        Bitmap bmp = BitmapFactory.decodeFile(path, opts);
-        if (bmp == null) throw new RuntimeException("decode failed");
-
-        Bitmap scaled = Bitmap.createScaledBitmap(bmp, SAMPLE, SAMPLE, false);
-        bmp.recycle();
-
-        int[] pixels = new int[SAMPLE * SAMPLE];
-        scaled.getPixels(pixels, 0, SAMPLE, 0, 0, SAMPLE, SAMPLE);
-        scaled.recycle();
-
-        List<float[]> labs = new ArrayList<>(pixels.length);
-        for (int p : pixels) {
-            labs.add(rgbToLab(Color.red(p), Color.green(p), Color.blue(p)));
-        }
-
-        // Prevent infinite loop if topN > number of unique pixels
-        int maxColors = labs.size();
-        if (topN > maxColors) topN = maxColors;
-
-        return medianCut(labs, topN);
     }
 
     // ── Median cut ────────────────────────────────────────────────────────────
@@ -345,7 +320,7 @@ public class ColorAnalyzer {
 
     // ── Grouping ──────────────────────────────────────────────────────────────
 
-    private static void assignGroups(List<Result> results, float threshold) {
+    private static void assignGroups(List<Result> results, Options opts) {
         int[] groups = new int[results.size()];
         for (int i = 0; i < groups.length; i++) groups[i] = -1;
         int nextGroup = 0;
@@ -358,7 +333,7 @@ public class ColorAnalyzer {
                 float dist = opts.useCIEDE2000
                         ? ciede2000FromNames(results.get(i).colors, results.get(j).colors)
                         : colorDistance(results.get(i).colors, results.get(j).colors);
-                if (dist < threshold) {
+                if (dist < opts.threshold) {
                     groups[j] = groups[i];
                 }
             }
@@ -385,6 +360,14 @@ public class ColorAnalyzer {
 
     private static boolean isGrayscale(float[] lab) {
         return Math.abs(lab[1]) < 8 && Math.abs(lab[2]) < 8;
+    }
+
+    private static boolean isGrayscale(float[][] labs) {
+        if (labs.length == 0) return false;
+        for (float[] lab : labs) {
+            if (!isGrayscale(lab)) return false;
+        }
+        return true;
     }
 
     private static float computeVibrance(float[][] labs) {
@@ -473,12 +456,6 @@ public class ColorAnalyzer {
             if (d < best) { best = d; idx = i; }
         }
         return names[idx];
-    }
-
-    // ── Grouping (now uses Options) ───────────────────────────────────────────
-
-    private static void assignGroups(List<Result> results, Options opts) {
-        assignGroups(results, opts.threshold);
     }
 
     // CIEDE2000 helper (used when enabled)
