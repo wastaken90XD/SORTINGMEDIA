@@ -170,7 +170,9 @@ public class ColorAnalyzer {
                 labs.add(lab);
             }
         }
-        if (labs.isEmpty()) labs.add(new float[]{50,0,0}); // fallback gray
+        if (labs.isEmpty()) {
+            labs.add(new float[]{50f, 0f, 0f}); // fallback gray
+        }
 
         int maxColors = labs.size();
         if (topN > maxColors) topN = maxColors;
@@ -222,7 +224,11 @@ public class ColorAnalyzer {
         while (buckets.size() < n) {
             // Find the bucket with the largest colour spread
             List<float[]> largest = Collections.max(buckets,
-                (a, b) -> Float.compare(spread(a), spread(b)));
+                new java.util.Comparator<List<float[]>>() {
+                    @Override public int compare(List<float[]> a, List<float[]> b) {
+                        return Float.compare(spread(a), spread(b));
+                    }
+                });
 
             // If the bucket can't be split further, stop
             if (largest.size() <= 1) break;
@@ -230,7 +236,11 @@ public class ColorAnalyzer {
             buckets.remove(largest);
             int axis = widestAxis(largest);
             final int ax = axis;
-            Collections.sort(largest, (a, b) -> Float.compare(a[ax], b[ax]));
+            Collections.sort(largest, new java.util.Comparator<float[]>() {
+                @Override public int compare(float[] a, float[] b) {
+                    return Float.compare(a[ax], b[ax]);
+                }
+            });
 
             int mid = largest.size() / 2;
             buckets.add(new ArrayList<>(largest.subList(0, mid)));
