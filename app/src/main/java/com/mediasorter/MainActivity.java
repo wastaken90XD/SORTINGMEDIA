@@ -741,13 +741,17 @@ public class MainActivity extends Activity
 
     /** Scrolls the file browser so the currently previewed file is visible. */
     private void scrollFileListToCurrent(int absoluteIndex) {
-        if (fileBrowser == null || currentFiles.isEmpty()) return;
+        if (fileBrowser == null) return;
+
+        // Defensive copy to avoid ConcurrentModificationException during rapid switching / refresh
+        List<MediaFile> windowCopy = new ArrayList<>(currentFiles);
+        if (windowCopy.isEmpty()) return;
 
         // Find the position of this file inside the *current window* (currentFiles)
         int windowPos = -1;
         String targetPath = fullList.get(absoluteIndex).getPath();
-        for (int i = 0; i < currentFiles.size(); i++) {
-            if (currentFiles.get(i).getPath().equals(targetPath)) {
+        for (int i = 0; i < windowCopy.size(); i++) {
+            if (windowCopy.get(i).getPath().equals(targetPath)) {
                 windowPos = i;
                 break;
             }

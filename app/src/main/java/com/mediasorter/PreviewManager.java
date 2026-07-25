@@ -76,6 +76,7 @@ public class PreviewManager {
     private GestureDetector      swipeDetector;
     private ScaleGestureDetector scaleDetector;
     private SidePanelTagAdapter  sidePanelAdapter;
+    private ThumbnailLoader      thumbnailLoader;
 
     private boolean panelVisible = false;
 
@@ -96,6 +97,14 @@ public class PreviewManager {
     public PreviewManager(Context context, View previewRoot, FileStatus fileStatus) {
         this.context    = context;
         this.fileStatus = fileStatus;
+        // Try to get a ThumbnailLoader if the context is MainActivity
+        if (context instanceof MainActivity) {
+            try {
+                java.lang.reflect.Field f = MainActivity.class.getDeclaredField("thumbnailLoader");
+                f.setAccessible(true);
+                this.thumbnailLoader = (ThumbnailLoader) f.get(context);
+            } catch (Exception ignored) {}
+        }
         bindViews(previewRoot);
         setupZoom();
         setupButtons();
@@ -346,6 +355,16 @@ public class PreviewManager {
     // ── Image ─────────────────────────────────────────────────────────────────
 
     private void loadImage(MediaFile file) {
+        // Show thumbnail immediately to avoid black preview while full image loads
+        Bitmap thumb = thumbnailLoader != null
+                ? thumbnailLoader.getCachedThumbnail(file)   // fast path
+                : null;
+        if (thumb != null) {
+            imagePreview.setVisibility(View.VISIBLE);
+            imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            imagePreview.setImageBitmap(thumb);
+        }
+
         executor.submit(() -> {
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
@@ -361,9 +380,11 @@ public class PreviewManager {
                     imagePreview.setImageBitmap(bmp);
                     imagePreview.setLayerType(View.LAYER_TYPE_HARDWARE, null);
                     imagePreview.post(() -> {
-                        imagePreview.setScaleType(ImageView.ScaleType.MATRIX);
-                        Matrix m = new Matrix(imagePreview.getImageMatrix());
-                        imagePreview.setImageMatrix(m);
+                        if (imagePreview.getWidth() > 0 && imagePreview.getHeight() > 0) {
+                            imagePreview.setScaleType(ImageView.ScaleType.MATRIX);
+                            Matrix m = new Matrix(imagePreview.getImageMatrix());
+                            imagePreview.setImageMatrix(m);
+                        }
                     });
                 } else {
                     showUnsupported("Could not decode image");
