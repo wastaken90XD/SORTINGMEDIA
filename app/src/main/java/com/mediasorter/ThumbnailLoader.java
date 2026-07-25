@@ -196,6 +196,22 @@ public void precache(List<MediaFile> files) {
 }
     // ── Memory cache ─────────────────────────────────────────────────────────
 
+    /**
+     * Returns an already-loaded thumbnail without starting I/O or generation.
+     *
+     * This is useful for callers, such as the full-screen preview, that can
+     * display a cached thumbnail while their higher-resolution image is being
+     * decoded. The cache lock also preserves the LRU access ordering.
+     */
+    public Bitmap getCachedThumbnail(MediaFile file) {
+        if (file == null) return null;
+
+        synchronized (memCache) {
+            Bitmap cached = memCache.get(file.getPath());
+            return cached != null && !cached.isRecycled() ? cached : null;
+        }
+    }
+
     private void putInMemCache(String path, Bitmap bmp) {
         long bmpBytes = bmp.getByteCount();
         synchronized (memCache) {
