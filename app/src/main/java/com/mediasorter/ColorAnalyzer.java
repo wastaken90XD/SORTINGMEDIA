@@ -13,7 +13,22 @@ import java.util.Map;
 
 public class ColorAnalyzer {
 
-    public enum Mode { TAG, RENAME, GROUP, TAG_AND_RENAME, ALL }
+    public enum Mode { TAG, RENAME, GROUP, TAG_AND_RENAME, ALL, PREVIEW_ONLY }
+
+    /** Versatile configuration for color analysis */
+    public static class Options {
+        public int topN = 3;
+        public float threshold = 20f;
+        public Mode mode = Mode.ALL;
+        public boolean useCustomPalette = false;
+        public String[] customNames;
+        public int[] customPalette;
+        public float minSaturation = 0.15f;   // 0-1
+        public float minLightness  = 0.08f;   // 0-1
+        public boolean groupByHueOnly = false;
+        public String tagPrefix = "";         // e.g. "color_"
+        public boolean includeGroupTag = true;
+    }
 
     private static final int SAMPLE = 64;
 
@@ -45,10 +60,23 @@ public class ColorAnalyzer {
         public boolean      success = false;
     }
 
+    // Legacy overload (kept for backward compatibility)
     public static List<Result> analyze(List<MediaFile> files,
                                        int topN,
                                        float threshold,
                                        Mode mode,
+                                       TagManager tagManager,
+                                       BatchRenameManager renamer) {
+        Options opts = new Options();
+        opts.topN = topN;
+        opts.threshold = threshold;
+        opts.mode = mode;
+        return analyze(files, opts, tagManager, renamer);
+    }
+
+    /** Most versatile public entry point */
+    public static List<Result> analyze(List<MediaFile> files,
+                                       Options opts,
                                        TagManager tagManager,
                                        BatchRenameManager renamer) {
         List<Result> results = new ArrayList<>();
@@ -116,9 +144,49 @@ public class ColorAnalyzer {
         return results;
     }
 
-    // ── Color extraction ──────────────────────────────────────────────────────
+    // ── Color extraction (now respects Options) ───────────────────────────────
 
+    private static float[][] extractLabColors(String path, Options opts) {
+        int topN = opts.topN;
+        BitmapFactory.Options bopts = new BitmapFactory.Options();
+        bopts.inSampleSize = 4;
+        Bitmap bmp = BitmapFactory.decodeFile(path, bopts);
+        if (bmp == null) throw new RuntimeException("decode failed");
+
+        Bitmap scaled = Bitmap.createScaledBitmap(bmp, SAMPLE, SAMPLE, false);
+        bmp.recycle();
+
+        int[] pixels = new int[SAMPLE * SAMPLE];
+        scaled.getPixels(pixels, 0, SAMPLE, 0, 0, SAMPLE, SAMPLE);
+        scaled.recycle();
+
+        List<float[]> labs = new ArrayList<>(pixels.length);
+        for (int p : pixels) {
+            float[] lab = rgbToLab(Color.red(p), Color.green(p), Color.blue(p));
+            // optional saturation / lightness filtering
+            float sat = getSaturation(lab);
+            float light = lab[0] / 100f;
+            if (sat >= opts.minSaturation && light >= opts.minLightness) {
+                labs.add(lab);
+            }
+        }
+        if (labs.isEmpty()) labs.add(new float[]{50,0,0}); // fallback gray
+
+        int maxColors = labs.size();
+        if (topN > maxColors) topN = maxColors;
+        return medianCut(labs, topN);
+    }
+
+    private static float getSaturation(float[] lab) {
+        return (float) Math.sqrt(lab[1]*lab[1] + lab[2]*lab[2]) / 128f;
+    }
+
+    // legacy wrapper kept for any internal calls
     private static float[][] extractLabColors(String path, int topN) {
+        Options o = new Options();
+        o.topN = topN;
+        return extractLabColors(path, o);
+    }
         BitmapFactory.Options opts = new BitmapFactory.Options();
         opts.inSampleSize = 4;
         Bitmap bmp = BitmapFactory.decodeFile(path, opts);
@@ -284,15 +352,30 @@ public class ColorAnalyzer {
     }
 
     private static String nearestName(float[] lab) {
+        return nearestName(lab, new Options());
+    }
+
+    private static String nearestName(float[] lab, Options opts) {
+        int[] palette = (opts.useCustomPalette && opts.customPalette != null)
+                ? opts.customPalette : PALETTE;
+        String[] names = (opts.useCustomPalette && opts.customNames != null)
+                ? opts.customNames : NAMES;
+
         float best = Float.MAX_VALUE;
         int   idx  = 0;
-        for (int i = 0; i < PALETTE.length; i++) {
-            int c = PALETTE[i];
+        for (int i = 0; i < palette.length; i++) {
+            int c = palette[i];
             float[] pLab = rgbToLab(
                 (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
             float d = labDist(lab, pLab);
             if (d < best) { best = d; idx = i; }
         }
-        return NAMES[idx];
+        return names[idx];
+    }
+
+    // ── Grouping (now uses Options) ───────────────────────────────────────────
+
+    private static void assignGroups(List<Result> results, Options opts) {
+        assignGroups(results, opts.threshold);
     }
 }
