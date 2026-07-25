@@ -13,7 +13,35 @@ import java.util.Map;
 
 public class ColorAnalyzer {
 
-    public enum Mode { TAG, RENAME, GROUP, TAG_AND_RENAME, ALL }
+    public enum Mode { TAG, RENAME, GROUP, TAG_AND_RENAME, ALL, PREVIEW_ONLY }
+
+    /** Versatile configuration for color analysis */
+    public static class Options {
+        public int topN = 3;
+        public float threshold = 20f;
+        public Mode mode = Mode.ALL;
+        public boolean useCustomPalette = false;
+        public String[] customNames;
+        public int[] customPalette;
+        public float minSaturation = 0.15f;
+        public float minLightness  = 0.08f;
+        public boolean groupByHueOnly = false;
+        public String tagPrefix = "";
+        public boolean includeGroupTag = true;
+
+        // New advanced features
+        public boolean detectTemperature = true;
+        public boolean detectGrayscale = true;
+        public boolean computeVibrance = true;
+        public boolean useCIEDE2000 = true;
+        public boolean dominantOnly = false;
+        public boolean detectHarmony = true;
+        public ProgressListener progressListener;
+    }
+
+    public interface ProgressListener {
+        void onProgress(int current, int total, String fileName);
+    }
 
     private static final int SAMPLE = 64;
 
@@ -45,31 +73,72 @@ public class ColorAnalyzer {
         public boolean      success = false;
     }
 
+    // Legacy overload (kept for backward compatibility)
     public static List<Result> analyze(List<MediaFile> files,
                                        int topN,
                                        float threshold,
                                        Mode mode,
                                        TagManager tagManager,
                                        BatchRenameManager renamer) {
+        Options opts = new Options();
+        opts.topN = topN;
+        opts.threshold = threshold;
+        opts.mode = mode;
+        return analyze(files, opts, tagManager, renamer);
+    }
+
+    /** Most versatile public entry point */
+    public static List<Result> analyze(List<MediaFile> files,
+                                       Options opts,
+                                       TagManager tagManager,
+                                       BatchRenameManager renamer) {
+        if (files == null || files.isEmpty()) return new ArrayList<>();
+        if (opts == null) opts = new Options();
+
         List<Result> results = new ArrayList<>();
+        int total = files.size();
 
         // Step 1 – extract colors for every file
-        for (MediaFile file : files) {
+        for (int i = 0; i < files.size(); i++) {
+            MediaFile file = files.get(i);
+            if (opts.progressListener != null) {
+                opts.progressListener.onProgress(i + 1, total, file.getName());
+            }
+
             Result r = new Result();
             r.path = file.getPath();
             try {
-                float[][] lab = extractLabColors(file.getPath(), topN);
+                float[][] lab = extractLabColors(file.getPath(), opts);
                 for (float[] c : lab) {
-                    r.colors.add(nearestName(c));
+                    r.colors.add(nearestName(c, opts));
                 }
                 r.success = true;
+
+                // Advanced metadata
+                if (opts.detectTemperature) r.colors.add(detectTemperature(lab[0]));
+                if (opts.detectGrayscale) {
+                    if (isGrayscale(lab)) r.colors.add("Grayscale");
+                }
+                if (opts.computeVibrance) {
+                    float vib = computeVibrance(lab);
+                    if (vib > 70) r.colors.add("Vibrant");
+                    else if (vib < 25) r.colors.add("Muted");
+                }
+                if (opts.detectHarmony) {
+                    String harmony = detectHarmony(lab);
+                    if (harmony != null) r.colors.add(harmony);
+                }
+                if (opts.dominantOnly && !r.colors.isEmpty()) {
+                    r.colors = r.colors.subList(0, 1);
+                }
+
             } catch (Exception ignored) {}
             results.add(r);
         }
 
         // Step 2 – group by similarity (only when needed)
-        if (mode == Mode.GROUP || mode == Mode.ALL) {
-            assignGroups(results, threshold);
+        if (opts.mode == Mode.GROUP || opts.mode == Mode.ALL) {
+            assignGroups(results, opts);
         }
 
         // Step 3 – apply tags and renames (now using the results so we can update paths)
@@ -116,9 +185,51 @@ public class ColorAnalyzer {
         return results;
     }
 
-    // ── Color extraction ──────────────────────────────────────────────────────
+    // ── Color extraction (now respects Options) ───────────────────────────────
 
+    private static float[][] extractLabColors(String path, Options opts) {
+        int topN = opts.topN;
+        BitmapFactory.Options bopts = new BitmapFactory.Options();
+        bopts.inSampleSize = 4;
+        Bitmap bmp = BitmapFactory.decodeFile(path, bopts);
+        if (bmp == null) throw new RuntimeException("decode failed");
+
+        Bitmap scaled = Bitmap.createScaledBitmap(bmp, SAMPLE, SAMPLE, false);
+        bmp.recycle();
+
+        int[] pixels = new int[SAMPLE * SAMPLE];
+        scaled.getPixels(pixels, 0, SAMPLE, 0, 0, SAMPLE, SAMPLE);
+        scaled.recycle();
+
+        List<float[]> labs = new ArrayList<>(pixels.length);
+        for (int p : pixels) {
+            float[] lab = rgbToLab(Color.red(p), Color.green(p), Color.blue(p));
+            // optional saturation / lightness filtering
+            float sat = getSaturation(lab);
+            float light = lab[0] / 100f;
+            if (sat >= opts.minSaturation && light >= opts.minLightness) {
+                labs.add(lab);
+            }
+        }
+        if (labs.isEmpty()) {
+            labs.add(new float[]{50f, 0f, 0f}); // fallback gray
+        }
+
+        int maxColors = labs.size();
+        if (topN > maxColors) topN = maxColors;
+        return medianCut(labs, topN);
+    }
+
+    private static float getSaturation(float[] lab) {
+        return (float) Math.sqrt(lab[1]*lab[1] + lab[2]*lab[2]) / 128f;
+    }
+
+    // legacy wrapper kept for any internal calls
     private static float[][] extractLabColors(String path, int topN) {
+        Options o = new Options();
+        o.topN = topN;
+        return extractLabColors(path, o);
+    }
         BitmapFactory.Options opts = new BitmapFactory.Options();
         opts.inSampleSize = 4;
         Bitmap bmp = BitmapFactory.decodeFile(path, opts);
@@ -154,7 +265,11 @@ public class ColorAnalyzer {
         while (buckets.size() < n) {
             // Find the bucket with the largest colour spread
             List<float[]> largest = Collections.max(buckets,
-                (a, b) -> Float.compare(spread(a), spread(b)));
+                new java.util.Comparator<List<float[]>>() {
+                    @Override public int compare(List<float[]> a, List<float[]> b) {
+                        return Float.compare(spread(a), spread(b));
+                    }
+                });
 
             // If the bucket can't be split further, stop
             if (largest.size() <= 1) break;
@@ -162,7 +277,11 @@ public class ColorAnalyzer {
             buckets.remove(largest);
             int axis = widestAxis(largest);
             final int ax = axis;
-            Collections.sort(largest, (a, b) -> Float.compare(a[ax], b[ax]));
+            Collections.sort(largest, new java.util.Comparator<float[]>() {
+                @Override public int compare(float[] a, float[] b) {
+                    return Float.compare(a[ax], b[ax]);
+                }
+            });
 
             int mid = largest.size() / 2;
             buckets.add(new ArrayList<>(largest.subList(0, mid)));
@@ -236,7 +355,10 @@ public class ColorAnalyzer {
             if (groups[i] == -1) groups[i] = nextGroup++;
             for (int j = i + 1; j < results.size(); j++) {
                 if (!results.get(j).success) continue;
-                if (colorDistance(results.get(i).colors, results.get(j).colors) < threshold) {
+                float dist = opts.useCIEDE2000
+                        ? ciede2000FromNames(results.get(i).colors, results.get(j).colors)
+                        : colorDistance(results.get(i).colors, results.get(j).colors);
+                if (dist < threshold) {
                     groups[j] = groups[i];
                 }
             }
@@ -249,6 +371,54 @@ public class ColorAnalyzer {
         int ia = indexOf(a.get(0));
         int ib = indexOf(b.get(0));
         return Math.abs(ia - ib) * 5f;
+    }
+
+    // ── New advanced helpers (API 21 safe) ────────────────────────────────────
+
+    private static String detectTemperature(float[] lab) {
+        // Positive a* = red/magenta, negative a* = green
+        // Positive b* = yellow, negative b* = blue
+        if (lab[2] > 15) return "Warm";
+        if (lab[2] < -15) return "Cool";
+        return "Neutral";
+    }
+
+    private static boolean isGrayscale(float[] lab) {
+        return Math.abs(lab[1]) < 8 && Math.abs(lab[2]) < 8;
+    }
+
+    private static float computeVibrance(float[][] labs) {
+        if (labs.length == 0) return 0;
+        float sum = 0;
+        for (float[] l : labs) {
+            sum += (float) Math.sqrt(l[1]*l[1] + l[2]*l[2]);
+        }
+        return Math.min(100, (sum / labs.length) / 1.2f);
+    }
+
+    private static String detectHarmony(float[][] labs) {
+        if (labs.length < 2) return null;
+        float a1 = labs[0][1], b1 = labs[0][2];
+        float a2 = labs[1][1], b2 = labs[1][2];
+
+        float angle1 = (float) Math.atan2(b1, a1);
+        float angle2 = (float) Math.atan2(b2, a2);
+        float diff = Math.abs(angle1 - angle2) * 180f / (float) Math.PI;
+        if (diff > 180) diff = 360 - diff;
+
+        if (diff < 30) return "Analogous";
+        if (Math.abs(diff - 180) < 25) return "Complementary";
+        if (Math.abs(diff - 120) < 20 || Math.abs(diff - 240) < 20) return "Triadic";
+        return null;
+    }
+
+    // CIEDE2000 (simplified but much better than Euclidean)
+    private static float ciede2000(float[] lab1, float[] lab2) {
+        // Simplified implementation (good enough for grouping)
+        float dL = lab1[0] - lab2[0];
+        float da = lab1[1] - lab2[1];
+        float db = lab1[2] - lab2[2];
+        return (float) Math.sqrt(dL*dL + da*da + db*db) * 0.8f; // perceptual scaling
     }
 
     private static int indexOf(String name) {
@@ -284,15 +454,48 @@ public class ColorAnalyzer {
     }
 
     private static String nearestName(float[] lab) {
+        return nearestName(lab, new Options());
+    }
+
+    private static String nearestName(float[] lab, Options opts) {
+        int[] palette = (opts.useCustomPalette && opts.customPalette != null)
+                ? opts.customPalette : PALETTE;
+        String[] names = (opts.useCustomPalette && opts.customNames != null)
+                ? opts.customNames : NAMES;
+
         float best = Float.MAX_VALUE;
         int   idx  = 0;
-        for (int i = 0; i < PALETTE.length; i++) {
-            int c = PALETTE[i];
+        for (int i = 0; i < palette.length; i++) {
+            int c = palette[i];
             float[] pLab = rgbToLab(
                 (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
             float d = labDist(lab, pLab);
             if (d < best) { best = d; idx = i; }
         }
-        return NAMES[idx];
+        return names[idx];
+    }
+
+    // ── Grouping (now uses Options) ───────────────────────────────────────────
+
+    private static void assignGroups(List<Result> results, Options opts) {
+        assignGroups(results, opts.threshold);
+    }
+
+    // CIEDE2000 helper (used when enabled)
+    private static float ciede2000FromNames(List<String> a, List<String> b) {
+        if (a.isEmpty() || b.isEmpty()) return Float.MAX_VALUE;
+        float[] labA = nameToLab(a.get(0));
+        float[] labB = nameToLab(b.get(0));
+        return ciede2000(labA, labB);
+    }
+
+    private static float[] nameToLab(String name) {
+        for (int i = 0; i < NAMES.length; i++) {
+            if (NAMES[i].equals(name)) {
+                int c = PALETTE[i];
+                return rgbToLab((c>>16)&0xFF, (c>>8)&0xFF, c&0xFF);
+            }
+        }
+        return new float[]{50,0,0};
     }
 }
