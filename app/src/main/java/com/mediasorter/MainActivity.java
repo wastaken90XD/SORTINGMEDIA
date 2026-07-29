@@ -819,18 +819,23 @@ public class MainActivity extends Activity
             }
             checked[i] = allHave;
         }
+        // Only boxes the user toggles are applied/removed (delta semantics) —
+        // untouched boxes leave partially tagged files exactly as they were.
+        final boolean[] initial = checked.clone();
 
         new AlertDialog.Builder(this)
                 .setTitle("Tag " + selectedFiles.size() + " files")
                 .setMultiChoiceItems(tagNames, checked,
                         (d, which, isChecked) -> checked[which] = isChecked)
                 .setPositiveButton("Apply", (d, w) -> {
-                    for (MediaFile file : selectedFiles) {
-                        for (int i = 0; i < tagNames.length; i++) {
+                    for (int i = 0; i < tagNames.length; i++) {
+                        if (checked[i] == initial[i]) continue;
+                        for (MediaFile file : selectedFiles) {
                             if (checked[i]) tagManager.applyTag(file, tagNames[i]);
+                            else            tagManager.removeTag(file, tagNames[i]);
                         }
-                        mediaAdapter.updateFile(file);
                     }
+                    for (MediaFile file : selectedFiles) mediaAdapter.updateFile(file);
                     mediaAdapter.exitSelectMode();
                     btnScan.setText("SCAN");
                     btnScan.setOnClickListener(v -> startScan());
@@ -1586,6 +1591,10 @@ private Spinner makeSpinner(String[] options) {
             }
             checked[i] = allHave;
         }
+        // Snapshot of the initial state. Only boxes the user actually toggles
+        // are applied/removed — untouched boxes must leave files that only
+        // *partially* carry a tag exactly as they were (no silent stripping).
+        final boolean[] initial = checked.clone();
 
         // Keep the chooser open while several tags are selected. Applying the
         // final checked state also allows tags to be removed in the same pass.
@@ -1594,22 +1603,30 @@ private Spinner makeSpinner(String[] options) {
                 .setMultiChoiceItems(names, checked,
                         (dialog, which, isChecked) -> checked[which] = isChecked)
                 .setPositiveButton("Apply", (dialog, which) ->
-                        applyQuickTags(targets, names, checked))
+                        applyTagDelta(targets, names, initial, checked))
                 .setNeutralButton("＋ New tag", (dialog, which) ->
                         showNewTagDialog(targets, () -> showQuickTagPopup(targets)))
                 .setNegativeButton("Cancel", null)
                 .show();
     }
 
-    /** Applies the popup's checked state to every target and refreshes the UI. */
-    private void applyQuickTags(List<MediaFile> targets, String[] names, boolean[] checked) {
-        for (MediaFile f : targets) {
-            for (int i = 0; i < names.length; i++) {
+    /**
+     * Applies the difference between the popup's initial and final checked
+     * states to every target, then refreshes the UI. Checkboxes the user did
+     * not touch are deliberately skipped: when only some targets carried a
+     * tag, forcing the (unchecked) state onto all of them would silently
+     * strip that tag from the files that had it.
+     */
+    private void applyTagDelta(List<MediaFile> targets, String[] names,
+                               boolean[] initial, boolean[] checked) {
+        for (int i = 0; i < names.length; i++) {
+            if (checked[i] == initial[i]) continue;  // untouched — leave as-is
+            for (MediaFile f : targets) {
                 if (checked[i]) tagManager.applyTag(f, names[i]);
                 else            tagManager.removeTag(f, names[i]);
             }
-            mediaAdapter.updateFileTags(f);
         }
+        for (MediaFile f : targets) mediaAdapter.updateFileTags(f);
         syncUiAfterTagging(targets);
         if (mediaAdapter.isSelectMode()) {
             mediaAdapter.exitSelectMode();
@@ -1650,6 +1667,14 @@ private Spinner makeSpinner(String[] options) {
                 .setPositiveButton("Create", (d, w) -> {
                     String name = input.getText().toString().trim();
                     if (!name.isEmpty()) {
+                        if (name.contains(",")) {
+                            // Commas break the recent-tags persistence format
+                            Toast.makeText(this, "Tag names can't contain commas",
+                                    Toast.LENGTH_SHORT).show();
+                            if (onDone != null) onDone.run();
+                            return;
+                        }
+                        boolean existed = tagManager.hasTagName(name);
                         tagManager.createTag(name);
                         if (targets != null) {
                             for (MediaFile f : targets) {
@@ -1658,7 +1683,9 @@ private Spinner makeSpinner(String[] options) {
                             }
                             syncUiAfterTagging(targets);
                         }
-                        Toast.makeText(this, "Tag \"" + name + "\" created",
+                        Toast.makeText(this,
+                                existed ? "Tag \"" + name + "\" applied"
+                                        : "Tag \"" + name + "\" created",
                                 Toast.LENGTH_SHORT).show();
                     }
                     if (onDone != null) onDone.run();

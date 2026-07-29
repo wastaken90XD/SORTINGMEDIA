@@ -30,7 +30,12 @@ public class TagManager {
     // regardless of how many different tags were applied afterwards —
     // previously only a single "last applied" tag was remembered per file,
     // so undoing the 2nd-to-last gesture tag was impossible (bug).
+    //
+    // Guarded by stackLock because applyTag() can also run on background
+    // threads (e.g. ColorAnalyzer) while swipe gestures mutate the same map
+    // on the UI thread — an unguarded HashMap race can corrupt the table.
     private final Map<String, LinkedList<String>> appliedStack = new HashMap<>();
+    private final Object stackLock = new Object();
 
     // Listener for tag list changes
     public interface TagChangeListener {
@@ -96,27 +101,32 @@ public class TagManager {
     // ── Gesture-applied stack (for swipe/dpad undo) ───────────────────────────
 
     private void recordApplied(String path, String tagName) {
-        LinkedList<String> stack = appliedStack.get(path);
-        if (stack == null) {
-            stack = new LinkedList<>();
-            appliedStack.put(path, stack);
+        synchronized (stackLock) {
+            LinkedList<String> stack = appliedStack.get(path);
+            if (stack == null) {
+                stack = new LinkedList<>();
+                appliedStack.put(path, stack);
+            }
+            stack.remove(tagName);     // no duplicates; newest applies go last
+            stack.addLast(tagName);
         }
-        stack.remove(tagName);     // no duplicates; newest applies go last
-        stack.addLast(tagName);
     }
 
     private void unrecordApplied(String path, String tagName) {
-        LinkedList<String> stack = appliedStack.get(path);
-        if (stack == null) return;
-        stack.remove(tagName);
-        if (stack.isEmpty()) appliedStack.remove(path);
+        synchronized (stackLock) {
+            LinkedList<String> stack = appliedStack.get(path);
+            if (stack == null) return;
+            stack.remove(tagName);
+            if (stack.isEmpty()) appliedStack.remove(path);
+        }
     }
 
     // ── Create ────────────────────────────────────────────────────────────────
 
     public void createTag(String name) {
         String trimmed = name.trim();
-        if (trimmed.isEmpty()) return;
+        // Commas would corrupt the comma-separated recent-tags persistence
+        if (trimmed.isEmpty() || trimmed.contains(",")) return;
         final Tag tag;
         synchronized (tagMap) {
             if (tagMap.containsKey(trimmed)) return;
@@ -177,16 +187,20 @@ public class TagManager {
     // ── Undo last applied tag ─────────────────────────────────────────────────
 
     public boolean undoLastTag(MediaFile file) {
-        LinkedList<String> stack = appliedStack.get(file.getPath());
-        if (stack == null || stack.isEmpty()) return false;
-        String last = stack.getLast();
-        if (!file.hasTag(last)) {
-            // Tag was removed by other means (e.g. tags bar) — drop the record
-            unrecordApplied(file.getPath(), last);
-            return false;
+        // Whole read-check-act under the lock; synchronized is reentrant, so
+        // the nested unrecordApplied/removeTag calls are safe.
+        synchronized (stackLock) {
+            LinkedList<String> stack = appliedStack.get(file.getPath());
+            if (stack == null || stack.isEmpty()) return false;
+            String last = stack.getLast();
+            if (!file.hasTag(last)) {
+                // Tag was removed by other means (e.g. tags bar) — drop the record
+                unrecordApplied(file.getPath(), last);
+                return false;
+            }
+            removeTag(file, last);  // also unrecords it
+            return true;
         }
-        removeTag(file, last);  // also unrecords it
-        return true;
     }
 
     // ── Toggle ────────────────────────────────────────────────────────────────
@@ -209,17 +223,22 @@ public class TagManager {
      * left untouched, so rapid swipe-tagging never strips unknown tags.
      */
     public void applyOrUndo(MediaFile file, String tagName) {
-        LinkedList<String> stack = appliedStack.get(file.getPath());
-        boolean tracked = stack != null && stack.contains(tagName);
-        if (tracked && file.hasTag(tagName)) {
-            // Repeat of the gesture that applied this tag — undo just this
-            // tag and leave every other gesture-applied tag untouched.
-            removeTag(file, tagName);
-        } else if (!file.hasTag(tagName)) {
-            applyTag(file, tagName);
+        // Compound check-then-act under the lock (reentrant; applyTag/
+        // removeTag re-acquire it in recordApplied/unrecordApplied). No other
+        // monitor is taken while stackLock is held, so no lock-order issues.
+        synchronized (stackLock) {
+            LinkedList<String> stack = appliedStack.get(file.getPath());
+            boolean tracked = stack != null && stack.contains(tagName);
+            if (tracked && file.hasTag(tagName)) {
+                // Repeat of the gesture that applied this tag — undo just this
+                // tag and leave every other gesture-applied tag untouched.
+                removeTag(file, tagName);
+            } else if (!file.hasTag(tagName)) {
+                applyTag(file, tagName);
+            }
+            // else: file already carried the tag without it being applied in
+            // this session — keep the original no-op behaviour.
         }
-        // else: file already carried the tag without it being applied in this
-        // session — keep the original no-op behaviour.
     }
 
     // ── Delete ────────────────────────────────────────────────────────────────
@@ -266,6 +285,12 @@ public class TagManager {
     public List<Tag> getTopTags(int n) {
         List<Tag> all = getAllTags();
         return all.subList(0, Math.min(n, all.size()));
+    }
+
+    public boolean hasTagName(String name) {
+        synchronized (tagMap) {
+            return tagMap.containsKey(name);
+        }
     }
 
     public List<Tag> getRecentTags(int n) {
