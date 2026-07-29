@@ -25,8 +25,12 @@ public class TagManager {
     private final LinkedList<String> recentTags;
     private final SharedPreferences  prefs;
 
-    // Last applied tag per file path — for undo on second gesture
-    private final Map<String, String> lastApplied = new HashMap<>();
+    // Per-file stack (oldest → newest) of tags applied via applyTag() in this
+    // session. A repeated swipe/dpad gesture removes *its own* tag again,
+    // regardless of how many different tags were applied afterwards —
+    // previously only a single "last applied" tag was remembered per file,
+    // so undoing the 2nd-to-last gesture tag was impossible (bug).
+    private final Map<String, LinkedList<String>> appliedStack = new HashMap<>();
 
     // Listener for tag list changes
     public interface TagChangeListener {
@@ -89,20 +93,41 @@ public class TagManager {
         saveRecentTags();
     }
 
+    // ── Gesture-applied stack (for swipe/dpad undo) ───────────────────────────
+
+    private void recordApplied(String path, String tagName) {
+        LinkedList<String> stack = appliedStack.get(path);
+        if (stack == null) {
+            stack = new LinkedList<>();
+            appliedStack.put(path, stack);
+        }
+        stack.remove(tagName);     // no duplicates; newest applies go last
+        stack.addLast(tagName);
+    }
+
+    private void unrecordApplied(String path, String tagName) {
+        LinkedList<String> stack = appliedStack.get(path);
+        if (stack == null) return;
+        stack.remove(tagName);
+        if (stack.isEmpty()) appliedStack.remove(path);
+    }
+
     // ── Create ────────────────────────────────────────────────────────────────
 
     public void createTag(String name) {
         String trimmed = name.trim();
         if (trimmed.isEmpty()) return;
-        executor.submit(() -> {
-            synchronized (tagMap) {
-                if (tagMap.containsKey(trimmed)) return;
-                Tag tag = new Tag(trimmed);
-                db.tagDao().insert(tag);
-                tagMap.put(trimmed, tag);
-            }
-            notifyTagsChanged();
-        });
+        final Tag tag;
+        synchronized (tagMap) {
+            if (tagMap.containsKey(trimmed)) return;
+            // Update the in-memory map synchronously so the new tag shows up
+            // immediately (e.g. when a dialog re-opens right after creating);
+            // only the DB write stays on the background executor.
+            tag = new Tag(trimmed);
+            tagMap.put(trimmed, tag);
+        }
+        executor.submit(() -> db.tagDao().insert(tag));
+        notifyTagsChanged();
     }
 
     // ── Apply ─────────────────────────────────────────────────────────────────
@@ -111,7 +136,7 @@ public class TagManager {
         if (file.hasTag(tagName)) return;
         file.addTag(tagName);
         addToRecent(tagName);
-        lastApplied.put(file.getPath(), tagName);
+        recordApplied(file.getPath(), tagName);
 
         executor.submit(() -> {
             synchronized (tagMap) {
@@ -134,6 +159,7 @@ public class TagManager {
     public void removeTag(MediaFile file, String tagName) {
         if (!file.hasTag(tagName)) return;
         file.removeTag(tagName);
+        unrecordApplied(file.getPath(), tagName);
 
         executor.submit(() -> {
             synchronized (tagMap) {
@@ -151,10 +177,15 @@ public class TagManager {
     // ── Undo last applied tag ─────────────────────────────────────────────────
 
     public boolean undoLastTag(MediaFile file) {
-        String last = lastApplied.get(file.getPath());
-        if (last == null || !file.hasTag(last)) return false;
-        removeTag(file, last);
-        lastApplied.remove(file.getPath());
+        LinkedList<String> stack = appliedStack.get(file.getPath());
+        if (stack == null || stack.isEmpty()) return false;
+        String last = stack.getLast();
+        if (!file.hasTag(last)) {
+            // Tag was removed by other means (e.g. tags bar) — drop the record
+            unrecordApplied(file.getPath(), last);
+            return false;
+        }
+        removeTag(file, last);  // also unrecords it
         return true;
     }
 
@@ -165,17 +196,30 @@ public class TagManager {
         else                      applyTag(file, tagName);
     }
 
-    // ── Toggle with undo — second call removes last applied ───────────────────
+    // ── Toggle with undo — repeating the same gesture removes the tag again ───
 
+    /**
+     * Applies the tag, or removes it again when the gesture is repeated.
+     * Unlike the old single-slot implementation this works per tag: applying
+     * tag A then tag B (via different gestures) and repeating both gestures
+     * now removes B *and* A again — the earlier tag no longer "sticks".
+     *
+     * A tag the file already carried before it was applied through this
+     * session (e.g. imported from metadata at scan time) is intentionally
+     * left untouched, so rapid swipe-tagging never strips unknown tags.
+     */
     public void applyOrUndo(MediaFile file, String tagName) {
-        String last = lastApplied.get(file.getPath());
-        if (last != null && last.equals(tagName) && file.hasTag(tagName)) {
-            // Second press — undo
+        LinkedList<String> stack = appliedStack.get(file.getPath());
+        boolean tracked = stack != null && stack.contains(tagName);
+        if (tracked && file.hasTag(tagName)) {
+            // Repeat of the gesture that applied this tag — undo just this
+            // tag and leave every other gesture-applied tag untouched.
             removeTag(file, tagName);
-            lastApplied.remove(file.getPath());
-        } else {
+        } else if (!file.hasTag(tagName)) {
             applyTag(file, tagName);
         }
+        // else: file already carried the tag without it being applied in this
+        // session — keep the original no-op behaviour.
     }
 
     // ── Delete ────────────────────────────────────────────────────────────────
