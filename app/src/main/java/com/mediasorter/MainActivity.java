@@ -794,6 +794,10 @@ public class MainActivity extends Activity
     // ── Batch dialogs ─────────────────────────────────────────────────────────
 
     private void showBatchTagDialog() {
+        showBatchTagDialog(null);
+    }
+
+    private void showBatchTagDialog(final Map<String, Boolean> pendingEdits) {
         final List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
         if (selectedFiles.isEmpty()) return;
 
@@ -823,6 +827,15 @@ public class MainActivity extends Activity
         // untouched boxes leave partially tagged files exactly as they were.
         final boolean[] initial = checked.clone();
 
+        // Re-apply edits captured before the "＋ New tag" detour (must happen
+        // AFTER cloning `initial`, which always mirrors file state).
+        if (pendingEdits != null) {
+            for (int i = 0; i < tagNames.length; i++) {
+                Boolean pending = pendingEdits.get(tagNames[i]);
+                if (pending != null) checked[i] = pending;
+            }
+        }
+
         new AlertDialog.Builder(this)
                 .setTitle("Tag " + selectedFiles.size() + " files")
                 .setMultiChoiceItems(tagNames, checked,
@@ -843,8 +856,13 @@ public class MainActivity extends Activity
                     Toast.makeText(this, "Tagged " + selectedFiles.size() + " files",
                             Toast.LENGTH_SHORT).show();
                 })
-                .setNeutralButton("＋ New tag", (d, w) ->
-                        showNewTagDialog(selectedFiles, this::showBatchTagDialog))
+                .setNeutralButton("＋ New tag", (d, w) -> {
+                    // Snapshot the unapplied checkbox state so the detour into
+                    // the create dialog doesn't discard it
+                    Map<String, Boolean> edits = new java.util.HashMap<>();
+                    for (int i = 0; i < tagNames.length; i++) edits.put(tagNames[i], checked[i]);
+                    showNewTagDialog(selectedFiles, () -> showBatchTagDialog(edits));
+                })
                 .setNegativeButton("Cancel", null)
                 .show();
     }
@@ -1557,9 +1575,15 @@ private Spinner makeSpinner(String[] options) {
      * Quick tag popup for one or more files (a file tapped in the browser, or
      * the whole multi-selection). A tag is pre-checked only when *every* target
      * already carries it; Apply then sets the exact checked state on all of
-     * them. New tags can be created without leaving the dialog.
+     * them. New tags can be created without leaving the dialog — and pending
+     * checkbox edits survive the detour into the create dialog.
      */
     private void showQuickTagPopup(final List<MediaFile> targets) {
+        showQuickTagPopup(targets, null);
+    }
+
+    private void showQuickTagPopup(final List<MediaFile> targets,
+                                   final Map<String, Boolean> pendingEdits) {
         if (targets == null || targets.isEmpty()) return;
 
         final List<Tag> choices = getQuickTagChoices();
@@ -1596,6 +1620,16 @@ private Spinner makeSpinner(String[] options) {
         // *partially* carry a tag exactly as they were (no silent stripping).
         final boolean[] initial = checked.clone();
 
+        // Re-apply edits captured before the "＋ New tag" detour. This must
+        // happen AFTER cloning `initial` (which always mirrors file state) so
+        // the restored boxes still count as user toggles for the delta apply.
+        if (pendingEdits != null) {
+            for (int i = 0; i < names.length; i++) {
+                Boolean pending = pendingEdits.get(names[i]);
+                if (pending != null) checked[i] = pending;
+            }
+        }
+
         // Keep the chooser open while several tags are selected. Applying the
         // final checked state also allows tags to be removed in the same pass.
         new AlertDialog.Builder(this)
@@ -1604,8 +1638,13 @@ private Spinner makeSpinner(String[] options) {
                         (dialog, which, isChecked) -> checked[which] = isChecked)
                 .setPositiveButton("Apply", (dialog, which) ->
                         applyTagDelta(targets, names, initial, checked))
-                .setNeutralButton("＋ New tag", (dialog, which) ->
-                        showNewTagDialog(targets, () -> showQuickTagPopup(targets)))
+                .setNeutralButton("＋ New tag", (dialog, which) -> {
+                    // Snapshot the unapplied checkbox state so the detour into
+                    // the create dialog doesn't discard it
+                    Map<String, Boolean> edits = new java.util.HashMap<>();
+                    for (int i = 0; i < names.length; i++) edits.put(names[i], checked[i]);
+                    showNewTagDialog(targets, () -> showQuickTagPopup(targets, edits));
+                })
                 .setNegativeButton("Cancel", null)
                 .show();
     }
