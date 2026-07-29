@@ -257,9 +257,11 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         });
 
         // Quick tags live on the tag text so long-press remains dedicated to
-        // multi-selection (the batch workflow users expect).
+        // multi-selection (the batch workflow users expect). Tapping the tag
+        // text while a selection is active opens the quick-tag popup for the
+        // whole selection — the fastest way to tag many files at once.
         holder.fileTags.setOnClickListener(v -> {
-            if (selectMode) {
+            if (selectMode && selected.isEmpty()) {
                 toggleSelection(file.getPath(), holder);
             } else if (longClickListener != null) {
                 longClickListener.onFileLongClick(file, holder.fileTags);

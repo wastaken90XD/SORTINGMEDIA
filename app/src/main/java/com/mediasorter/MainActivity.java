@@ -164,9 +164,17 @@ public class MainActivity extends Activity
         mediaAdapter = new MediaAdapter(thumbnailLoader, this::onFileSelected);
         tagAdapter   = new TagAdapter(this::onTagToggled);
 
-        // Long-press in file list shows quick tag popup
-        mediaAdapter.setOnFileLongClickListener((file, anchor) ->
-                showQuickTagPopup(anchor, file));
+        // Tapping the tags line in the file list shows the quick tag popup;
+        // with an active selection it targets every selected file at once.
+        mediaAdapter.setOnFileLongClickListener((file, anchor) -> {
+            if (mediaAdapter.isSelectMode() && mediaAdapter.getSelectedCount() > 0) {
+                showQuickTagPopup(new ArrayList<>(mediaAdapter.getSelectedFiles()));
+            } else {
+                List<MediaFile> single = new ArrayList<>();
+                single.add(file);
+                showQuickTagPopup(single);
+            }
+        });
 
         mediaAdapter.setSelectionListener(count -> {
             mainHandler.post(() -> {
@@ -786,36 +794,74 @@ public class MainActivity extends Activity
     // ── Batch dialogs ─────────────────────────────────────────────────────────
 
     private void showBatchTagDialog() {
-        List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
+        showBatchTagDialog(null);
+    }
+
+    private void showBatchTagDialog(final Map<String, Boolean> pendingEdits) {
+        final List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
         if (selectedFiles.isEmpty()) return;
 
         List<Tag> allTags = tagManager.getAllTags();
         if (allTags.isEmpty()) {
-            Toast.makeText(this, "No tags yet", Toast.LENGTH_SHORT).show();
+            // Nothing to choose from yet — offer creating the first tag.
+            // Only re-open this dialog once a tag exists, otherwise "Back"
+            // would loop between the two dialogs forever.
+            showNewTagDialog(selectedFiles, () -> {
+                if (!tagManager.getAllTags().isEmpty()) showBatchTagDialog();
+            });
             return;
         }
 
-        String[]  tagNames = new String[allTags.size()];
-        boolean[] checked  = new boolean[allTags.size()];
-        for (int i = 0; i < allTags.size(); i++) tagNames[i] = allTags.get(i).getName();
+        final String[]  tagNames = new String[allTags.size()];
+        final boolean[] checked  = new boolean[allTags.size()];
+        for (int i = 0; i < allTags.size(); i++) {
+            tagNames[i] = allTags.get(i).getName();
+            // Pre-check tags that every selected file already carries
+            boolean allHave = true;
+            for (MediaFile f : selectedFiles) {
+                if (!f.hasTag(tagNames[i])) { allHave = false; break; }
+            }
+            checked[i] = allHave;
+        }
+        // Only boxes the user toggles are applied/removed (delta semantics) —
+        // untouched boxes leave partially tagged files exactly as they were.
+        final boolean[] initial = checked.clone();
+
+        // Re-apply edits captured before the "＋ New tag" detour (must happen
+        // AFTER cloning `initial`, which always mirrors file state).
+        if (pendingEdits != null) {
+            for (int i = 0; i < tagNames.length; i++) {
+                Boolean pending = pendingEdits.get(tagNames[i]);
+                if (pending != null) checked[i] = pending;
+            }
+        }
 
         new AlertDialog.Builder(this)
                 .setTitle("Tag " + selectedFiles.size() + " files")
                 .setMultiChoiceItems(tagNames, checked,
                         (d, which, isChecked) -> checked[which] = isChecked)
                 .setPositiveButton("Apply", (d, w) -> {
-                    for (MediaFile file : selectedFiles) {
-                        for (int i = 0; i < tagNames.length; i++) {
+                    for (int i = 0; i < tagNames.length; i++) {
+                        if (checked[i] == initial[i]) continue;
+                        for (MediaFile file : selectedFiles) {
                             if (checked[i]) tagManager.applyTag(file, tagNames[i]);
+                            else            tagManager.removeTag(file, tagNames[i]);
                         }
-                        mediaAdapter.updateFile(file);
                     }
+                    for (MediaFile file : selectedFiles) mediaAdapter.updateFile(file);
                     mediaAdapter.exitSelectMode();
                     btnScan.setText("SCAN");
                     btnScan.setOnClickListener(v -> startScan());
                     scheduleRefresh();
                     Toast.makeText(this, "Tagged " + selectedFiles.size() + " files",
                             Toast.LENGTH_SHORT).show();
+                })
+                .setNeutralButton("＋ New tag", (d, w) -> {
+                    // Snapshot the unapplied checkbox state so the detour into
+                    // the create dialog doesn't discard it
+                    Map<String, Boolean> edits = new java.util.HashMap<>();
+                    for (int i = 0; i < tagNames.length; i++) edits.put(tagNames[i], checked[i]);
+                    showNewTagDialog(selectedFiles, () -> showBatchTagDialog(edits));
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
@@ -1513,38 +1559,195 @@ private Spinner makeSpinner(String[] options) {
             .show();
     }
 
-    // ── Quick tag toggle from file list (long-press popup) ──────────────────
+    // ── Quick tag toggle from file list (tags-tap popup) ────────────────────
 
-    private void showQuickTagPopup(View anchor, MediaFile file) {
-        List<Tag> topTags = tagManager.getTopTags(10);
-        if (topTags.isEmpty()) {
-            Toast.makeText(this, "No tags yet", Toast.LENGTH_SHORT).show();
+    /** Tags offered in the quick-tag popup: most recent first, then most used. */
+    private List<Tag> getQuickTagChoices() {
+        Map<String, Tag> merged = new java.util.LinkedHashMap<>();
+        for (Tag t : tagManager.getRecentTags(6)) merged.put(t.getName(), t);
+        for (Tag t : tagManager.getTopTags(10)) {
+            if (!merged.containsKey(t.getName())) merged.put(t.getName(), t);
+        }
+        return new ArrayList<>(merged.values());
+    }
+
+    /**
+     * Quick tag popup for one or more files (a file tapped in the browser, or
+     * the whole multi-selection). A tag is pre-checked only when *every* target
+     * already carries it; Apply then sets the exact checked state on all of
+     * them. New tags can be created without leaving the dialog — and pending
+     * checkbox edits survive the detour into the create dialog.
+     */
+    private void showQuickTagPopup(final List<MediaFile> targets) {
+        showQuickTagPopup(targets, null);
+    }
+
+    private void showQuickTagPopup(final List<MediaFile> targets,
+                                   final Map<String, Boolean> pendingEdits) {
+        if (targets == null || targets.isEmpty()) return;
+
+        final List<Tag> choices = getQuickTagChoices();
+        if (choices.isEmpty()) {
+            // Nothing to choose from yet — go straight to creating the first
+            // tag. Only come back to the popup once a tag actually exists,
+            // otherwise "Back" would loop between the two dialogs forever.
+            showNewTagDialog(targets, () -> {
+                if (!tagManager.getAllTags().isEmpty()) {
+                    showQuickTagPopup(targets);
+                } else {
+                    Toast.makeText(this, "No tags yet", Toast.LENGTH_SHORT).show();
+                }
+            });
             return;
         }
 
-        String[] names = new String[topTags.size()];
-        boolean[] checked = new boolean[topTags.size()];
-        for (int i = 0; i < topTags.size(); i++) {
-            names[i] = topTags.get(i).getName();
-            checked[i] = file.hasTag(names[i]);
+        final String title = targets.size() == 1
+                ? "Quick tags — " + targets.get(0).getName()
+                : "Quick tags — " + targets.size() + " files";
+
+        final String[]  names   = new String[choices.size()];
+        final boolean[] checked = new boolean[choices.size()];
+        for (int i = 0; i < choices.size(); i++) {
+            names[i] = choices.get(i).getName();
+            boolean allHave = true;
+            for (MediaFile f : targets) {
+                if (!f.hasTag(names[i])) { allHave = false; break; }
+            }
+            checked[i] = allHave;
+        }
+        // Snapshot of the initial state. Only boxes the user actually toggles
+        // are applied/removed — untouched boxes must leave files that only
+        // *partially* carry a tag exactly as they were (no silent stripping).
+        final boolean[] initial = checked.clone();
+
+        // Re-apply edits captured before the "＋ New tag" detour. This must
+        // happen AFTER cloning `initial` (which always mirrors file state) so
+        // the restored boxes still count as user toggles for the delta apply.
+        if (pendingEdits != null) {
+            for (int i = 0; i < names.length; i++) {
+                Boolean pending = pendingEdits.get(names[i]);
+                if (pending != null) checked[i] = pending;
+            }
         }
 
         // Keep the chooser open while several tags are selected. Applying the
         // final checked state also allows tags to be removed in the same pass.
         new AlertDialog.Builder(this)
-                .setTitle("Quick tags — " + file.getName())
+                .setTitle(title)
                 .setMultiChoiceItems(names, checked,
                         (dialog, which, isChecked) -> checked[which] = isChecked)
-                .setPositiveButton("Apply", (dialog, which) -> {
-                    for (int i = 0; i < names.length; i++) {
-                        if (checked[i]) tagManager.applyTag(file, names[i]);
-                        else tagManager.removeTag(file, names[i]);
-                    }
-                    mediaAdapter.updateFileTags(file);
-                    updateProgress();
+                .setPositiveButton("Apply", (dialog, which) ->
+                        applyTagDelta(targets, names, initial, checked))
+                .setNeutralButton("＋ New tag", (dialog, which) -> {
+                    // Snapshot the unapplied checkbox state so the detour into
+                    // the create dialog doesn't discard it
+                    Map<String, Boolean> edits = new java.util.HashMap<>();
+                    for (int i = 0; i < names.length; i++) edits.put(names[i], checked[i]);
+                    showNewTagDialog(targets, () -> showQuickTagPopup(targets, edits));
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    /**
+     * Applies the difference between the popup's initial and final checked
+     * states to every target, then refreshes the UI. Checkboxes the user did
+     * not touch are deliberately skipped: when only some targets carried a
+     * tag, forcing the (unchecked) state onto all of them would silently
+     * strip that tag from the files that had it.
+     */
+    private void applyTagDelta(List<MediaFile> targets, String[] names,
+                               boolean[] initial, boolean[] checked) {
+        for (int i = 0; i < names.length; i++) {
+            if (checked[i] == initial[i]) continue;  // untouched — leave as-is
+            for (MediaFile f : targets) {
+                if (checked[i]) tagManager.applyTag(f, names[i]);
+                else            tagManager.removeTag(f, names[i]);
+            }
+        }
+        for (MediaFile f : targets) mediaAdapter.updateFileTags(f);
+        syncUiAfterTagging(targets);
+        if (mediaAdapter.isSelectMode()) {
+            mediaAdapter.exitSelectMode();
+            btnScan.setText("SCAN");
+            btnScan.setOnClickListener(v -> startScan());
+        }
+        Toast.makeText(this,
+                targets.size() == 1 ? "Tags updated"
+                                    : "Tagged " + targets.size() + " files",
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /** Dialog that creates a brand-new tag and applies it to the targets. */
+    private void showNewTagDialog(final List<MediaFile> targets, final Runnable onDone) {
+        final EditText input = new EditText(this);
+        input.setHint("Tag name");
+        input.setTextColor(0xFFFFFFFF);
+
+        FrameLayout box = new FrameLayout(this);
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(pad, 0, pad, 0);
+        input.setLayoutParams(lp);
+        box.addView(input);
+
+        String title = "Create tag";
+        if (targets != null && !targets.isEmpty()) {
+            title += targets.size() == 1
+                    ? " — " + targets.get(0).getName()
+                    : " — applied to " + targets.size() + " files";
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(box)
+                .setPositiveButton("Create", (d, w) -> {
+                    String name = input.getText().toString().trim();
+                    if (!name.isEmpty()) {
+                        if (name.contains(",")) {
+                            // Commas break the recent-tags persistence format
+                            Toast.makeText(this, "Tag names can't contain commas",
+                                    Toast.LENGTH_SHORT).show();
+                            if (onDone != null) onDone.run();
+                            return;
+                        }
+                        boolean existed = tagManager.hasTagName(name);
+                        tagManager.createTag(name);
+                        if (targets != null) {
+                            for (MediaFile f : targets) {
+                                tagManager.applyTag(f, name);
+                                mediaAdapter.updateFileTags(f);
+                            }
+                            syncUiAfterTagging(targets);
+                        }
+                        Toast.makeText(this,
+                                existed ? "Tag \"" + name + "\" applied"
+                                        : "Tag \"" + name + "\" created",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                    if (onDone != null) onDone.run();
+                })
+                .setNegativeButton("Back", (d, w) -> {
+                    if (onDone != null) onDone.run();
+                })
+                .show();
+    }
+
+    /** Keeps preview, side panel and progress in sync after (batch) tagging. */
+    private void syncUiAfterTagging(List<MediaFile> targets) {
+        if (currentIndex >= 0 && currentIndex < fullList.size()) {
+            String currentPath = fullList.get(currentIndex).getPath();
+            for (MediaFile f : targets) {
+                if (f.getPath().equals(currentPath)) {
+                    tagAdapter.setCurrentFile(f);
+                    refreshSidePanel();
+                    break;
+                }
+            }
+        }
+        updateProgress();
     }
 
     // ── FolderWatcher callbacks ──────────────────────────────────────────────
