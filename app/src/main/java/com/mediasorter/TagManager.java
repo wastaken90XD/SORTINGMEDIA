@@ -1,4 +1,5 @@
 package com.mediasorter;
+public boolean tagsEnabled = true;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -334,3 +335,5 @@ public class TagManager {
         return coMap;
     }
 }
+public void setTagsEnabled(boolean on) { tagsEnabled = on; }
+public boolean isTagsEnabled() { return tagsEnabled; }

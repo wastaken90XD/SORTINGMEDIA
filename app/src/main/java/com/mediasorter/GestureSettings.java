@@ -34,6 +34,8 @@ public class GestureSettings {
     private static final String KEY_DPAD_LEFT    = "dpad_left_v2";
     private static final String KEY_DPAD_RIGHT   = "dpad_right_v2";
     private static final String KEY_DPAD_CENTER  = "dpad_center_v2";
+    private static final String KEY_DPAD_ENABLED = "dpad_enabled";
+    private static final String KEY_TAGS_PROMPT = "tags_prompt_enabled";
 
     private final SharedPreferences prefs;
 
@@ -234,3 +236,5 @@ public class GestureSettings {
         return sb.toString();
     }
 }
+dpad disable key added
+public boolean isDpadEnabled() { return prefs.getBoolean(KEY_DPAD_ENABLED, true); }

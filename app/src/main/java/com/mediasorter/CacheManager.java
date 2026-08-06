@@ -75,7 +75,7 @@ public class CacheManager {
         }
     }
 
-    // ── Manual clear ─────────────────────────────────────────────────────────
+    // Manual clear public ─────────────────────────────────────────────────────────
 
     public void clearAll() {
         File[] files = cacheDir.listFiles();
