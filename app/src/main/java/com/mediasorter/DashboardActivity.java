@@ -13,7 +13,7 @@ import java.util.List;
 
 public class DashboardActivity extends Activity {
 
-    private boolean disableTagsInMenu = false;
+    private boolean disableTagsInMenu = true;
     private List<MediaFile> files;
     private List<Tag>       tags;
 

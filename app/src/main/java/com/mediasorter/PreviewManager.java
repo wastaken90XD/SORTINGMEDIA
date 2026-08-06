@@ -476,3 +476,4 @@ public class PreviewManager {
         executor.shutdown();
     }
 }
+// release preview resources to prevent OOM

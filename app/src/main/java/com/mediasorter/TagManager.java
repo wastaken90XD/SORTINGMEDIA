@@ -336,3 +336,4 @@ public class TagManager {
     }
 }
 public void setTagsEnabled(boolean on) { tagsEnabled = on; }
+public boolean isTagsEnabled() { return tagsEnabled; }

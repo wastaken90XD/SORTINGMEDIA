@@ -237,3 +237,4 @@ public class GestureSettings {
     }
 }
 dpad disable key added
+public boolean isDpadEnabled() { return prefs.getBoolean(KEY_DPAD_ENABLED, true); }
