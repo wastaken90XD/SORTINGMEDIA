@@ -40,6 +40,7 @@ import com.mediasorter.RulesActivity;
 
 public class MainActivity extends Activity
         implements FolderWatcher.Listener, MediaIndexer.IndexListener {
+    private boolean disableTagsInMenu = false;
 
     private BatchRenameManager batchRenameManager = new BatchRenameManager();
     private MediaIndexer    indexer;

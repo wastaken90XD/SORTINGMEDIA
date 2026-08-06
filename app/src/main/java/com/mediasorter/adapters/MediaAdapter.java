@@ -300,6 +300,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
 }
 
     @Override
+    public void editFileTags(MediaFile f, String tag) { f.addFileTag(tag); }
     public void onViewRecycled(@NonNull ViewHolder holder) {
         super.onViewRecycled(holder);
         if (holder.thumbnail.getTag() != null) {
