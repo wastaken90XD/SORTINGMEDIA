@@ -1282,10 +1282,23 @@ private Spinner makeSpinner(String[] options) {
                 "Rename by color",
                 "Group similar",
                 "Tag + Rename",
-                "All three"
+                "All three",
+                "★ Signature tag (golden ticket)",
+                "★ Golden ticket (tag + rename)"
         };
         android.widget.Spinner modeSpin = makeSpinner(modes);
         layout.addView(modeSpin);
+
+        TextView goldenHint = new TextView(this);
+        goldenHint.setText(
+                "Golden ticket: every image gets the ONE colour that is rarest\n"
+                + "across the analysed set but meaningful inside the image —\n"
+                + "its own signature (e.g. \"★ Deep Lagoon\"). Re-runs skip\n"
+                + "files that already carry a ★ tag, so they're fast.");
+        goldenHint.setTextColor(0xFF888888);
+        goldenHint.setTextSize(11f);
+        goldenHint.setPadding(0, 8, 0, 0);
+        layout.addView(goldenHint);
 
         android.widget.ScrollView sv = new android.widget.ScrollView(this);
         sv.addView(layout);
@@ -1311,6 +1324,8 @@ private Spinner makeSpinner(String[] options) {
                         case 1:  mode = ColorAnalyzer.Mode.RENAME;         break;
                         case 2:  mode = ColorAnalyzer.Mode.GROUP;          break;
                         case 3:  mode = ColorAnalyzer.Mode.TAG_AND_RENAME; break;
+                        case 5:  mode = ColorAnalyzer.Mode.SIGNATURE;      break;
+                        case 6:  mode = ColorAnalyzer.Mode.GOLDEN_TICKET;  break;
                         default: mode = ColorAnalyzer.Mode.ALL;            break;
                     }
                     final ColorAnalyzer.Mode finalMode = mode;
@@ -1324,14 +1339,30 @@ private Spinner makeSpinner(String[] options) {
                                         finalThreshold, finalMode, tagManager, batchRenameManager);
                         mainHandler.post(() -> {
                             folderWatcher.resumeAll();
-                            int ok = 0;
-                            for (ColorAnalyzer.Result r : results) if (r.success) ok++;
+                            int ok = 0, signed = 0;
+                            java.util.Set<String> touchedFolders = new java.util.LinkedHashSet<>();
+                            for (ColorAnalyzer.Result r : results) {
+                                if (r.success) ok++;
+                                if (r.signatureColor != null) signed++;
+                                String p = (r.path != null) ? r.path : null;
+                                int slash = (p == null) ? -1 : p.lastIndexOf('/');
+                                if (slash > 0) touchedFolders.add(p.substring(0, slash));
+                            }
+                            // Watchers were paused while files were renamed —
+                            // reconcile the index so renamed entries don't linger.
+                            for (String folder : touchedFolders) indexer.rescan(folder);
+                            boolean golden = finalMode == ColorAnalyzer.Mode.SIGNATURE
+                                    || finalMode == ColorAnalyzer.Mode.GOLDEN_TICKET;
                             mediaAdapter.exitSelectMode();
                             btnScan.setText("SCAN");
                             btnScan.setOnClickListener(v -> startScan());
                             scheduleRefresh();
                             Toast.makeText(this,
-                                    "Analyzed " + ok + " / " + selectedFiles.size() + " files",
+                                    golden
+                                        ? "★ Golden tickets: " + signed + " / "
+                                            + selectedFiles.size() + " files"
+                                        : "Analyzed " + ok + " / "
+                                            + selectedFiles.size() + " files",
                                     Toast.LENGTH_SHORT).show();
                         });
                     }).start();

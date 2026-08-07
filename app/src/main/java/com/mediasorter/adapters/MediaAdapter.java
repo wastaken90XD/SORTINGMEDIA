@@ -122,7 +122,9 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         selectedPath = path;
         for (int i = 0; i < files.size(); i++) {
             String p = files.get(i).getPath();
-            if (p.equals(old) || p.equals(path)) notifyItemChanged(i);
+            // Payload keeps the thumbnail from being re-decoded for a
+            // pure highlight change.
+            if (p.equals(old) || p.equals(path)) notifyItemChanged(i, "selection");
         }
     }
 
@@ -160,14 +162,23 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
 
     public void selectAll() {
         for (MediaFile f : files) selected.add(f.getPath());
-        notifyDataSetChanged();
+        notifySelectionChangedVisually();
         if (selectionListener != null) selectionListener.onSelectionChanged(selected.size());
     }
 
     public void deselectAll() {
         selected.clear();
-        notifyDataSetChanged();
+        notifySelectionChangedVisually();
         if (selectionListener != null) selectionListener.onSelectionChanged(0);
+    }
+
+    /**
+     * Rebind only the selection visuals of visible rows (checkbox, highlight,
+     * order badge) via payload — a full notifyDataSetChanged() here forced a
+     * thumbnail re-decode of every visible row on each tap.
+     */
+    private void notifySelectionChangedVisually() {
+        if (!files.isEmpty()) notifyItemRangeChanged(0, files.size(), "selection");
     }
 
     private void toggleSelection(String path, ViewHolder holder) {
@@ -181,8 +192,8 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
             holder.checkBox.setChecked(true);
         }
         if (selectionListener != null) selectionListener.onSelectionChanged(selected.size());
-        // Refresh all visible items so selection order badges update
-        notifyDataSetChanged();
+        // Refresh other visible rows so selection order badges update
+        notifySelectionChangedVisually();
     }
 
     /**
@@ -210,11 +221,21 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position,
                                   @NonNull List<Object> payloads) {
-        if (!payloads.isEmpty() && "tags".equals(payloads.get(0))) {
-            // Partial update — only rebind tags text, skip thumbnail reload
+        if (!payloads.isEmpty()) {
+            // Partial updates only — skip the (expensive) thumbnail reload.
+            // RecyclerView may merge several payloads into one list.
+            boolean handled = false;
             MediaFile file = files.get(position);
-            bindTags(holder, file);
-            return;
+            for (Object p : payloads) {
+                if ("tags".equals(p)) {
+                    bindTags(holder, file);
+                    handled = true;
+                } else if ("selection".equals(p)) {
+                    bindSelectionVisual(holder, file);
+                    handled = true;
+                }
+            }
+            if (handled) return;
         }
         // Full bind
         onBindViewHolder(holder, position);
@@ -222,40 +243,15 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
 
     @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
-        MediaFile file    = files.get(position);
-        boolean   isSel   = selected.contains(file.getPath());
+        MediaFile file = files.get(position);
 
         holder.fileName.setText(file.getName());
         holder.fileDetails.setText(
             file.getFormattedSize()
-            + "  •  " + file.getType().name().toLowerCase());
+            + "  •  " + file.getType().name().toLowerCase(java.util.Locale.US));
 
         bindTags(holder, file);
-
-        if (selectMode) {
-            holder.checkBox.setVisibility(View.VISIBLE);
-            holder.checkBox.setChecked(isSel);
-            holder.itemView.setBackgroundColor(isSel ? 0xFF2A2A6E : 0x00000000);
-
-            // Show selection order badge
-            if (isSel) {
-                int order = getSelectionOrder(file.getPath());
-                holder.selectionOrder.setVisibility(View.VISIBLE);
-                holder.selectionOrder.setText(String.valueOf(order));
-                // Make it circular
-                GradientDrawable bg = new GradientDrawable();
-                bg.setShape(GradientDrawable.OVAL);
-                bg.setColor(0xFFE94560);
-                holder.selectionOrder.setBackground(bg);
-            } else {
-                holder.selectionOrder.setVisibility(View.GONE);
-            }
-        } else {
-            holder.checkBox.setVisibility(View.GONE);
-            holder.selectionOrder.setVisibility(View.GONE);
-            holder.itemView.setBackgroundColor(
-                file.getPath().equals(selectedPath) ? 0xFF1A1A4E : 0x00000000);
-        }
+        bindSelectionVisual(holder, file);
 
         loader.load(file, holder.thumbnail);
 
@@ -290,6 +286,39 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
             }
             return true;
         });
+    }
+
+    /**
+     * Checkbox / row highlight / selection-order badge — everything except
+     * text rows and the thumbnail. Extracted so the "selection" payload path
+     * can rebind just this without touching the bitmap pipeline.
+     */
+    private void bindSelectionVisual(ViewHolder holder, MediaFile file) {
+        boolean isSel = selected.contains(file.getPath());
+        if (selectMode) {
+            holder.checkBox.setVisibility(View.VISIBLE);
+            holder.checkBox.setChecked(isSel);
+            holder.itemView.setBackgroundColor(isSel ? 0xFF2A2A6E : 0x00000000);
+
+            // Show selection order badge
+            if (isSel) {
+                int order = getSelectionOrder(file.getPath());
+                holder.selectionOrder.setVisibility(View.VISIBLE);
+                holder.selectionOrder.setText(String.valueOf(order));
+                // Make it circular
+                GradientDrawable bg = new GradientDrawable();
+                bg.setShape(GradientDrawable.OVAL);
+                bg.setColor(0xFFE94560);
+                holder.selectionOrder.setBackground(bg);
+            } else {
+                holder.selectionOrder.setVisibility(View.GONE);
+            }
+        } else {
+            holder.checkBox.setVisibility(View.GONE);
+            holder.selectionOrder.setVisibility(View.GONE);
+            holder.itemView.setBackgroundColor(
+                file.getPath().equals(selectedPath) ? 0xFF1A1A4E : 0x00000000);
+        }
     }
 
     /** Extracted so partial-update can call just this. */

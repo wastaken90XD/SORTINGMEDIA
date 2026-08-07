@@ -79,7 +79,9 @@ public class MetadataWriter {
             return false;
         }
 
-        String lower = filePath.toLowerCase();
+        // Locale.US — default-locale lowercase mis-matches extensions like
+        // ".JPEG" on Turkish/Azeri devices ('I' -> dotless 'ı').
+        String lower = filePath.toLowerCase(java.util.Locale.US);
         if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
             return transform(file, (in, out, buf) -> writeJpegStream(in, out, buf, tags));
         } else if (lower.endsWith(".png")) {
