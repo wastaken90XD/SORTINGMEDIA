@@ -235,6 +235,24 @@ public class GestureSettings {
         }
         return sb.toString();
     }
+
+    // ── D-pad enable / disable toggle ─────────────────────────────────────────
+
+    public boolean isDpadEnabled() {
+        return prefs.getBoolean(KEY_DPAD_ENABLED, true);
+    }
+
+    public void setDpadEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_DPAD_ENABLED, enabled).apply();
+    }
+
+    // ── Always-prompt-for-tags toggle ─────────────────────────────────────────
+
+    public boolean isTagsPromptEnabled() {
+        return prefs.getBoolean(KEY_TAGS_PROMPT, true);
+    }
+
+    public void setTagsPromptEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_TAGS_PROMPT, enabled).apply();
+    }
 }
-dpad disable key added
-public boolean isDpadEnabled() { return prefs.getBoolean(KEY_DPAD_ENABLED, true); }

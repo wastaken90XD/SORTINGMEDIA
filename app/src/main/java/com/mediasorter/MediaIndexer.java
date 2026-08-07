@@ -18,8 +18,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MediaIndexer {
 
-    private static final int PAGE_SIZE     = 50;
-    private static final int PAGE_DELAY_MS = 150;
+    private static final int PAGE_SIZE      = 50;
+    private static final int PAGE_DELAY_MS  = 150;
+    private static final int PROGRESS_EVERY = 10; // files between UI progress callbacks
 
     public interface IndexListener {
         void onFileFound(MediaFile file);
@@ -215,7 +216,11 @@ public class MediaIndexer {
                 if (mf.getType() == MediaFile.Type.UNSUPPORTED) continue;
 
                 scanned++;
-                if (listener != null) {
+                // Throttle UI updates: one callback per file flooded the main
+                // thread's message queue on large folders.
+                if (listener != null && (scanned == 1
+                        || scanned % PROGRESS_EVERY == 0
+                        || scanned == totalMedia)) {
                     try { listener.onScanProgress(scanned, totalMedia, f.getName()); }
                     catch (Exception ignored) {}
                 }
@@ -256,10 +261,14 @@ public class MediaIndexer {
         }
     }
 
-    private boolean isMediaFile(String name) {
-        String n = name.toLowerCase();
-        return n.matches(".*\\.(jpg|jpeg|png|bmp|webp|gif)")
-                || n.matches(".*\\.(mp4|3gp|avi|mkv|mov|webm)");
+    private static final String[] MEDIA_IMAGE_EXTS = {"jpg", "jpeg", "png", "bmp", "webp", "gif"};
+    private static final String[] MEDIA_VIDEO_EXTS = {"mp4", "3gp", "avi", "mkv", "mov", "webm"};
+
+    private static boolean isMediaFile(String name) {
+        // Locale.US — see MediaFile.resolveType; also avoids a regex compile per file.
+        String n = name.toLowerCase(java.util.Locale.US);
+        return com.mediasorter.models.MediaFile.hasExtension(n, MEDIA_IMAGE_EXTS)
+                || com.mediasorter.models.MediaFile.hasExtension(n, MEDIA_VIDEO_EXTS);
     }
 
     // ── Rescan (lightweight) – serialized through same executor, never dropped ─
@@ -502,6 +511,19 @@ public class MediaIndexer {
 
     // ── Delete file ───────────────────────────────────────────────────────────
 
+    /**
+     * Removes the path from the index, manifest and hash cache WITHOUT
+     * touching the file on disk. For callers that already moved the file
+     * themselves (e.g. "move to trash").
+     */
+    public void removeFromIndexOnly(String path) {
+        removeFromIndex(path);
+        removePersistedHash(path);
+        if (listener != null) {
+            try { listener.onFileRemoved(path); } catch (Exception ignored) {}
+        }
+    }
+
     public boolean deleteFile(String path) {
         File f = new File(path);
         boolean deleted = f.exists() && f.delete();
@@ -529,7 +551,7 @@ public class MediaIndexer {
     }
 
     private void readDimensions(MediaFile mf) {
-        String lower = mf.getPath().toLowerCase();
+        String lower = mf.getPath().toLowerCase(java.util.Locale.US);
         try {
             if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")
                     || lower.endsWith(".png") || lower.endsWith(".webp")

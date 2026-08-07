@@ -76,7 +76,7 @@ public class SettingsExporter {
             // Write to file
             String timestamp = new SimpleDateFormat(
                     "yyyyMMdd_HHmmss", Locale.US).format(new Date());
-            File exportDir = new File(context.getExternalFilesDir(null), "backups");
+            File exportDir = getBackupDir(context);
             if (!exportDir.exists()) exportDir.mkdirs();
             File exportFile = new File(exportDir, "mediasorter_backup_" + timestamp + ".json");
 
@@ -156,10 +156,15 @@ public class SettingsExporter {
     }
 
     /**
-     * Get the backup directory path.
+     * Get the backup directory path. getExternalFilesDir() can return null
+     * when external storage is (temporarily) unavailable — fall back to
+     * internal storage so export still works instead of producing garbage
+     * relative paths.
      */
     public static File getBackupDir(Context context) {
-        return new File(context.getExternalFilesDir(null), "backups");
+        File external = context.getExternalFilesDir(null);
+        File root = external != null ? external : context.getFilesDir();
+        return new File(root, "backups");
     }
 
     /**

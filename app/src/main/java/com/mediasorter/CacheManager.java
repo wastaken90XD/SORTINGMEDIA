@@ -85,8 +85,17 @@ public class CacheManager {
 
     // ── Thumbnail paths ───────────────────────────────────────────────────────
 
+    /**
+     * Cache key includes file length + lastModified, so a thumbnail is
+     * automatically regenerated when the source file changes (the old key was
+     * path-only and happily served STALE thumbs after edits/renames), and
+     * 32-bit hashCode collisions can no longer mix up two files' thumbs.
+     */
     public File getThumbnailFile(String filePath) {
-        String key = String.valueOf(filePath.hashCode());
+        File src = new File(filePath);
+        long len = src.length();
+        long mod = src.lastModified();
+        String key = filePath.hashCode() + "_" + len + "_" + mod;
         return new File(cacheDir, key + ".jpg");
     }
 

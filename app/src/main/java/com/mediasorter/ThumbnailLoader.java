@@ -263,9 +263,9 @@ public void precache(List<MediaFile> files) {
 
     public void clearMemCache() {
         synchronized (memCache) {
-            for (Bitmap bmp : memCache.values()) {
-                if (bmp != null && !bmp.isRecycled()) bmp.recycle();
-            }
+            // Never recycle here: cached bitmaps may still be set on
+            // ImageViews, and drawing a recycled bitmap crashes the app.
+            // Dropping the references lets GC reclaim them safely.
             memCache.clear();
             currentBytes = 0;
         }
@@ -312,10 +312,12 @@ public void precache(List<MediaFile> files) {
         try {
             switch (file.getType()) {
                 case IMAGE: return generateImage(file.getPath(), size);
-                case VIDEO: return generateVideo(file.getPath());
+                case VIDEO: return generateVideo(file.getPath(), size);
                 default:    return null;
             }
         } catch (OutOfMemoryError e) {
+            return null;
+        } catch (Exception e) {
             return null;
         }
     }
@@ -333,11 +335,31 @@ public void precache(List<MediaFile> files) {
         }
     }
 
-    private Bitmap generateVideo(String path) {
+    /**
+     * Extracts a frame and scales it down to the requested thumbnail size.
+     * getFrameAtTime() returns the video's FULL-RESOLUTION frame (e.g. 26 MB
+     * for a 4K clip) — the previous implementation returned it unscaled,
+     * spiking the heap per video thumbnail. (getScaledFrameAtTime would be
+     * ideal but is API 27+; we scale manually to stay API-21 compatible.)
+     */
+    private Bitmap generateVideo(String path, int size) {
         MediaMetadataRetriever r = new MediaMetadataRetriever();
         try {
             r.setDataSource(path);
-            return r.getFrameAtTime(0);
+            Bitmap frame = r.getFrameAtTime(0);
+            if (frame == null) return null;
+            int w = frame.getWidth();
+            int h = frame.getHeight();
+            if (w <= 0 || h <= 0) { frame.recycle(); return null; }
+            if (w <= size && h <= size) return frame;
+            float ratio = Math.min((float) size / w, (float) size / h);
+            int nw = Math.max(1, Math.round(w * ratio));
+            int nh = Math.max(1, Math.round(h * ratio));
+            Bitmap scaled = Bitmap.createScaledBitmap(frame, nw, nh, true);
+            frame.recycle();
+            return scaled;
+        } catch (OutOfMemoryError e) {
+            return null;
         } catch (Exception e) {
             return null;
         } finally {

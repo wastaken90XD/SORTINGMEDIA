@@ -8,7 +8,7 @@
     <string name="cache_limit">Cache limit (MB)</string>
     <string name="folder_added">Folder added</string>
     <string name="folder_removed">Folder removed</string>
+    <string name="random_tags">Random Tags</string>
+    <string name="dpad_toggle">DPad Control</string>
+    <string name="gesture_custom">Gesture Customization</string>
 </resources>
-<string name="random_tags">Random Tags</string>
-<string name="dpad_toggle">DPad Control</string>
-<string name="gesture_custom">Gesture Customization</string>

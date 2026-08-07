@@ -1,5 +1,4 @@
 package com.mediasorter;
-public boolean tagsEnabled = true;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -16,9 +15,10 @@ import java.util.concurrent.Executors;
 
 public class TagManager {
 
-    private static final String PREFS      = "tag_recent_prefs";
-    private static final String KEY_RECENT = "recent_tags";
-    private static final int    MAX_RECENT = 10;
+    private static final String PREFS            = "tag_recent_prefs";
+    private static final String KEY_RECENT       = "recent_tags";
+    private static final String KEY_TAGS_ENABLED = "tags_enabled";
+    private static final int    MAX_RECENT       = 10;
 
     private final TagDatabase        db;
     private final ExecutorService    executor   = Executors.newSingleThreadExecutor();
@@ -334,6 +334,18 @@ public class TagManager {
         }
         return coMap;
     }
+
+    // ── Global "tags UI enabled" toggle ───────────────────────────────────────
+    // When disabled, main windows hide tag prompts, quick-tag popups and the
+    // tag side panel. Tags already on files are untouched and the organizer
+    // keeps working — this only gates interactive tag UI.
+
+    public boolean isTagsEnabled() {
+        return prefs.getBoolean(KEY_TAGS_ENABLED, true);
+    }
+
+    public void setTagsEnabled(boolean on) {
+        prefs.edit().putBoolean(KEY_TAGS_ENABLED, on).apply();
+        notifyTagsChanged();
+    }
 }
-public void setTagsEnabled(boolean on) { tagsEnabled = on; }
-public boolean isTagsEnabled() { return tagsEnabled; }

@@ -7,11 +7,23 @@ import com.mediasorter.models.MediaFile;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class ColorAnalyzer {
 
-    public enum Mode { TAG, RENAME, GROUP, TAG_AND_RENAME, ALL, PREVIEW_ONLY }
+    /**
+     * Analysis modes. NEW ENTRIES ARE APPENDED — never reorder this enum,
+     * callers index it by position.
+     */
+    public enum Mode {
+        TAG, RENAME, GROUP, TAG_AND_RENAME, ALL, PREVIEW_ONLY,
+        /** Tag each image with its unique "golden ticket" signature colour. */
+        SIGNATURE,
+        /** Signature tag + rename the file with that colour too. */
+        GOLDEN_TICKET
+    }
 
     /** Versatile configuration for color analysis */
     public static class Options {
@@ -35,6 +47,18 @@ public class ColorAnalyzer {
         public boolean dominantOnly = false;
         public boolean detectHarmony = true;
         public ProgressListener progressListener;
+
+        // ── Golden ticket (signature colour) options ─────────────────────
+        /** Prefix for the one-colour-per-file tag, e.g. "★ Deep Lagoon". */
+        public String  signaturePrefix           = "★ ";
+        /** Minimum pixel coverage (0..1) a colour needs to be a candidate. */
+        public float   signatureMinCoverage      = 0.03f;
+        /** Skip files that already carry a signature tag (idempotent runs —
+         *  decodes are skipped entirely, so re-running over a large library
+         *  is nearly instant). */
+        public boolean respectExistingSignature  = true;
+        /** How many palette clusters to consider per image for signatures. */
+        public int     signatureCandidates       = 6;
     }
 
     public interface ProgressListener {
@@ -62,6 +86,25 @@ public class ColorAnalyzer {
         0xd2b48c, 0xf5f0dc, 0xffd700, 0xc0c0c0, 0xb87333
     };
 
+    /** Lazily computed LAB triples for the default palette. nearestName() used
+     *  to convert every palette colour on EVERY call — that was ~30 rgbToLab
+     *  conversions per dominant colour per file. Computing once saves ~90% of
+     *  the naming cost on large selections. */
+    private static volatile float[][] sPaletteLab = null;
+
+    private static float[][] paletteLab() {
+        float[][] cached = sPaletteLab;
+        if (cached == null) {
+            cached = new float[PALETTE.length][];
+            for (int i = 0; i < PALETTE.length; i++) {
+                int c = PALETTE[i];
+                cached[i] = rgbToLab((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+            }
+            sPaletteLab = cached;
+        }
+        return cached;
+    }
+
     // ── Public API ────────────────────────────────────────────────────────────
 
     public static class Result {
@@ -69,6 +112,18 @@ public class ColorAnalyzer {
         public List<String> colors  = new ArrayList<>();
         public int          groupId = -1;
         public boolean      success = false;
+        /** The image's unique "golden ticket" colour name (null when none was
+         *  found, or the file was skipped because it already had one, or the
+         *  mode doesn't ask for signatures). */
+        public String       signatureColor = null;
+    }
+
+    /** One palette cluster: average colour + how much of the image it covers. */
+    private static class PaletteEntry {
+        float[] lab;
+        float   coverage;   // 0..1 fraction of sampled pixels
+        String  name;       // golden-ticket name from signatureName()
+        float   saturation; // 0..1+
     }
 
     // Legacy overload (kept for backward compatibility)
@@ -93,8 +148,16 @@ public class ColorAnalyzer {
         if (files == null || files.isEmpty()) return new ArrayList<>();
         if (opts == null) opts = new Options();
 
+        final boolean wantSignature =
+                opts.mode == Mode.SIGNATURE || opts.mode == Mode.GOLDEN_TICKET;
+
         List<Result> results = new ArrayList<>();
         int total = files.size();
+
+        // Weighted palettes per file (for the golden-ticket pass). Only
+        // computed when a signature mode is active; normal modes skip it.
+        List<List<PaletteEntry>> weightedPalettes =
+                wantSignature ? new ArrayList<List<PaletteEntry>>() : null;
 
         // Step 1 – extract colors for every file
         for (int i = 0; i < files.size(); i++) {
@@ -105,12 +168,32 @@ public class ColorAnalyzer {
 
             Result r = new Result();
             r.path = file.getPath();
+
+            // Idempotence: honour an existing signature tag and skip the whole
+            // decode+analysis for that file.
+            if (wantSignature && opts.respectExistingSignature) {
+                String existing = findExistingSignature(file.getTags(), opts.signaturePrefix);
+                if (existing != null) {
+                    r.signatureColor = existing;
+                    r.success = true;
+                    results.add(r);
+                    if (weightedPalettes != null) weightedPalettes.add(null);
+                    continue;
+                }
+            }
+
             try {
                 float[][] lab = extractLabColors(file.getPath(), opts);
                 for (float[] c : lab) {
                     r.colors.add(nearestName(c, opts));
                 }
                 r.success = true;
+
+                if (wantSignature) {
+                    List<PaletteEntry> palette = extractWeightedPalette(
+                            file.getPath(), Math.max(opts.signatureCandidates, opts.topN), opts);
+                    if (weightedPalettes != null) weightedPalettes.add(palette);
+                }
 
                 // Advanced metadata
                 if (opts.detectTemperature) r.colors.add(detectTemperature(lab[0]));
@@ -130,7 +213,9 @@ public class ColorAnalyzer {
                     r.colors = r.colors.subList(0, 1);
                 }
 
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                if (weightedPalettes != null) weightedPalettes.add(null);
+            }
             results.add(r);
         }
 
@@ -139,11 +224,36 @@ public class ColorAnalyzer {
             assignGroups(results, opts);
         }
 
+        // Step 2b – the golden ticket pass: pick every image's unique colour.
+        if (wantSignature) {
+            assignSignatures(results, weightedPalettes, opts);
+        }
+
         // Step 3 – apply tags and renames (now using the results so we can update paths)
         for (int i = 0; i < results.size(); i++) {
             Result r    = results.get(i);
             MediaFile f = files.get(i);
-            if (!r.success || r.colors.isEmpty()) continue;
+            if (!r.success) continue;
+
+            if (wantSignature) {
+                // Signature modes apply ONLY the golden ticket (plus rename for
+                // GOLDEN_TICKET) — the classic colour properties stay out of it.
+                if (r.signatureColor != null) {
+                    if (tagManager != null) {
+                        tagManager.applyTag(f, opts.signaturePrefix + r.signatureColor);
+                    }
+                    if (opts.mode == Mode.GOLDEN_TICKET) {
+                        renameWithPrefix(f, r,
+                                opts.signaturePrefix.trim().isEmpty()
+                                        ? r.signatureColor.replace(" ", "-")
+                                        : opts.signaturePrefix.trim()
+                                                + r.signatureColor.replace(" ", "-"));
+                    }
+                }
+                continue;
+            }
+
+            if (r.colors.isEmpty()) continue;
 
             // Tagging
             if (opts.mode == Mode.TAG || opts.mode == Mode.TAG_AND_RENAME || opts.mode == Mode.ALL) {
@@ -157,43 +267,263 @@ public class ColorAnalyzer {
             if (opts.mode == Mode.RENAME || opts.mode == Mode.TAG_AND_RENAME || opts.mode == Mode.ALL) {
                 String prefix = join("-", r.colors);
                 if (r.groupId >= 0) prefix = "GRP" + r.groupId + "-" + prefix;
-
-                String oldName = f.getName();
-                String ext = "";
-                int lastDot = oldName.lastIndexOf('.');
-                if (lastDot > 0) {   // "photo.tar.gz" -> ext = ".gz" (keep it simple)
-                    ext = oldName.substring(lastDot);
-                    oldName = oldName.substring(0, lastDot);  // strip extension
-                }
-
-                String newName = prefix + "_" + oldName + ext;
-                File oldFile = new File(r.path);
-                File newFile = new File(oldFile.getParent(), newName);
-
-                if (oldFile.renameTo(newFile)) {
-                    // Update the result's path to the new location
-                    r.path = newFile.getAbsolutePath();
-                } else {
-                    // Optionally log the error; we keep the old path but mark success = false?
-                    // For now we leave r.path unchanged so the caller sees what happened.
-                }
+                renameWithPrefix(f, r, prefix);
             }
         }
 
         return results;
     }
 
+    /**
+     * Renames file f to prefix_original.ext — keeps the extension, refuses to
+     * overwrite existing files, and updates r.path on success. Tag writes
+     * happen BEFORE renames (XMP is inside the file and travels with it).
+     */
+    private static void renameWithPrefix(MediaFile f, Result r, String prefix) {
+        String oldName = f.getName();
+        String ext = "";
+        int lastDot = oldName.lastIndexOf('.');
+        if (lastDot > 0) {   // "photo.tar.gz" -> ext = ".gz" (keep it simple)
+            ext = oldName.substring(lastDot);
+            oldName = oldName.substring(0, lastDot);  // strip extension
+        }
+
+        // Already applied (e.g. rename succeeded but the XMP tag write failed
+        // on a previous run) — never stack prefixes.
+        if (oldName.startsWith(prefix + "_")) return;
+
+        String newName = prefix + "_" + oldName + ext;
+        File oldFile = new File(r.path);
+        File newFile = new File(oldFile.getParent(), newName);
+
+        if (newFile.equals(oldFile)) return;      // nothing to do
+        if (newFile.exists())        return;      // never clobber
+        if (oldFile.renameTo(newFile)) {
+            r.path = newFile.getAbsolutePath();
+            f.setPath(newFile.getAbsolutePath());
+        }
+        // else: leave r.path unchanged so the caller sees what happened
+    }
+
+    // ── Golden ticket ─────────────────────────────────────────────────────────
+
+    /**
+     * A signature is the colour that is most *this* image's own: decent
+     * coverage inside the image, rare across the analysed library, and as
+     * saturated as possible (gray washes lose to chromatic colours unless
+     * nothing else is available).
+     */
+    private static void assignSignatures(List<Result> results,
+                                         List<List<PaletteEntry>> palettes,
+                                         Options opts) {
+        // Document frequency: in how many images does each colour name appear?
+        Map<String, Integer> df = new HashMap<>();
+        for (List<PaletteEntry> palette : palettes) {
+            if (palette == null) continue;
+            for (PaletteEntry e : palette) {
+                Integer c = df.get(e.name);
+                df.put(e.name, c == null ? 1 : c + 1);
+            }
+        }
+        // Pre-signed files (skipped via respectExistingSignature) hold their
+        // colour forever — count them so a new file never picks a colour that
+        // already belongs to another analysed image.
+        for (int i = 0; i < results.size(); i++) {
+            Result r = results.get(i);
+            if (palettes.get(i) == null && r.signatureColor != null) {
+                Integer c = df.get(r.signatureColor);
+                df.put(r.signatureColor, c == null ? 1 : c + 1);
+            }
+        }
+
+        for (int i = 0; i < results.size(); i++) {
+            List<PaletteEntry> palette = palettes.get(i);
+            if (palette == null || palette.isEmpty()) continue;
+
+            // First pass: any chromatic candidate above the coverage floor?
+            boolean hasChromatic = false;
+            for (PaletteEntry e : palette) {
+                if (e.coverage >= opts.signatureMinCoverage
+                        && !isGraySignature(e.name)) {
+                    hasChromatic = true;
+                    break;
+                }
+            }
+
+            // Golden ticket semantics: a colour that only THIS image has
+            // (df == 1) always beats a shared one, however dominant the
+            // shared one is. Among unique candidates, coverage × saturation
+            // decides. Only when nothing is unique does the rarity-weighted
+            // score pick the least-shared colour.
+            PaletteEntry bestUnique = null, bestShared = null;
+            float bestUniqueScore = -1f, bestSharedScore = -1f;
+            for (PaletteEntry e : palette) {
+                if (e.coverage < opts.signatureMinCoverage) continue;
+                if (hasChromatic && isGraySignature(e.name)) continue;
+
+                int count = df.containsKey(e.name) ? df.get(e.name) : 1;
+                float rarity   = 1f / (1f + count);
+                float salience = 0.35f + 0.65f * Math.min(1f, e.saturation);
+                float score    = e.coverage * rarity * salience;
+                if (count == 1) {
+                    if (score > bestUniqueScore) { bestUniqueScore = score; bestUnique = e; }
+                } else if (score > bestSharedScore) {
+                    bestSharedScore = score; bestShared = e;
+                }
+            }
+            PaletteEntry best = (bestUnique != null) ? bestUnique : bestShared;
+            if (best != null) {
+                results.get(i).signatureColor = best.name;
+                // Greedy: within this run the colour is now taken, so later
+                // images stop seeing it as unique.
+                Integer c = df.get(best.name);
+                df.put(best.name, (c == null ? 1 : c) + 1);
+            }
+        }
+    }
+
+    /**
+     * Weighted palette via median cut: cluster averages + per-cluster pixel
+     * coverage. Shares the pixel pipeline with extractLabColors, so signature
+     * modes cost at most one extra 64×64 decode — and only for files that
+     * don't yet carry a signature.
+     */
+    private static List<PaletteEntry> extractWeightedPalette(String path, int n,
+                                                             Options opts) {
+        Bitmap bmp = decodeForAnalysis(path);
+        if (bmp == null) throw new RuntimeException("decode failed");
+
+        Bitmap scaled = Bitmap.createScaledBitmap(bmp, SAMPLE, SAMPLE, false);
+        // createScaledBitmap returns the SAME object when no scaling is needed
+        // (image already SAMPLE-sized) — recycling it would kill our pixels.
+        if (scaled != bmp) bmp.recycle();
+
+        int[] pixels = new int[SAMPLE * SAMPLE];
+        scaled.getPixels(pixels, 0, SAMPLE, 0, 0, SAMPLE, SAMPLE);
+        scaled.recycle();
+
+        List<float[]> labs = new ArrayList<>(pixels.length);
+        for (int p : pixels) {
+            float[] lab = rgbToLab(Color.red(p), Color.green(p), Color.blue(p));
+            float sat = getSaturation(lab);
+            float light = lab[0] / 100f;
+            if (sat >= opts.minSaturation && light >= opts.minLightness) {
+                labs.add(lab);
+            }
+        }
+        List<PaletteEntry> out = new ArrayList<>();
+        if (labs.isEmpty()) {
+            PaletteEntry e = new PaletteEntry();
+            e.lab = new float[]{50f, 0f, 0f};
+            e.coverage = 1f;
+            e.name = signatureName(e.lab);
+            e.saturation = 0f;
+            out.add(e);
+            return out;
+        }
+
+        if (n > labs.size()) n = labs.size();
+        List<List<float[]>> buckets = medianCutBuckets(labs, n);
+        int total = labs.size();
+        for (List<float[]> bucket : buckets) {
+            if (bucket.isEmpty()) continue;
+            PaletteEntry e = new PaletteEntry();
+            e.lab = average(bucket);
+            e.coverage = bucket.size() / (float) total;
+            e.saturation = getSaturation(e.lab);
+            e.name = signatureName(e.lab);
+            out.add(e);
+        }
+        return out;
+    }
+
+    /**
+     * Deterministic golden-ticket names: 12 hue families × 3 lightness
+     * variants plus 5 achromatic shades. Two images only share a name when
+     * their colour genuinely lives in the same perceptual bucket.
+     */
+    private static final String[] SIGNATURE_GRAY =
+        {"Midnight Black", "Charcoal", "Ash Gray", "Silver", "Porcelain"};
+    private static final String[] SIGNATURE_HUE = {
+        "Ruby", "Sunset", "Amber", "Solar", "Lime", "Emerald",
+        "Jade", "Lagoon", "Azure", "Sapphire", "Amethyst", "Orchid"
+    };
+
+    private static String signatureName(float[] lab) {
+        double chroma = Math.sqrt(lab[1] * lab[1] + lab[2] * lab[2]);
+        if (chroma < 8.0) {
+            int l = lab[0] < 12 ? 0 : lab[0] < 30 ? 1 : lab[0] < 55 ? 2
+                  : lab[0] < 80 ? 3 : 4;
+            return SIGNATURE_GRAY[l];
+        }
+        double hue = Math.toDegrees(Math.atan2(lab[2], lab[1]));
+        if (hue < 0) hue += 360.0;
+        int idx = (int) ((hue + 15.0) / 30.0) % 12;
+        String family = SIGNATURE_HUE[idx];
+        if (lab[0] < 38) return "Deep " + family;
+        if (lab[0] > 72) return "Pale " + family;
+        return family;
+    }
+
+    private static boolean isGraySignature(String name) {
+        for (String g : SIGNATURE_GRAY) if (g.equals(name)) return true;
+        return false;
+    }
+
+    private static String findExistingSignature(List<String> tags, String prefix) {
+        if (tags == null || prefix == null) return null;
+        for (String t : tags) {
+            if (t != null && t.startsWith(prefix)) {
+                return t.substring(prefix.length());
+            }
+        }
+        return null;
+    }
+
+    // ── Decode ────────────────────────────────────────────────────────────────
+
+    /**
+     * Decode an image down to ~256px on its long edge with OOM defense.
+     * The previous fixed inSampleSize=4 still produced ~100 MP bitmaps for
+     * huge photos (~400 MB) and the uncaught OutOfMemoryError crashed the
+     * whole analysis run. Retries once with a doubled sample size on OOM.
+     */
+    private static Bitmap decodeForAnalysis(String path) {
+        BitmapFactory.Options b = new BitmapFactory.Options();
+        try {
+            b.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(path, b);
+            if (b.outWidth <= 0 || b.outHeight <= 0) return null;
+            int sample = 1;
+            int longest = Math.max(b.outWidth, b.outHeight);
+            while (longest / (sample * 2) > 256) sample *= 2;
+            b.inJustDecodeBounds = false;
+            b.inSampleSize = sample;
+            return BitmapFactory.decodeFile(path, b);
+        } catch (OutOfMemoryError e) {
+            try {
+                b.inJustDecodeBounds = false;
+                b.inSampleSize = Math.max(2, b.inSampleSize * 2);
+                return BitmapFactory.decodeFile(path, b);
+            } catch (OutOfMemoryError | Exception e2) {
+                return null;
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     // ── Color extraction (now respects Options) ───────────────────────────────
 
     private static float[][] extractLabColors(String path, Options opts) {
         int topN = opts.topN;
-        BitmapFactory.Options bopts = new BitmapFactory.Options();
-        bopts.inSampleSize = 4;
-        Bitmap bmp = BitmapFactory.decodeFile(path, bopts);
+        Bitmap bmp = decodeForAnalysis(path);
         if (bmp == null) throw new RuntimeException("decode failed");
 
         Bitmap scaled = Bitmap.createScaledBitmap(bmp, SAMPLE, SAMPLE, false);
-        bmp.recycle();
+        // createScaledBitmap returns the SAME object when no scaling is needed
+        // (image already SAMPLE-sized) — recycling it would kill our pixels.
+        if (scaled != bmp) bmp.recycle();
 
         int[] pixels = new int[SAMPLE * SAMPLE];
         scaled.getPixels(pixels, 0, SAMPLE, 0, 0, SAMPLE, SAMPLE);
@@ -232,9 +562,19 @@ public class ColorAnalyzer {
     // ── Median cut ────────────────────────────────────────────────────────────
 
     private static float[][] medianCut(List<float[]> pixels, int n) {
-        if (pixels.isEmpty() || n <= 0) return new float[0][0];
+        List<List<float[]>> buckets = medianCutBuckets(pixels, n);
+        float[][] result = new float[buckets.size()][];
+        for (int i = 0; i < buckets.size(); i++) {
+            result[i] = average(buckets.get(i));
+        }
+        return result;
+    }
 
+    /** The shared splitter; medianCut() wraps it for the legacy float[] API. */
+    private static List<List<float[]>> medianCutBuckets(List<float[]> pixels, int n) {
         List<List<float[]>> buckets = new ArrayList<>();
+        if (pixels.isEmpty() || n <= 0) return buckets;
+
         buckets.add(new ArrayList<>(pixels));
 
         while (buckets.size() < n) {
@@ -262,12 +602,7 @@ public class ColorAnalyzer {
             buckets.add(new ArrayList<>(largest.subList(0, mid)));
             buckets.add(new ArrayList<>(largest.subList(mid, largest.size())));
         }
-
-        float[][] result = new float[buckets.size()][];
-        for (int i = 0; i < buckets.size(); i++) {
-            result[i] = average(buckets.get(i));
-        }
-        return result;
+        return buckets;
     }
 
     private static float spread(List<float[]> bucket) {
@@ -325,13 +660,22 @@ public class ColorAnalyzer {
         for (int i = 0; i < groups.length; i++) groups[i] = -1;
         int nextGroup = 0;
 
+        // Precompute each result's dominant LAB once — the O(n²) loop below
+        // used to re-derive it from the colour *names* for every pair.
+        float[][] dominant = new float[results.size()][];
         for (int i = 0; i < results.size(); i++) {
-            if (!results.get(i).success) continue;
+            if (results.get(i).success && !results.get(i).colors.isEmpty()) {
+                dominant[i] = nameToLab(results.get(i).colors.get(0));
+            }
+        }
+
+        for (int i = 0; i < results.size(); i++) {
+            if (!results.get(i).success || dominant[i] == null) continue;
             if (groups[i] == -1) groups[i] = nextGroup++;
             for (int j = i + 1; j < results.size(); j++) {
-                if (!results.get(j).success) continue;
+                if (!results.get(j).success || dominant[j] == null) continue;
                 float dist = opts.useCIEDE2000
-                        ? ciede2000FromNames(results.get(i).colors, results.get(j).colors)
+                        ? ciede2000(dominant[i], dominant[j])
                         : colorDistance(results.get(i).colors, results.get(j).colors);
                 if (dist < opts.threshold) {
                     groups[j] = groups[i];
@@ -441,21 +785,29 @@ public class ColorAnalyzer {
     }
 
     private static String nearestName(float[] lab, Options opts) {
-        int[] palette = (opts.useCustomPalette && opts.customPalette != null)
-                ? opts.customPalette : PALETTE;
-        String[] names = (opts.useCustomPalette && opts.customNames != null)
-                ? opts.customNames : NAMES;
+        if (opts.useCustomPalette && opts.customPalette != null
+                && opts.customNames != null) {
+            float best = Float.MAX_VALUE;
+            int   idx  = 0;
+            for (int i = 0; i < opts.customPalette.length; i++) {
+                int c = opts.customPalette[i];
+                float[] pLab = rgbToLab(
+                    (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+                float d = labDist(lab, pLab);
+                if (d < best) { best = d; idx = i; }
+            }
+            return opts.customNames[idx];
+        }
 
+        // Default palette: cached LAB conversion (see paletteLab()).
+        float[][] pl = paletteLab();
         float best = Float.MAX_VALUE;
         int   idx  = 0;
-        for (int i = 0; i < palette.length; i++) {
-            int c = palette[i];
-            float[] pLab = rgbToLab(
-                (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
-            float d = labDist(lab, pLab);
+        for (int i = 0; i < pl.length; i++) {
+            float d = labDist(lab, pl[i]);
             if (d < best) { best = d; idx = i; }
         }
-        return names[idx];
+        return NAMES[idx];
     }
 
     // CIEDE2000 helper (used when enabled)
@@ -466,13 +818,18 @@ public class ColorAnalyzer {
         return ciede2000(labA, labB);
     }
 
+    private static Map<String, float[]> sNameToLab = null;
+
     private static float[] nameToLab(String name) {
-        for (int i = 0; i < NAMES.length; i++) {
-            if (NAMES[i].equals(name)) {
+        if (sNameToLab == null) {
+            Map<String, float[]> m = new HashMap<>();
+            for (int i = 0; i < NAMES.length; i++) {
                 int c = PALETTE[i];
-                return rgbToLab((c>>16)&0xFF, (c>>8)&0xFF, c&0xFF);
+                m.put(NAMES[i], rgbToLab((c>>16)&0xFF, (c>>8)&0xFF, c&0xFF));
             }
+            sNameToLab = m;
         }
-        return new float[]{50,0,0};
+        float[] lab = sNameToLab.get(name);
+        return lab != null ? lab : new float[]{50,0,0};
     }
 }

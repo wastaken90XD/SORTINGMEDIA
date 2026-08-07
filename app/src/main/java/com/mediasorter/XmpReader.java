@@ -22,7 +22,8 @@ public class XmpReader {
     public static List<String> readTags(String filePath) {
         if (filePath == null || filePath.isEmpty()) return new ArrayList<>();
         try {
-            String lower = filePath.toLowerCase();
+            // Locale.US — see MetadataWriter.addTags.
+            String lower = filePath.toLowerCase(java.util.Locale.US);
             if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
                 return readJpeg(filePath);
             } else if (lower.endsWith(".png")) {

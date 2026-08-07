@@ -13,7 +13,6 @@ import java.util.List;
 
 public class DashboardActivity extends Activity {
 
-    private boolean disableTagsInMenu = true;
     private List<MediaFile> files;
     private List<Tag>       tags;
 
@@ -21,10 +20,26 @@ public class DashboardActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Retrieve data from Intent extras
-        Intent intent = getIntent();
-        files = (List<MediaFile>) intent.getSerializableExtra("files");
-        tags  = (List<Tag>)       intent.getSerializableExtra("tags");
+        // Prefer the static snapshots passed by MainActivity — a whole media
+        // index sent as Intent extras can overflow the binder transaction
+        // limit (TransactionTooLargeException) on large libraries.
+        files = MainActivity.getLatestFullList();
+        tags  = MainActivity.getLatestTagList();
+
+        // Compatibility fallback: legacy callers may still send extras.
+        if (files == null || files.isEmpty()) {
+            Intent intent = getIntent();
+            Object extraFiles = intent.getSerializableExtra("files");
+            if (extraFiles instanceof List) {
+                files = (List<MediaFile>) extraFiles;
+            }
+        }
+        if (tags == null || tags.isEmpty()) {
+            Object extraTags = getIntent().getSerializableExtra("tags");
+            if (extraTags instanceof List) {
+                tags = (List<Tag>) extraTags;
+            }
+        }
 
         if (files == null) files = new ArrayList<>();
         if (tags  == null) tags  = new ArrayList<>();

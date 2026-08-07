@@ -27,12 +27,28 @@ public class MediaFile implements Serializable {
         this.type    = resolveType(name);
     }
 
-     private Type resolveType(String name) {
-        String lower = name.toLowerCase();
-        if (lower.matches(".*\\.(jpg|jpeg|png|bmp|webp|gif)")) return Type.IMAGE;
-        if (lower.matches(".*\\.(mp4|3gp|avi|mkv|mov|webm)"))  return Type.VIDEO;
+    // Locale.US: on Turkish/Azeri devices toLowerCase() turns 'I' into a
+    // dotless 'ı', which silently broke .GIF-type extension checks.
+    private static final String[] IMAGE_EXTS = {"jpg", "jpeg", "png", "bmp", "webp", "gif"};
+    private static final String[] VIDEO_EXTS = {"mp4", "3gp", "avi", "mkv", "mov", "webm"};
+
+    /** Extension compare — much faster than String.matches (no regex compile per call). */
+    public static boolean hasExtension(String lowerName, String[] exts) {
+        int dot = lowerName.lastIndexOf('.');
+        if (dot < 0) return false;
+        String ext = lowerName.substring(dot + 1);
+        for (String e : exts) {
+            if (ext.equals(e)) return true;
+        }
+        return false;
+    }
+
+    private Type resolveType(String name) {
+        String lower = name.toLowerCase(java.util.Locale.US);
+        if (hasExtension(lower, IMAGE_EXTS)) return Type.IMAGE;
+        if (hasExtension(lower, VIDEO_EXTS)) return Type.VIDEO;
         return Type.UNSUPPORTED;
-}
+    }
 
     // Getters
     public String       getPath()      { return path; }
