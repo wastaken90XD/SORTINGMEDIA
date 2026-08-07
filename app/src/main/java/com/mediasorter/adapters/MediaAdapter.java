@@ -102,6 +102,21 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         }
     }
 
+    /**
+     * Directly toggle a single tag on a file and re-bind just the tags line.
+     * MainActivity routes through TagManager so changes also persist to XMP;
+     * this in-memory edit is a lightweight path for callers that already
+     * handled persistence themselves.
+     */
+    public void editFileTags(MediaFile f, String tag) {
+        if (f == null || tag == null) return;
+        String t = tag.trim();
+        if (t.isEmpty()) return;
+        if (f.hasTag(t)) f.removeTag(t);
+        else             f.addTag(t);
+        updateFileTags(f);
+    }
+
     public void setSelected(String path) {
         String old   = selectedPath;
         selectedPath = path;
@@ -300,7 +315,6 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
 }
 
     @Override
-    public void editFileTags(MediaFile f, String tag) { if(f!=null && tag!=null) f.addFileTag(tag); }
     public void onViewRecycled(@NonNull ViewHolder holder) {
         super.onViewRecycled(holder);
         if (holder.thumbnail.getTag() != null) {

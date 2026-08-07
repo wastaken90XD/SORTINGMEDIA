@@ -2,25 +2,39 @@ package com.mediasorter;
 
 import android.util.Log;
 import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.List;
 import java.util.zip.CRC32;
-import java.util.zip.Deflater;
-import java.io.IOException;
 
+/**
+ * Writes XMP tags into JPEG / PNG / MP4 files and strips metadata.
+ *
+ * RENOVATED (OOM + data-safety):
+ *  - Everything is streamed with a small fixed buffer. The previous
+ *    implementation read each ENTIRE file into memory (up to 3 copies of a
+ *    500 MB video) and OOM-crashed on any realistically-sized library.
+ *  - Writes go to a temporary sibling file first and are then swapped in via
+ *    delete+rename. The previous implementation truncated the original file
+ *    and rewrote it in place — an interruption mid-write destroyed photos.
+ */
 public class MetadataWriter {
 
     private static final String TAG = "MetadataWriter";
+    private static final int    BUFFER_SIZE = 256 * 1024; // 256 KB streaming buffer
+    private static final String TMP_SUFFIX  = ".xmp_tmp";
 
     // ── XMP block builder ─────────────────────────────────────────────────────
 
     private static final String XMP_HEADER =
-        "<?xpacket begin=\"\uFEFF\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n" +
+        "<?xpacket begin=\"﻿\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n" +
         "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n" +
         "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n" +
         "<rdf:Description rdf:about=\"\"\n" +
@@ -48,81 +62,124 @@ public class MetadataWriter {
         return xmp.toString().getBytes(StandardCharsets.UTF_8);
     }
 
+    private static String escapeXml(String s) {
+        return s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;");
+    }
+
     // ── Public API ────────────────────────────────────────────────────────────
 
     public static boolean writeTags(String filePath, List<String> tags) {
         File file = new File(filePath);
-        Log.d(TAG, "Writing to: " + filePath);
-        Log.d(TAG, "Exists: " + file.exists() + " Writable: " + file.canWrite());
-
         if (!file.exists() || !file.canWrite()) {
-            Log.e(TAG, "File not writable");
+            Log.e(TAG, "File not writable: " + filePath);
             return false;
         }
 
         String lower = filePath.toLowerCase();
         if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
-            return writeJpeg(filePath, tags);
+            return transform(file, (in, out, buf) -> writeJpegStream(in, out, buf, tags));
         } else if (lower.endsWith(".png")) {
-            return writePng(filePath, tags);
+            return transform(file, (in, out, buf) -> writePngStream(in, out, buf, tags));
         } else if (lower.endsWith(".mp4") || lower.endsWith(".mov")) {
-            return writeMp4(filePath, tags);
+            return transform(file, (in, out, buf) -> writeMp4Stream(in, out, buf, tags));
         }
 
         Log.w(TAG, "Unsupported format: " + filePath);
         return false;
     }
 
-    // ── JPEG ──────────────────────────────────────────────────────────────────
+    // ── Transform plumbing: stream original -> temp, then swap atomically ─────
 
-    private static final int    JPEG_SOI  = 0xFFD8;
-    private static final int    JPEG_APP1 = 0xFFE1;
-    private static final byte[] XMP_MAGIC =
-        "http://ns.adobe.com/xap/1.0/\0".getBytes(StandardCharsets.UTF_8);
+    private interface StreamTransform {
+        /** Copy/transform in -> out. Throw IOException on failure. */
+        void run(InputStream in, OutputStream out, byte[] buf) throws IOException;
+    }
 
-    private static boolean writeJpeg(String filePath, List<String> tags) {
-        try {
-            byte[] xmpBytes  = buildXmp(tags);
-            byte[] appMarker = buildJpegApp1(xmpBytes);
-
-            RandomAccessFile raf = new RandomAccessFile(filePath, "r");
-            byte[] original = new byte[(int) raf.length()];
-            raf.readFully(original);
-            raf.close();
-
-            if (original.length < 2 ||
-                ((original[0] & 0xFF) << 8 | (original[1] & 0xFF)) != JPEG_SOI) {
-                Log.e(TAG, "Not a valid JPEG");
-                return false;
-            }
-
-            // Remove existing XMP APP1 if present
-            original = removeJpegXmp(original);
-
-            // Inject new XMP after SOI
-            byte[] output = new byte[2 + appMarker.length + original.length - 2];
-            output[0] = original[0];
-            output[1] = original[1];
-            System.arraycopy(appMarker, 0, output, 2, appMarker.length);
-            System.arraycopy(original, 2, output, 2 + appMarker.length,
-                original.length - 2);
-
-            FileOutputStream fos = new FileOutputStream(filePath);
-            fos.write(output);
-            fos.close();
-
-            Log.d(TAG, "JPEG XMP written successfully");
-            return true;
-
+    /**
+     * Runs the transform into a temp file in the same directory and swaps it
+     * in only when the transform completed cleanly. If anything goes wrong
+     * the original file is left untouched.
+     */
+    private static boolean transform(File file, StreamTransform t) {
+        File tmp = new File(file.getParentFile(), file.getName() + TMP_SUFFIX);
+        boolean ok = false;
+        try (FileInputStream in = new FileInputStream(file);
+             FileOutputStream out = new FileOutputStream(tmp)) {
+            t.run(in, out, new byte[BUFFER_SIZE]);
+            out.getFD().sync();
+            ok = true;
         } catch (Exception e) {
-            Log.e(TAG, "JPEG write failed: " + e.getMessage());
+            Log.e(TAG, "Transform failed for " + file.getName() + ": " + e.getMessage());
+        }
+
+        if (!ok) {
+            if (tmp.exists() && !tmp.delete()) {
+                Log.w(TAG, "Could not delete temp file " + tmp.getAbsolutePath());
+            }
             return false;
+        }
+
+        // Swap: original -> backup name, temp -> original. Keep it simple and
+        // safe on the same directory (renameTo is atomic within one mount).
+        if (!file.delete()) {
+            Log.e(TAG, "Could not delete original before swap: " + file.getAbsolutePath());
+            tmp.delete();
+            return false;
+        }
+        if (!tmp.renameTo(file)) {
+            Log.e(TAG, "Rename of temp file failed: " + tmp.getAbsolutePath());
+            tmp.delete();
+            return false;
+        }
+        return true;
+    }
+
+    private static long copyBytes(InputStream in, OutputStream out, byte[] buf,
+                                   long count) throws IOException {
+        long remaining = count;
+        while (remaining > 0) {
+            int n = in.read(buf, 0, (int) Math.min(buf.length, remaining));
+            if (n < 0) throw new EOFException("Unexpected end of stream");
+            out.write(buf, 0, n);
+            remaining -= n;
+        }
+        return count;
+    }
+
+    private static void copyRest(InputStream in, OutputStream out, byte[] buf)
+            throws IOException {
+        int n;
+        while ((n = in.read(buf)) >= 0) out.write(buf, 0, n);
+    }
+
+    private static void skipFully(InputStream in, long count) throws IOException {
+        long remaining = count;
+        while (remaining > 0) {
+            long n = in.skip(remaining);
+            if (n <= 0) {
+                if (in.read() < 0) throw new EOFException("Unexpected end of stream");
+                n = 1;
+            }
+            remaining -= n;
         }
     }
 
-    private static byte[] buildJpegApp1(byte[] xmpBytes) {
+    // ── JPEG ──────────────────────────────────────────────────────────────────
+
+    private static final byte[] XMP_MAGIC =
+        "http://ns.adobe.com/xap/1.0/\0".getBytes(StandardCharsets.UTF_8);
+    private static final int MAX_JPEG_SEGMENT = 0xFFFF; // 16-bit segment length
+
+    private static byte[] buildJpegApp1(byte[] xmpBytes) throws IOException {
         int totalLen = 2 + XMP_MAGIC.length + xmpBytes.length;
-        byte[] marker = new byte[2 + totalLen];
+        if (totalLen > MAX_JPEG_SEGMENT) {
+            throw new IOException("XMP too large for JPEG segment");
+        }
+        byte[] marker = new byte[4 + totalLen - 2];
         marker[0] = (byte) 0xFF;
         marker[1] = (byte) 0xE1;
         marker[2] = (byte) ((totalLen >> 8) & 0xFF);
@@ -132,506 +189,538 @@ public class MetadataWriter {
         return marker;
     }
 
-    private static byte[] removeJpegXmp(byte[] data) {
-        try {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            out.write(data[0]);
-            out.write(data[1]);
-            int pos = 2;
-            while (pos < data.length - 1) {
-                int marker = ((data[pos] & 0xFF) << 8) | (data[pos + 1] & 0xFF);
-                if ((marker & 0xFF00) != 0xFF00) break;
-                if (pos + 3 >= data.length) break;
-                int segLen = ((data[pos + 2] & 0xFF) << 8) | (data[pos + 3] & 0xFF);
-                boolean isXmp = marker == JPEG_APP1
-                    && isXmpSegment(data, pos + 4);
-                if (!isXmp) {
-                    out.write(data, pos, 2 + segLen);
-                }
-                pos += 2 + segLen;
-                if (marker == 0xFFDA) {
-                    // Start of scan — write rest as-is
-                    out.write(data, pos, data.length - pos);
-                    break;
-                }
-            }
-            return out.toByteArray();
-        } catch (Exception e) {
-            return data;
-        }
+    /** Marker codes that have no length field (standalone). */
+    private static boolean isStandaloneMarker(int marker) {
+        return marker == 0x01                      // TEM
+            || marker == 0xD8 || marker == 0xD9    // SOI / EOI
+            || (marker >= 0xD0 && marker <= 0xD7); // RSTn
     }
 
-    private static boolean isXmpSegment(byte[] data, int offset) {
-        if (offset + XMP_MAGIC.length > data.length) return false;
-        for (int i = 0; i < XMP_MAGIC.length; i++) {
-            if (data[offset + i] != XMP_MAGIC[i]) return false;
+    private static void writeJpegStream(InputStream in, OutputStream out,
+                                        byte[] buf, List<String> tags) throws IOException {
+        int soi0 = in.read();
+        int soi1 = in.read();
+        if (soi0 != 0xFF || soi1 != 0xD8) throw new IOException("Not a valid JPEG");
+
+        out.write(0xFF);
+        out.write(0xD8);
+        out.write(buildJpegApp1(buildXmp(tags)));
+
+        while (true) {
+            int b0 = in.read();
+            if (b0 < 0) return; // degenerate but nothing left to copy
+            if (b0 != 0xFF) {
+                // Outside a marker (should not happen before SOS, but be
+                // tolerant): copy this byte and the rest verbatim.
+                out.write(b0);
+                copyRest(in, out, buf);
+                return;
+            }
+            int marker = in.read();
+            if (marker < 0) { out.write(b0); return; }
+            if (marker == 0xFF) {           // fill byte before marker
+                out.write(0xFF);
+                continue;
+            }
+
+            if (isStandaloneMarker(marker)) {
+                out.write(0xFF);
+                out.write(marker);
+                continue;
+            }
+
+            if (marker == 0xDA) {           // SOS: copy everything verbatim
+                out.write(0xFF);
+                out.write(marker);
+                copyRest(in, out, buf);
+                return;
+            }
+
+            int hi = in.read(), lo = in.read();
+            if (hi < 0 || lo < 0) throw new EOFException("Truncated JPEG segment");
+            int segLen = ((hi & 0xFF) << 8) | (lo & 0xFF);
+            if (segLen < 2) throw new IOException("Bad JPEG segment length");
+            int payload = segLen - 2;
+
+            // Probe the payload head so we can detect an XMP APP1 segment
+            // without a pushback stream: bytes we read are held in `probe`
+            // and echoed back out when the segment turns out to be kept.
+            int probeLen = Math.min(payload, marker == 0xE1 ? XMP_MAGIC.length : 0);
+            byte[] probe = new byte[probeLen];
+            if (probeLen > 0) readFully(in, probe);
+
+            if (marker == 0xE1 && probeLen == XMP_MAGIC.length && eq(probe, XMP_MAGIC)) {
+                // Existing XMP segment -> drop it; our fresh one was already
+                // written right after the SOI. IMPORTANT: the FF E1 marker
+                // bytes must NOT be emitted — emitting them would plant a
+                // phantom segment and desync the whole marker stream.
+                skipFully(in, payload - probeLen);
+                continue;
+            }
+
+            out.write(0xFF);
+            out.write(marker);
+            out.write(hi);
+            out.write(lo);
+            if (probeLen > 0) out.write(probe);
+            copyBytes(in, out, buf, payload - probeLen);
         }
-        return true;
     }
 
     // ── PNG ───────────────────────────────────────────────────────────────────
 
     private static final byte[] PNG_SIGNATURE =
         {(byte)0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-    private static final byte[] PNG_IEND =
-        {0x49, 0x45, 0x4E, 0x44};
-    private static final byte[] PNG_XTXT =
-        {0x69, 0x54, 0x58, 0x74}; // iTXt chunk type
+    private static final byte[] PNG_IEND = {0x49, 0x45, 0x4E, 0x44};
+    private static final byte[] PNG_ITXT = {0x69, 0x54, 0x58, 0x74};
+    private static final byte[] PNG_XMP_KEYWORD =
+        "XML:com.adobe.xmp".getBytes(StandardCharsets.UTF_8);
 
-    private static boolean writePng(String filePath, List<String> tags) {
-    try {
-        File file = new File(filePath);
-        byte[] original = readAllBytes(file);   // safe full read
-        if (original == null) {
-            Log.e(TAG, "Failed to read PNG");
-            return false;
-        }
-
-        // Validate PNG signature
-        for (int i = 0; i < PNG_SIGNATURE.length; i++) {
-            if (original[i] != PNG_SIGNATURE[i]) {
-                Log.e(TAG, "Not a valid PNG");
-                return false;
-            }
-        }
-
-        byte[] xmpBytes = buildXmp(tags);
-        byte[] iTXtChunk = buildPngITXtChunk(xmpBytes);
-
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        out.write(PNG_SIGNATURE);
-
-        int pos = 8;
-        boolean injected = false;
-
-        while (pos < original.length - 4) {
-            int chunkLen = readInt(original, pos);
-            byte[] chunkType = Arrays.copyOfRange(original, pos + 4, pos + 8);
-
-            boolean isXmpChunk = Arrays.equals(chunkType, PNG_XTXT) &&
-                    isXmpITXt(original, pos + 8);
-
-            if (Arrays.equals(chunkType, PNG_IEND) && !injected) {
-                out.write(iTXtChunk);
-                injected = true;
-            }
-
-            if (!isXmpChunk) {
-                out.write(original, pos, 12 + chunkLen);
-            }
-
-            pos += 12 + chunkLen;
-        }
-
-        FileOutputStream fos = new FileOutputStream(filePath);
-        fos.write(out.toByteArray());
-        fos.close();
-
-        Log.d(TAG, "PNG XMP written successfully");
-        return true;
-
-    } catch (Exception e) {
-        Log.e(TAG, "PNG write failed: " + e.getMessage());
-        return false;
-    }
-}
-
-    private static byte[] buildPngITXtChunk(byte[] xmpBytes) throws Exception {
-        // iTXt keyword for XMP
+    private static byte[] buildPngITXtChunk(byte[] xmpBytes) throws IOException {
         byte[] keyword = "XML:com.adobe.xmp\0".getBytes(StandardCharsets.UTF_8);
-        // Compression flag (0=uncompressed), compression method (0), lang tag, translated keyword
-        byte[] flags = {0x00, 0x00, 0x00, 0x00};
+        byte[] flags   = {0x00, 0x00, 0x00, 0x00};
 
         ByteArrayOutputStream data = new ByteArrayOutputStream();
         data.write(keyword);
         data.write(flags);
         data.write(xmpBytes);
-
         byte[] chunkData = data.toByteArray();
         int len = chunkData.length;
 
         ByteArrayOutputStream chunk = new ByteArrayOutputStream();
-        // Length
         chunk.write((len >> 24) & 0xFF);
         chunk.write((len >> 16) & 0xFF);
-        chunk.write((len >> 8) & 0xFF);
+        chunk.write((len >> 8)  & 0xFF);
         chunk.write(len & 0xFF);
-        // Type
-        chunk.write(PNG_XTXT);
-        // Data
+        chunk.write(PNG_ITXT);
         chunk.write(chunkData);
-        // CRC
+
         CRC32 crc = new CRC32();
-        crc.update(PNG_XTXT);
+        crc.update(PNG_ITXT);
         crc.update(chunkData);
         long crcVal = crc.getValue();
-        chunk.write((int)((crcVal >> 24) & 0xFF));
-        chunk.write((int)((crcVal >> 16) & 0xFF));
-        chunk.write((int)((crcVal >> 8) & 0xFF));
-        chunk.write((int)(crcVal & 0xFF));
-
+        chunk.write((int) ((crcVal >> 24) & 0xFF));
+        chunk.write((int) ((crcVal >> 16) & 0xFF));
+        chunk.write((int) ((crcVal >> 8)  & 0xFF));
+        chunk.write((int) (crcVal & 0xFF));
         return chunk.toByteArray();
     }
 
-    private static boolean isXmpITXt(byte[] data, int offset) {
-        byte[] keyword = "XML:com.adobe.xmp".getBytes(StandardCharsets.UTF_8);
-        if (offset + keyword.length > data.length) return false;
-        for (int i = 0; i < keyword.length; i++) {
-            if (data[offset + i] != keyword[i]) return false;
+    private static void writePngStream(InputStream in, OutputStream out,
+                                       byte[] buf, List<String> tags) throws IOException {
+        byte[] sig = new byte[8];
+        readFully(in, sig);
+        for (int i = 0; i < 8; i++) {
+            if (sig[i] != PNG_SIGNATURE[i]) throw new IOException("Not a valid PNG");
         }
+        out.write(sig);
+
+        byte[] iTXtChunk = buildPngITXtChunk(buildXmp(tags));
+        boolean injected = false;
+        byte[] header = new byte[8];
+
+        while (true) {
+            int got = readUpTo(in, header, 8);
+            if (got == 0) return;                       // EOF without IEND
+            if (got < 8) { out.write(header, 0, got); copyRest(in, out, buf); return; }
+
+            long chunkLen = ((long) (header[0] & 0xFF) << 24)
+                          | ((long) (header[1] & 0xFF) << 16)
+                          | ((long) (header[2] & 0xFF) << 8)
+                          | ((long) (header[3] & 0xFF));
+            if (chunkLen > Integer.MAX_VALUE - 12) throw new IOException("Bad PNG chunk");
+            byte[] type = {header[4], header[5], header[6], header[7]};
+            long bodyPlusCrc = chunkLen + 4;
+
+            boolean isIend = eq(type, PNG_IEND);
+            if (isIend && !injected) {
+                out.write(iTXtChunk);
+                injected = true;
+            }
+
+            // Probe the chunk payload head to recognise our XMP iTXt chunk
+            // without a pushback stream; probed bytes are echoed back out
+            // for chunks that are kept.
+            boolean isITXt = eq(type, PNG_ITXT);
+            int probeLen = (isITXt && chunkLen >= PNG_XMP_KEYWORD.length)
+                ? PNG_XMP_KEYWORD.length : 0;
+            byte[] probe = new byte[probeLen];
+            if (probeLen > 0) readFully(in, probe);
+
+            boolean isXmpITXt = isITXt && probeLen == PNG_XMP_KEYWORD.length
+                && eq(probe, PNG_XMP_KEYWORD);
+
+            if (isXmpITXt) {
+                skipFully(in, bodyPlusCrc - probeLen); // drop stale XMP chunk
+            } else {
+                out.write(header, 0, 8);
+                if (probeLen > 0) out.write(probe);
+                copyBytes(in, out, buf, bodyPlusCrc - probeLen);
+            }
+
+            if (isIend) { copyRest(in, out, buf); return; }
+        }
+    }
+
+    private static boolean eq(byte[] a, byte[] b) {
+        if (a.length != b.length) return false;
+        for (int i = 0; i < a.length; i++) if (a[i] != b[i]) return false;
         return true;
+    }
+
+    private static void readFully(InputStream in, byte[] dst) throws IOException {
+        int offset = 0;
+        while (offset < dst.length) {
+            int n = in.read(dst, offset, dst.length - offset);
+            if (n < 0) throw new EOFException("Unexpected EOF");
+            offset += n;
+        }
+    }
+
+    private static int readUpTo(InputStream in, byte[] dst, int max) throws IOException {
+        int offset = 0;
+        while (offset < max) {
+            int n = in.read(dst, offset, max - offset);
+            if (n < 0) break;
+            offset += n;
+        }
+        return offset;
     }
 
     // ── MP4 ───────────────────────────────────────────────────────────────────
 
-    private static boolean writeMp4(String filePath, List<String> tags) {
-    try {
-        byte[] xmpBytes = buildXmp(tags);
+    private static final byte[] XMP_UUID = {
+        (byte)0xBE, (byte)0x7A, (byte)0xCF, (byte)0xCB,
+        (byte)0x97, (byte)0xA9, (byte)0x42, (byte)0xE8,
+        (byte)0x9C, (byte)0x71, (byte)0x99, (byte)0x94,
+        (byte)0x91, (byte)0xE3, (byte)0xAF, (byte)0xAC
+    };
+    private static final byte[] MP4_UUID_TYPE = {0x75, 0x75, 0x69, 0x64}; // "uuid"
 
-        File file = new File(filePath);
-        byte[] original = readAllBytes(file);
-        if (original == null) {
-            Log.e(TAG, "Failed to read MP4");
-            return false;
-        }
-
-        byte[] xmpUuid = {
-                (byte)0xBE, (byte)0x7A, (byte)0xCF, (byte)0xCB,
-                (byte)0x97, (byte)0xA9, (byte)0x42, (byte)0xE8,
-                (byte)0x9C, (byte)0x71, (byte)0x99, (byte)0x94,
-                (byte)0x91, (byte)0xE3, (byte)0xAF, (byte)0xAC
-        };
-
-        int atomSize = 8 + 16 + xmpBytes.length;
-        byte[] atom = new byte[atomSize];
-
-        atom[0] = (byte)((atomSize >> 24) & 0xFF);
-        atom[1] = (byte)((atomSize >> 16) & 0xFF);
-        atom[2] = (byte)((atomSize >> 8) & 0xFF);
-        atom[3] = (byte)(atomSize & 0xFF);
-        atom[4] = 0x75; // u
-        atom[5] = 0x75; // u
-        atom[6] = 0x69; // i
-        atom[7] = 0x64; // d
-        System.arraycopy(xmpUuid, 0, atom, 8, 16);
-        System.arraycopy(xmpBytes, 0, atom, 24, xmpBytes.length);
-
-        byte[] cleaned = removeMp4Xmp(original, xmpUuid);
-
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        out.write(cleaned);
-        out.write(atom);
-
-        FileOutputStream fos = new FileOutputStream(filePath);
-        fos.write(out.toByteArray());
-        fos.close();
-
-        Log.d(TAG, "MP4 XMP written successfully");
-        return true;
-
-    } catch (Exception e) {
-        Log.e(TAG, "MP4 write failed: " + e.getMessage());
-        return false;
+    private static long readU32(byte[] b, int off) {
+        return ((long) (b[off] & 0xFF) << 24)
+             | ((long) (b[off + 1] & 0xFF) << 16)
+             | ((long) (b[off + 2] & 0xFF) << 8)
+             | ((long) (b[off + 3] & 0xFF));
     }
-}
 
-    private static byte[] removeMp4Xmp(byte[] data, byte[] uuid) {
-        try {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            int pos = 0;
-            while (pos < data.length - 8) {
-                int size = readInt(data, pos);
-                if (size < 8 || pos + size > data.length) {
-                    out.write(data, pos, data.length - pos);
-                    break;
-                }
-                // Check if uuid atom with XMP uuid
-                boolean isXmpAtom = data[pos+4] == 0x75 && data[pos+5] == 0x75
-                    && data[pos+6] == 0x69 && data[pos+7] == 0x64
-                    && pos + 24 <= data.length
-                    && matchesUuid(data, pos + 8, uuid);
+    private static void writeU32(byte[] b, int off, long v) {
+        b[off]     = (byte) ((v >> 24) & 0xFF);
+        b[off + 1] = (byte) ((v >> 16) & 0xFF);
+        b[off + 2] = (byte) ((v >> 8)  & 0xFF);
+        b[off + 3] = (byte) (v & 0xFF);
+    }
 
-                if (!isXmpAtom) {
-                    out.write(data, pos, size);
-                }
-                pos += size;
+    private static void writeMp4Stream(InputStream in, OutputStream out,
+                                       byte[] buf, List<String> tags) throws IOException {
+        byte[] header  = new byte[8];   // size(4) + type(4)
+        byte[] uuidBuf = new byte[16];
+        boolean wroteAny = false;
+
+        while (true) {
+            int got = readUpTo(in, header, 8);
+            if (got == 0) break;                      // clean EOF: append ours below
+            if (got < 8) { out.write(header, 0, got); copyRest(in, out, buf); break; }
+
+            long size = readU32(header, 0);
+            int headerLen = 8;
+            byte[] lsHeader = null;                    // 64-bit largesize, if used
+            if (size == 1) {
+                lsHeader = new byte[8];
+                readFully(in, lsHeader);
+                long hi = readU32(lsHeader, 0);
+                long lo = readU32(lsHeader, 4);
+                size = (hi << 32) | lo;
+                headerLen = 16;
             }
-            return out.toByteArray();
-        } catch (Exception e) {
-            return data;
+
+            boolean toEof = (size == 0);
+            if (!toEof && size < headerLen) throw new IOException("Bad MP4 atom");
+
+            boolean isUuidType = header[4] == 0x75 && header[5] == 0x75
+                              && header[6] == 0x69 && header[7] == 0x64;
+
+            long body = toEof ? -1 : size - headerLen;
+
+            if (isUuidType && !toEof && body >= 16) {
+                readFully(in, uuidBuf);
+                if (eq(uuidBuf, XMP_UUID)) {
+                    skipFully(in, body - 16);          // drop stale XMP atom
+                    continue;
+                }
+                // Not an XMP uuid atom: replay header + uuid, then copy rest
+                out.write(header, 0, 8);
+                if (lsHeader != null) out.write(lsHeader);
+                out.write(uuidBuf);
+                copyBytes(in, out, buf, body - 16);
+                wroteAny = true;
+                continue;
+            }
+
+            out.write(header, 0, 8);
+            if (lsHeader != null) out.write(lsHeader);
+            if (toEof) {
+                copyRest(in, out, buf);
+                wroteAny = true;
+                break;
+            }
+            copyBytes(in, out, buf, body);
+            wroteAny = true;
         }
-    }
 
-    private static boolean matchesUuid(byte[] data, int offset, byte[] uuid) {
-        for (int i = 0; i < uuid.length; i++) {
-            if (data[offset + i] != uuid[i]) return false;
-        }
-        return true;
-    }
+        if (!wroteAny) throw new IOException("Empty MP4");
 
-    // ── Shared helpers ────────────────────────────────────────────────────────
-
-    private static int readInt(byte[] data, int offset) {
-        return ((data[offset] & 0xFF) << 24)
-             | ((data[offset+1] & 0xFF) << 16)
-             | ((data[offset+2] & 0xFF) << 8)
-             |  (data[offset+3] & 0xFF);
-    }
-
-    private static byte[] readAllBytes(File file) {
-    if (!file.exists() || file.length() > Integer.MAX_VALUE) return null;
-    try (FileInputStream fis = new FileInputStream(file)) {
-        byte[] data = new byte[(int) file.length()];
-        int offset = 0;
-        int remaining = data.length;
-        while (remaining > 0) {
-            int read = fis.read(data, offset, remaining);
-            if (read < 0) break;
-            offset += read;
-            remaining -= read;
-        }
-        return (offset == data.length) ? data : Arrays.copyOf(data, offset);
-    } catch (IOException e) {
-        Log.e(TAG, "readAllBytes failed: " + e.getMessage());
-        return null;
-    }
-}
-
-    private static String escapeXml(String s) {
-        return s.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&apos;");
+        byte[] xmpBytes = buildXmp(tags);
+        long atomSize = 8 + 16 + xmpBytes.length;
+        if (atomSize > 0xFFFFFFFFL - 24) throw new IOException("XMP too large");
+        byte[] head = new byte[8 + 16];
+        writeU32(head, 0, atomSize);
+        head[4] = MP4_UUID_TYPE[0]; head[5] = MP4_UUID_TYPE[1];
+        head[6] = MP4_UUID_TYPE[2]; head[7] = MP4_UUID_TYPE[3];
+        System.arraycopy(XMP_UUID, 0, head, 8, 16);
+        out.write(head);
+        out.write(xmpBytes);
     }
 
     // ── Strip metadata ────────────────────────────────────────────────────────
 
     /**
-     * Strip all JPEG metadata (EXIF, XMP, IPTC, comments) from a file.
-     * If keepOrientation is true, the EXIF Orientation tag is preserved.
-     * Re-encodes the image data without any APP1/APP13/COM segments.
+     * Strip JPEG metadata (APP1 EXIF/XMP, APP13 IPTC, APP2 ICC, COM comments)
+     * in one streaming pass. If keepOrientation is set, a pre-pass locates the
+     * EXIF orientation byte (reading only segment headers + the EXIF payload)
+     * and re-injects a minimal EXIF APP1 right after the SOI.
      */
     public static boolean stripJpegMetadata(String filePath, boolean keepOrientation) {
-        try {
-            RandomAccessFile raf = new RandomAccessFile(filePath, "r");
-            byte[] original = new byte[(int) raf.length()];
-            raf.readFully(original);
-            raf.close();
+        File file = new File(filePath);
+        if (!file.exists() || !file.canWrite()) return false;
 
-            if (original.length < 2 ||
-                ((original[0] & 0xFF) << 8 | (original[1] & 0xFF)) != JPEG_SOI) {
-                Log.e(TAG, "Not a valid JPEG for strip");
-                return false;
+        byte[] orientationSegment = null;
+        if (keepOrientation) {
+            try {
+                orientationSegment = findExifOrientationSegment(file);
+            } catch (Exception e) {
+                Log.w(TAG, "Orientation pre-scan failed: " + e.getMessage());
+            }
+        }
+
+        final byte[] orientSeg = orientationSegment;
+        return transform(file, new StreamTransform() {
+            @Override
+            public void run(InputStream in, OutputStream out, byte[] buf) throws IOException {
+                stripJpegStream(in, out, buf, orientSeg);
+            }
+        });
+    }
+
+    private static void stripJpegStream(InputStream in, OutputStream out,
+                                        byte[] buf, byte[] orientationSegment) throws IOException {
+        int soi0 = in.read();
+        int soi1 = in.read();
+        if (soi0 != 0xFF || soi1 != 0xD8) throw new IOException("Not a valid JPEG");
+
+        out.write(0xFF);
+        out.write(0xD8);
+        if (orientationSegment != null) out.write(orientationSegment);
+
+        while (true) {
+            int b0 = in.read();
+            if (b0 < 0) return;
+            if (b0 != 0xFF) { out.write(b0); copyRest(in, out, buf); return; }
+            int marker = in.read();
+            if (marker < 0) { out.write(b0); return; }
+            if (marker == 0xFF) { out.write(0xFF); continue; }
+
+            if (isStandaloneMarker(marker)) {
+                out.write(0xFF); out.write(marker);
+                continue;
             }
 
-            // Extract orientation byte before stripping (if requested)
-            byte[] orientationSegment = null;
-            if (keepOrientation) {
-                orientationSegment = extractExifOrientation(original);
+            if (marker == 0xDA) {           // SOS + scan data: verbatim
+                out.write(0xFF); out.write(marker);
+                copyRest(in, out, buf);
+                return;
             }
 
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            // Write SOI
-            out.write(original[0]);
-            out.write(original[1]);
+            int hi = in.read(), lo = in.read();
+            if (hi < 0 || lo < 0) throw new EOFException("Truncated JPEG segment");
+            int segLen = ((hi & 0xFF) << 8) | (lo & 0xFF);
+            if (segLen < 2) throw new IOException("Bad JPEG segment length");
+            int payload = segLen - 2;
 
-            int pos = 2;
-            boolean passedSos = false;
-            while (pos < original.length - 1) {
-                int marker = ((original[pos] & 0xFF) << 8) | (original[pos + 1] & 0xFF);
-                if ((marker & 0xFF00) != 0xFF00) {
-                    if (!passedSos) break;
-                    // After SOS, raw scan data — copy verbatim
-                    out.write(original, pos, original.length - pos);
-                    break;
-                }
-                if (pos + 3 >= original.length) break;
-                int segLen = ((original[pos + 2] & 0xFF) << 8) | (original[pos + 3] & 0xFF);
-
-                if (marker == 0xFFDA) {
-                    // SOS — keep this marker and everything after
-                    out.write(original, pos, original.length - pos);
-                    passedSos = true;
-                    break;
-                }
-
-                // Keep SOF, DQT, DHT, SOF markers (image structure)
-                // Strip: APP1 (EXIF/XMP), APP13 (IPTC/Photoshop), COM (comment), APP2 (ICC)
-                boolean keep = (marker == 0xFFC0 || marker == 0xFFC2 ||  // SOF0/SOF2
-                                marker == 0xFFC4 ||                       // DHT
-                                marker == 0xFFDB ||                       // DQT
-                                marker == 0xFFDD ||                       // DRI
-                                marker == 0xFFEE);                        // APP14 (Adobe)
-                // Also keep DQT (0xFFDB), DHT (0xFFC4)
-                if (!keep && marker != 0xFFE1 && marker != 0xFFED && marker != 0xFFFE && marker != 0xFFE2) {
-                    // Keep unknown APP markers that are not EXIF/IPTC/Comment
-                    if ((marker & 0xFFF0) == 0xFFE0 && marker != 0xFFE0) {
-                        // Other APPn — strip
-                    } else if (marker != 0xFFE1 && marker != 0xFFED && marker != 0xFFFE && marker != 0xFFE2) {
-                        keep = true;
-                    }
-                }
-                // Keep: SOF(0xC0-0xCF except EXIF), DHT(0xC4), DQT(0xDB), DRI(0xDD)
-                // Strip: APP1(0xE1=EXIF/XMP), APP13(0xED=IPTC), COM(0xFE), APP2(0xE2=ICC)
-                boolean isStructure = (marker >= 0xFFC0 && marker <= 0xFFC4) ||
-                                      marker == 0xFFDB || marker == 0xFFDD;
-                boolean isStrip = marker == JPEG_APP1 || marker == 0xFFED ||
-                                  marker == 0xFFFE || marker == 0xFFE2;
-
-                if (isStructure || !isStrip) {
-                    out.write(original, pos, 2 + segLen);
-                }
-                pos += 2 + segLen;
+            // Keep structural segments (SOF0..SOF15, DHT, DQT, DRI, APPn that
+            // are not EXIF/XMP/IPTC/ICC). Strip APP1, APP13, APP2, COM.
+            boolean strip = marker == 0xE1 || marker == 0xED
+                         || marker == 0xE2 || marker == 0xFE;
+            if (strip) {
+                skipFully(in, payload);
+            } else {
+                out.write(0xFF); out.write(marker);
+                out.write(hi);   out.write(lo);
+                copyBytes(in, out, buf, payload);
             }
-
-            // If we kept orientation, re-inject a minimal EXIF with just orientation
-            if (orientationSegment != null) {
-                // Insert orientation segment right after SOI
-                byte[] fullOut = out.toByteArray();
-                out.reset();
-                out.write(fullOut[0]);
-                out.write(fullOut[1]);
-                out.write(orientationSegment);
-                out.write(fullOut, 2, fullOut.length - 2);
-            }
-
-            FileOutputStream fos = new FileOutputStream(filePath);
-            fos.write(out.toByteArray());
-            fos.close();
-
-            Log.d(TAG, "JPEG metadata stripped");
-            return true;
-
-        } catch (Exception e) {
-            Log.e(TAG, "JPEG strip failed: " + e.getMessage());
-            return false;
         }
     }
 
-    /**
-     * Build a minimal EXIF APP1 segment that contains only the Orientation tag.
-     * Returns null if orientation not found in original.
-     */
-    private static byte[] extractExifOrientation(byte[] data) {
+    /** Strip a PNG down to critical chunks (IHDR, PLTE, IDAT, IEND). */
+    public static boolean stripPngMetadata(String filePath) {
+        File file = new File(filePath);
+        if (!file.exists() || !file.canWrite()) return false;
+        return transform(file, new StreamTransform() {
+            @Override
+            public void run(InputStream in, OutputStream out, byte[] buf) throws IOException {
+                stripPngStream(in, out, buf);
+            }
+        });
+    }
+
+    private static final byte[] PNG_IHDR = {0x49, 0x48, 0x44, 0x52};
+    private static final byte[] PNG_PLTE = {0x50, 0x4C, 0x54, 0x45};
+    private static final byte[] PNG_IDAT = {0x49, 0x44, 0x41, 0x54};
+
+    private static void stripPngStream(InputStream in, OutputStream out,
+                                       byte[] buf) throws IOException {
+        byte[] sig = new byte[8];
+        readFully(in, sig);
+        for (int i = 0; i < 8; i++) {
+            if (sig[i] != PNG_SIGNATURE[i]) throw new IOException("Not a valid PNG");
+        }
+        out.write(sig);
+        byte[] header = new byte[8];
+        while (true) {
+            int got = readUpTo(in, header, 8);
+            if (got == 0) return;
+            if (got < 8) { out.write(header, 0, got); copyRest(in, out, buf); return; }
+
+            long chunkLen = ((long) (header[0] & 0xFF) << 24)
+                          | ((long) (header[1] & 0xFF) << 16)
+                          | ((long) (header[2] & 0xFF) << 8)
+                          | ((long) (header[3] & 0xFF));
+            if (chunkLen > Integer.MAX_VALUE - 12) throw new IOException("Bad PNG chunk");
+            byte[] type = {header[4], header[5], header[6], header[7]};
+            long bodyPlusCrc = chunkLen + 4;
+
+            boolean keep = eq(type, PNG_IHDR) || eq(type, PNG_PLTE)
+                        || eq(type, PNG_IDAT) || eq(type, PNG_IEND);
+            if (keep) {
+                out.write(header, 0, 8);
+                copyBytes(in, out, buf, bodyPlusCrc);
+            } else {
+                skipFully(in, bodyPlusCrc);
+            }
+            if (eq(type, PNG_IEND)) { copyRest(in, out, buf); return; }
+        }
+    }
+
+    // ── EXIF orientation (pre-scan reads < 128 KB) ────────────────────────────
+
+    private static byte[] findExifOrientationSegment(File file) throws IOException {
+        try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+            if (raf.read() != 0xFF || raf.read() != 0xD8) return null;
+            while (true) {
+                int marker;
+                do { marker = raf.read(); } while (marker == 0xFF); // skip fill bytes
+                if (marker < 0) return null;
+                // Note: after the FF-skip loop, `marker` IS the segment code
+                // (E1, DB, C0, …) — not a prefix. Do not read twice here.
+                if (isStandaloneMarker(marker)) continue;
+                if (marker == 0xDA) return null;              // SOS: no more headers
+                int hi = raf.read(), lo = raf.read();
+                if (hi < 0 || lo < 0) return null;
+                int segLen = ((hi & 0xFF) << 8) | (lo & 0xFF);
+                if (segLen < 2) return null;
+                int payload = segLen - 2;
+                if (marker == 0xE1 && payload >= 6 && payload <= MAX_JPEG_SEGMENT) {
+                    byte[] seg = new byte[payload];
+                    raf.readFully(seg);
+                    String header = new String(seg, 0, 6, StandardCharsets.US_ASCII);
+                    if ("Exif\0\0".equals(header)) {
+                        return extractOrientationFromExif(seg);
+                    }
+                } else {
+                    long skipped = raf.skipBytes(payload);
+                    if (skipped < payload) return null;
+                }
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** seg = APP1 payload starting with "Exif\0\0". */
+    private static byte[] extractOrientationFromExif(byte[] seg) {
         try {
-            // Search for EXIF APP1 and extract orientation byte
-            int pos = 2;
-            while (pos < data.length - 4) {
-                int marker = ((data[pos] & 0xFF) << 8) | (data[pos + 1] & 0xFF);
-                if ((marker & 0xFF00) != 0xFF00) break;
-                if (pos + 3 >= data.length) break;
-                int segLen = ((data[pos + 2] & 0xFF) << 8) | (data[pos + 3] & 0xFF);
-                if (marker == 0xFFE1) {
-                    // Check if it's EXIF
-                    if (pos + 10 < data.length) {
-                        String header = new String(data, pos + 4, 6, StandardCharsets.US_ASCII);
-                        if ("Exif\0\0".equals(header)) {
-                            // Find orientation tag (0x0112) in IFD0
-                            // Byte order at offset pos+10+8 = pos+18
-                            int tiffStart = pos + 10; // after "Exif\0\0"
-                            if (tiffStart + 8 < data.length) {
-                                boolean bigEndian;
-                                if (data[tiffStart] == 'M' && data[tiffStart + 1] == 'M') {
-                                    bigEndian = true;
-                                } else if (data[tiffStart] == 'I' && data[tiffStart + 1] == 'I') {
-                                    bigEndian = false;
-                                } else {
-                                    return null;
-                                }
-                                int ifd0Offset = readShort(data, tiffStart + 4, bigEndian, tiffStart);
-                                int entryPos = tiffStart + ifd0Offset;
-                                if (entryPos + 2 >= data.length) return null;
-                                int entryCount = readShort(data, entryPos, bigEndian, 0);
-                                for (int i = 0; i < entryCount; i++) {
-                                    int ePos = entryPos + 2 + (i * 12);
-                                    if (ePos + 12 > data.length) break;
-                                    int tag = readShort(data, ePos, bigEndian, 0);
-                                    if (tag == 0x0112) {
-                                        int orientation = readShort(data, ePos + 8, bigEndian, 0);
-                                        if (orientation >= 1 && orientation <= 8) {
-                                            return buildMinimalExifOrientation((byte) orientation, bigEndian);
-                                        }
-                                    }
-                                }
-                            }
-                        }
+            int tiff = 6; // after Exif\0\0
+            if (seg.length < tiff + 8) return null;
+            boolean bigEndian;
+            if (seg[tiff] == 'M' && seg[tiff + 1] == 'M') bigEndian = true;
+            else if (seg[tiff] == 'I' && seg[tiff + 1] == 'I') bigEndian = false;
+            else return null;
+
+            // Offset to IFD0 is a 4-byte value (reading only 2 bytes yields 0
+            // for every standards-compliant EXIF header).
+            long ifd0 = readU32Endian(seg, tiff + 4, bigEndian);
+            int entryPos = tiff + (int) ifd0;
+            if (entryPos + 2 > seg.length) return null;
+            int count = readU16(seg, entryPos, bigEndian);
+            for (int i = 0; i < count; i++) {
+                int ePos = entryPos + 2 + i * 12;
+                if (ePos + 12 > seg.length) break;
+                int tag = readU16(seg, ePos, bigEndian);
+                if (tag == 0x0112) {
+                    int orientation = readU16(seg, ePos + 8, bigEndian);
+                    if (orientation >= 1 && orientation <= 8) {
+                        return buildMinimalExifOrientation((byte) orientation, bigEndian);
                     }
                     return null;
                 }
-                pos += 2 + segLen;
             }
-        } catch (Exception e) {
-            Log.w(TAG, "Could not extract orientation: " + e.getMessage());
-        }
+        } catch (Exception ignored) {}
         return null;
     }
 
-    private static int readShort(byte[] data, int offset, boolean bigEndian, int tiffBase) {
-        // For IFD offset calculation: value is relative to tiffBase
-        // But for tag values stored inline, tiffBase should be 0
-        if (bigEndian) {
-            return ((data[offset] & 0xFF) << 8) | (data[offset + 1] & 0xFF);
-        } else {
-            return (data[offset] & 0xFF) | ((data[offset + 1] & 0xFF) << 8);
-        }
+    private static int readU16(byte[] d, int off, boolean bigEndian) {
+        if (bigEndian) return ((d[off] & 0xFF) << 8) | (d[off + 1] & 0xFF);
+        return (d[off] & 0xFF) | ((d[off + 1] & 0xFF) << 8);
     }
 
-    private static byte[] readInt32ForIfd(byte[] data, int offset, boolean bigEndian) {
-        byte[] result = new byte[4];
+    private static long readU32Endian(byte[] d, int off, boolean bigEndian) {
         if (bigEndian) {
-            result[0] = data[offset]; result[1] = data[offset + 1];
-            result[2] = data[offset + 2]; result[3] = data[offset + 3];
-        } else {
-            result[0] = data[offset + 3]; result[1] = data[offset + 2];
-            result[2] = data[offset + 1]; result[3] = data[offset];
+            return ((long) (d[off] & 0xFF) << 24)
+                 | ((long) (d[off + 1] & 0xFF) << 16)
+                 | ((long) (d[off + 2] & 0xFF) << 8)
+                 | ((long) (d[off + 3] & 0xFF));
         }
-        return result;
+        return ((long) (d[off] & 0xFF))
+             | ((long) (d[off + 1] & 0xFF) << 8)
+             | ((long) (d[off + 2] & 0xFF) << 16)
+             | ((long) (d[off + 3] & 0xFF) << 24);
     }
 
-    /**
-     * Build a minimal EXIF APP1 segment with just the Orientation tag (0x0112).
-     */
+    /** Minimal EXIF APP1 segment containing only the Orientation tag. */
     private static byte[] buildMinimalExifOrientation(byte orientation, boolean bigEndian) {
         try {
             ByteArrayOutputStream exif = new ByteArrayOutputStream();
-            // "Exif\0\0" header
             exif.write("Exif\0\0".getBytes(StandardCharsets.US_ASCII));
-
-            // TIFF header
-            if (bigEndian) {
-                exif.write('M'); exif.write('M');
-            } else {
-                exif.write('I'); exif.write('I');
-            }
-            // TIFF magic (42)
+            if (bigEndian) { exif.write('M'); exif.write('M'); }
+            else           { exif.write('I'); exif.write('I'); }
             if (bigEndian) { exif.write(0x00); exif.write(0x2A); }
-            else { exif.write(0x2A); exif.write(0x00); }
-            // IFD0 offset (8)
+            else           { exif.write(0x2A); exif.write(0x00); }
             if (bigEndian) { exif.write(0x00); exif.write(0x00); exif.write(0x00); exif.write(0x08); }
-            else { exif.write(0x08); exif.write(0x00); exif.write(0x00); exif.write(0x00); }
-
-            // IFD0: 1 entry
-            if (bigEndian) { exif.write(0x00); exif.write(0x01); } // 1 entry
-            else { exif.write(0x01); exif.write(0x00); }
-
-            // Tag 0x0112 (Orientation)
+            else           { exif.write(0x08); exif.write(0x00); exif.write(0x00); exif.write(0x00); }
+            if (bigEndian) { exif.write(0x00); exif.write(0x01); }
+            else           { exif.write(0x01); exif.write(0x00); }
             if (bigEndian) { exif.write(0x01); exif.write(0x12); }
-            else { exif.write(0x12); exif.write(0x01); }
-            // Type: SHORT (3)
+            else           { exif.write(0x12); exif.write(0x01); }
             if (bigEndian) { exif.write(0x00); exif.write(0x03); }
-            else { exif.write(0x03); exif.write(0x00); }
-            // Count: 1
+            else           { exif.write(0x03); exif.write(0x00); }
             if (bigEndian) { exif.write(0x00); exif.write(0x00); exif.write(0x00); exif.write(0x01); }
-            else { exif.write(0x01); exif.write(0x00); exif.write(0x00); exif.write(0x00); }
-            // Value (orientation, in upper byte for SHORT)
+            else           { exif.write(0x01); exif.write(0x00); exif.write(0x00); exif.write(0x00); }
             if (bigEndian) { exif.write(0x00); exif.write(orientation); exif.write(0x00); exif.write(0x00); }
-            else { exif.write(orientation); exif.write(0x00); exif.write(0x00); exif.write(0x00); }
-            // Next IFD offset (0 = none)
+            else           { exif.write(orientation); exif.write(0x00); exif.write(0x00); exif.write(0x00); }
             exif.write(0x00); exif.write(0x00); exif.write(0x00); exif.write(0x00);
 
             byte[] exifData = exif.toByteArray();
-            int totalLen = 2 + exifData.length; // length field includes itself
+            int totalLen = 2 + exifData.length;
             byte[] app1 = new byte[2 + totalLen];
             app1[0] = (byte) 0xFF;
             app1[1] = (byte) 0xE1;
@@ -641,66 +730,6 @@ public class MetadataWriter {
             return app1;
         } catch (Exception e) {
             return null;
-        }
-    }
-
-    /**
-     * Strip all metadata from a PNG file (iTXt, tEXt, zTXt chunks).
-     * Keeps only critical chunks: IHDR, PLTE, IDAT, IEND.
-     */
-    public static boolean stripPngMetadata(String filePath) {
-        try {
-            File file = new File(filePath);
-            byte[] original = readAllBytes(file);
-            if (original == null) {
-                Log.e(TAG, "Failed to read PNG for strip");
-                return false;
-            }
-
-            // Validate PNG signature
-            for (int i = 0; i < PNG_SIGNATURE.length; i++) {
-                if (original[i] != PNG_SIGNATURE[i]) {
-                    Log.e(TAG, "Not a valid PNG for strip");
-                    return false;
-                }
-            }
-
-            // Critical chunks to keep
-            byte[] IHDR = {0x49, 0x48, 0x44, 0x52};
-            byte[] PLTE = {0x50, 0x4C, 0x54, 0x45};
-            byte[] IDAT = {0x49, 0x44, 0x41, 0x54};
-
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            out.write(PNG_SIGNATURE);
-
-            int pos = 8;
-            while (pos < original.length - 4) {
-                int chunkLen = readInt(original, pos);
-                byte[] chunkType = Arrays.copyOfRange(original, pos + 4, pos + 8);
-
-                // Keep IHDR, PLTE, IDAT, IEND
-                boolean isCritical = Arrays.equals(chunkType, IHDR) ||
-                                     Arrays.equals(chunkType, PLTE) ||
-                                     Arrays.equals(chunkType, IDAT) ||
-                                     Arrays.equals(chunkType, PNG_IEND);
-
-                if (isCritical) {
-                    out.write(original, pos, 12 + chunkLen);
-                }
-                // Skip ancillary chunks (iTXt, tEXt, zTXt, gAMA, sRGB, etc.)
-                pos += 12 + chunkLen;
-            }
-
-            FileOutputStream fos = new FileOutputStream(filePath);
-            fos.write(out.toByteArray());
-            fos.close();
-
-            Log.d(TAG, "PNG metadata stripped");
-            return true;
-
-        } catch (Exception e) {
-            Log.e(TAG, "PNG strip failed: " + e.getMessage());
-            return false;
         }
     }
 }

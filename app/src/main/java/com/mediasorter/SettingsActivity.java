@@ -138,6 +138,15 @@ public class SettingsActivity extends Activity {
         }));
         root.addView(windowSeek);
 
+        // ── Main window UI toggles ────────────────────────────────────────────
+        root.addView(makeTitle("Main Window"));
+        root.addView(makeToggleRow("D-Pad control",
+            gestureSettings.isDpadEnabled(),
+            enabled -> gestureSettings.setDpadEnabled(enabled)));
+        root.addView(makeToggleRow("Tag menus & prompts",
+            tagManager.isTagsEnabled(),
+            enabled -> tagManager.setTagsEnabled(enabled)));
+
         // ── Swipe gestures ────────────────────────────────────────────────────
         root.addView(makeTitle("Swipe Gestures"));
         root.addView(makeMultiGestureRow("Swipe Left",
@@ -797,6 +806,48 @@ root.addView(btnBulkActive);
     }
 
     // ── View helpers ──────────────────────────────────────────────────────────
+
+    /** Small callback for the toggle rows in "Main Window". */
+    private interface ToggleHandler {
+        void onToggle(boolean enabled);
+    }
+
+    /** Label + ON/OFF button row, matching the app's flat button style. */
+    private View makeToggleRow(String label, boolean initial, ToggleHandler handler) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = 4;
+        row.setLayoutParams(rowLp);
+
+        TextView lbl = makeLabel(label);
+        lbl.setLayoutParams(new LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(lbl);
+
+        Button btn = new Button(this);
+        btn.setTextColor(0xFFFFFFFF);
+        btn.setTextSize(12f);
+        final boolean[] state = {initial};
+        btn.setText(state[0] ? "ON" : "OFF");
+        btn.setBackgroundColor(state[0] ? 0xFFE94560 : 0xFF2A2A3E);
+        btn.setOnClickListener(v -> {
+            state[0] = !state[0];
+            btn.setText(state[0] ? "ON" : "OFF");
+            btn.setBackgroundColor(state[0] ? 0xFFE94560 : 0xFF2A2A3E);
+            handler.onToggle(state[0]);
+        });
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        btn.setLayoutParams(btnLp);
+        row.addView(btn);
+        return row;
+    }
+
 
     private TextView makeTitle(String text) {
         TextView tv = new TextView(this);

@@ -502,6 +502,19 @@ public class MediaIndexer {
 
     // ── Delete file ───────────────────────────────────────────────────────────
 
+    /**
+     * Removes the path from the index, manifest and hash cache WITHOUT
+     * touching the file on disk. For callers that already moved the file
+     * themselves (e.g. "move to trash").
+     */
+    public void removeFromIndexOnly(String path) {
+        removeFromIndex(path);
+        removePersistedHash(path);
+        if (listener != null) {
+            try { listener.onFileRemoved(path); } catch (Exception ignored) {}
+        }
+    }
+
     public boolean deleteFile(String path) {
         File f = new File(path);
         boolean deleted = f.exists() && f.delete();

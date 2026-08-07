@@ -1,5 +1,6 @@
 package com.mediasorter;
 
+import com.mediasorter.features.RandomGenerator;
 import com.mediasorter.models.MediaFile;
 import java.util.Collections;
 import java.util.List;
@@ -10,7 +11,7 @@ public class SortManager {
         NAME_ASC, NAME_DESC,
         SIZE_ASC, SIZE_DESC,
         DATE_ASC, DATE_DESC,
-        TYPE
+        TYPE, SHUFFLE
     }
 
     private SortBy current = SortBy.NAME_ASC;
@@ -48,6 +49,21 @@ public class SortManager {
                 Collections.sort(files, (a, b) ->
                     a.getType().name().compareTo(b.getType().name()));
                 break;
+            case SHUFFLE:
+                shuffle(files);
+                break;
+        }
+    }
+
+    /** Fisher–Yates shuffle driven by RandomGenerator so the order is
+     *  different every time "Shuffle" is picked from the sort menu. */
+    private void shuffle(List<MediaFile> files) {
+        for (int i = files.size() - 1; i > 0; i--) {
+            int j = RandomGenerator.pick(i + 1);
+            if (j < 0 || j == i) continue;
+            MediaFile tmp = files.get(i);
+            files.set(i, files.get(j));
+            files.set(j, tmp);
         }
     }
 
@@ -60,6 +76,7 @@ public class SortManager {
             case DATE_ASC:  return "Date ↑";
             case DATE_DESC: return "Date ↓";
             case TYPE:      return "Type";
+            case SHUFFLE:   return "Shuffle";
             default:        return "Sort";
         }
     }

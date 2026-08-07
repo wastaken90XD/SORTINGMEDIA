@@ -183,13 +183,42 @@ public class ColorAnalyzer {
         return results;
     }
 
+    /**
+     * Decode an image down to ~256px on its long edge with OOM defense.
+     * The previous fixed inSampleSize=4 still produced ~100 MP bitmaps for
+     * huge photos (~400 MB) and the uncaught OutOfMemoryError crashed the
+     * whole analysis run. Retries once with a doubled sample size on OOM.
+     */
+    private static Bitmap decodeForAnalysis(String path) {
+        BitmapFactory.Options b = new BitmapFactory.Options();
+        try {
+            b.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(path, b);
+            if (b.outWidth <= 0 || b.outHeight <= 0) return null;
+            int sample = 1;
+            int longest = Math.max(b.outWidth, b.outHeight);
+            while (longest / (sample * 2) > 256) sample *= 2;
+            b.inJustDecodeBounds = false;
+            b.inSampleSize = sample;
+            return BitmapFactory.decodeFile(path, b);
+        } catch (OutOfMemoryError e) {
+            try {
+                b.inJustDecodeBounds = false;
+                b.inSampleSize = Math.max(2, b.inSampleSize * 2);
+                return BitmapFactory.decodeFile(path, b);
+            } catch (OutOfMemoryError | Exception e2) {
+                return null;
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     // ── Color extraction (now respects Options) ───────────────────────────────
 
     private static float[][] extractLabColors(String path, Options opts) {
         int topN = opts.topN;
-        BitmapFactory.Options bopts = new BitmapFactory.Options();
-        bopts.inSampleSize = 4;
-        Bitmap bmp = BitmapFactory.decodeFile(path, bopts);
+        Bitmap bmp = decodeForAnalysis(path);
         if (bmp == null) throw new RuntimeException("decode failed");
 
         Bitmap scaled = Bitmap.createScaledBitmap(bmp, SAMPLE, SAMPLE, false);

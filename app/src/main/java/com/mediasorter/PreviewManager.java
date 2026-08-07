@@ -68,6 +68,7 @@ public class PreviewManager {
     private LinearLayout tagSidePanel;
     private Spinner      tagListSpinner;
     private RecyclerView sidePanelTagList;
+    private View         dpadContainer;
     private View         gestureOverlay;
     private TextView     swipeLeftLabel, swipeRightLabel, swipeUpLabel, swipeDownLabel;
 
@@ -79,6 +80,14 @@ public class PreviewManager {
     private ThumbnailLoader      thumbnailLoader;
 
     private boolean panelVisible = false;
+
+    // Path of the file most recently passed to load(); decode tasks that
+    // finish for any older path discard their bitmap instead of showing it.
+    private volatile String  currentPath = null;
+    // Bitmap decoded by loadImage itself (never a cached thumbnail!) that is
+    // currently owned by us; recycled once it is replaced or released.
+    private Bitmap           ownBitmap   = null;
+    private volatile boolean released    = false;
 
     // Zoom state
     private float scaleFactor = 1.0f;
@@ -135,6 +144,7 @@ public class PreviewManager {
         tagSidePanel       = root.findViewById(R.id.tagSidePanel);
         tagListSpinner     = root.findViewById(R.id.tagListSpinner);
         sidePanelTagList   = root.findViewById(R.id.sidePanelTagList);
+        dpadContainer      = root.findViewById(R.id.dpadContainer);
         gestureOverlay     = root.findViewById(R.id.gestureOverlay);
         swipeLeftLabel     = root.findViewById(R.id.swipeLeftLabel);
         swipeRightLabel    = root.findViewById(R.id.swipeRightLabel);
@@ -167,6 +177,13 @@ public class PreviewManager {
         swipeRightLabel.setOnLongClickListener(showOverlay);
         swipeUpLabel.setOnLongClickListener(showOverlay);
         swipeDownLabel.setOnLongClickListener(showOverlay);
+    }
+
+    /** Show/hide the whole floating D-pad (Settings → Main Window toggle). */
+    public void setDpadVisible(boolean visible) {
+        if (dpadContainer != null) {
+            dpadContainer.setVisibility(visible ? View.VISIBLE : View.GONE);
+        }
     }
 
     // ── Panel toggle ──────────────────────────────────────────────────────────
@@ -324,9 +341,20 @@ public class PreviewManager {
     public void setSwipeDetector(GestureDetector d) { this.swipeDetector = d; }
     public void setActionListener(ActionListener l) { this.actionListener = l; }
 
+    /**
+     * Preferred way to hand the shared thumbnail cache to the preview.
+     * The constructor's reflection-based lookup stays only as a fallback for
+     * old call sites.
+     */
+    public void setThumbnailLoader(ThumbnailLoader loader) {
+        if (loader != null) this.thumbnailLoader = loader;
+    }
+
     // ── Load ──────────────────────────────────────────────────────────────────
 
     public void load(MediaFile file) {
+        if (released || file == null) return;
+        currentPath = file.getPath();
         stopMedia();
         hideAll();
         resetZoom();
@@ -354,43 +382,88 @@ public class PreviewManager {
 
     // ── Image ─────────────────────────────────────────────────────────────────
 
-    private void loadImage(MediaFile file) {
+    private void loadImage(final MediaFile file) {
         // Show thumbnail immediately to avoid black preview while full image loads
         Bitmap thumb = thumbnailLoader != null
                 ? thumbnailLoader.getCachedThumbnail(file)   // fast path
                 : null;
-        if (thumb != null) {
+        if (thumb != null && !thumb.isRecycled()) {
             imagePreview.setVisibility(View.VISIBLE);
             imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
             imagePreview.setImageBitmap(thumb);
         }
 
-        executor.submit(() -> {
-            BitmapFactory.Options opts = new BitmapFactory.Options();
-            opts.inJustDecodeBounds = true;
-            BitmapFactory.decodeFile(file.getPath(), opts);
-            opts.inSampleSize       = calcSampleSize(opts, 1920, 1080);
-            opts.inJustDecodeBounds = false;
-            Bitmap bmp = BitmapFactory.decodeFile(file.getPath(), opts);
+        if (released || executor.isShutdown()) return;
+        final String path = file.getPath();
+        try {
+            executor.submit(() -> {
+                if (released) return;
+                Bitmap bmp = decodeSampled(path, 1920, 1080);
 
-            mainHandler.post(() -> {
-                if (bmp != null) {
-                    imagePreview.setVisibility(View.VISIBLE);
-                    imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                    imagePreview.setImageBitmap(bmp);
-                    imagePreview.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-                    imagePreview.post(() -> {
-                        if (imagePreview.getWidth() > 0 && imagePreview.getHeight() > 0) {
-                            imagePreview.setScaleType(ImageView.ScaleType.MATRIX);
-                            Matrix m = new Matrix(imagePreview.getImageMatrix());
-                            imagePreview.setImageMatrix(m);
-                        }
-                    });
-                } else {
-                    showUnsupported("Could not decode image");
-                }
+                mainHandler.post(() -> {
+                    // Stale task: user has already navigated to another file.
+                    // Recycle instead of displaying the wrong image.
+                    if (released || !path.equals(currentPath)) {
+                        if (bmp != null && !bmp.isRecycled()) bmp.recycle();
+                        return;
+                    }
+                    if (bmp != null) {
+                        replaceOwnBitmap(bmp);
+                        imagePreview.setVisibility(View.VISIBLE);
+                        imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                        imagePreview.setImageBitmap(bmp);
+                        imagePreview.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                        imagePreview.post(() -> {
+                            if (imagePreview.getWidth() > 0 && imagePreview.getHeight() > 0) {
+                                imagePreview.setScaleType(ImageView.ScaleType.MATRIX);
+                                Matrix m = new Matrix(imagePreview.getImageMatrix());
+                                imagePreview.setImageMatrix(m);
+                            }
+                        });
+                    } else {
+                        showUnsupported("Could not decode image");
+                    }
+                });
             });
-        });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            // Released between the isShutdown() check and submit — harmlessly skip.
+        }
+    }
+
+    /**
+     * Bounds-then-sample decode with OOM defense: if even the sampled bitmap
+     * does not fit, retry with a doubled sample size once before giving up.
+     * Never throws OutOfMemoryError to the caller.
+     */
+    private Bitmap decodeSampled(String path, int reqW, int reqH) {
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+        try {
+            opts.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(path, opts);
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) return null;
+            opts.inSampleSize       = calcSampleSize(opts, reqW, reqH);
+            opts.inJustDecodeBounds = false;
+            return BitmapFactory.decodeFile(path, opts);
+        } catch (OutOfMemoryError e) {
+            try {
+                opts.inJustDecodeBounds = false;
+                opts.inSampleSize = Math.max(2, opts.inSampleSize * 2);
+                return BitmapFactory.decodeFile(path, opts);
+            } catch (OutOfMemoryError | Exception e2) {
+                return null;
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Take ownership of a freshly decoded preview bitmap; recycle the old one. */
+    private void replaceOwnBitmap(Bitmap next) {
+        Bitmap old = ownBitmap;
+        ownBitmap = next;
+        if (old != null && !old.isRecycled() && old != next) {
+            old.recycle();
+        }
     }
 
     private int calcSampleSize(BitmapFactory.Options opts, int reqW, int reqH) {
@@ -471,9 +544,18 @@ public class PreviewManager {
         if (videoPreview != null) videoPreview.stopPlayback();
     }
 
+    /**
+     * Release preview resources to prevent OOM/leaks: stops video, drops the
+     * decoded full-size bitmap, cancels pending UI callbacks and shuts the
+     * decode executor down. Any load() after release() becomes a no-op.
+     */
     public void release() {
+        released = true;
         stopMedia();
+        mainHandler.removeCallbacks(hideOverlayRunnable);
+        Bitmap old = ownBitmap;
+        ownBitmap = null;
+        if (old != null && !old.isRecycled()) old.recycle();
         executor.shutdown();
     }
 }
-// release preview resources to prevent OOM

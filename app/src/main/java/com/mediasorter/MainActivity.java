@@ -40,7 +40,6 @@ import com.mediasorter.RulesActivity;
 
 public class MainActivity extends Activity
         implements FolderWatcher.Listener, MediaIndexer.IndexListener {
-    private boolean disableTagsInMenu = true; // default disable to prevent unwanted prompts
 
     private BatchRenameManager batchRenameManager = new BatchRenameManager();
     private MediaIndexer    indexer;
@@ -66,6 +65,7 @@ public class MainActivity extends Activity
     private List<MediaFile> fullList     = new ArrayList<>();
     private List<MediaFile> currentFiles = new ArrayList<>();
     private static List<MediaFile> sLatestFullList = new ArrayList<>();
+    private static List<Tag>       sLatestTagList  = new ArrayList<>();
     private int             currentIndex = -1;
 
     private boolean refreshPending = false;
@@ -97,11 +97,37 @@ public class MainActivity extends Activity
     @Override
     protected void onResume() {
         super.onResume();
+        applyUiToggles();
         if (indexer.isScanning()) return;
         if (!indexer.getIndex().isEmpty()) {
             for (String folder : folderManager.getFolders()) {
                 indexer.rescan(folder);
             }
+        }
+    }
+
+    // ── UI toggles from Settings → "Main Window" ─────────────────────────────
+    // Applied on create and every resume so returning from SettingsActivity is
+    // instant: D-pad visibility and the whole tag panel follow the toggles.
+    private void applyUiToggles() {
+        if (previewManager != null && gestureSettings != null) {
+            previewManager.setDpadVisible(gestureSettings.isDpadEnabled());
+        }
+        applyTagsGate();
+    }
+
+    /** Force-hides the tag panel and marks the toggle when tags are disabled. */
+    private void applyTagsGate() {
+        Button btnToggle = findViewById(R.id.btnToggleTagPanel);
+        LinearLayout tagPanel = findViewById(R.id.tagPanel);
+        boolean enabled = tagManager == null || tagManager.isTagsEnabled();
+        if (!enabled && tagPanel != null) {
+            tagPanel.setVisibility(View.GONE);
+        }
+        if (btnToggle != null) {
+            syncTagToggleButton(btnToggle,
+                    enabled && tagPanel != null
+                            && tagPanel.getVisibility() == View.VISIBLE);
         }
     }
 
@@ -126,6 +152,11 @@ public class MainActivity extends Activity
                 
     public static List<MediaFile> getLatestFullList() {
             return sLatestFullList;
+    }
+
+    /** Latest tag snapshot for DashboardActivity (avoids giant Intent extras). */
+    public static List<Tag> getLatestTagList() {
+            return sLatestTagList;
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
@@ -227,6 +258,8 @@ public class MainActivity extends Activity
         FrameLayout previewContainer = findViewById(R.id.previewPanel);
         getLayoutInflater().inflate(R.layout.panel_preview, previewContainer, true);
         previewManager = new PreviewManager(this, previewContainer, fileStatus);
+        previewManager.setThumbnailLoader(thumbnailLoader);
+        applyUiToggles();
 
         previewManager.setActionListener(new PreviewManager.ActionListener() {
             @Override public void onSkip()   { handleSkip(); }
@@ -414,10 +447,11 @@ public class MainActivity extends Activity
         findViewById(R.id.btnGroupBy).setOnClickListener(v -> showGroupMenu(v));
 
         findViewById(R.id.btnDashboard).setOnClickListener(v -> {
-    Intent i = new Intent(this, DashboardActivity.class);
-    i.putExtra("files", new ArrayList<>(indexer.getIndex()));  // copy of current index
-    i.putExtra("tags",  new ArrayList<>(tagManager.getAllTags())); // copy of all tags
-    startActivity(i);
+    // No Intent extras: the full index can be thousands of Serializable
+    // MediaFiles, which overflows the binder transaction limit
+    // (TransactionTooLargeException). DashboardActivity reads the static
+    // snapshots instead; extras stay as a compatibility fallback there.
+    startActivity(new Intent(this, DashboardActivity.class));
 });
 
         findViewById(R.id.btnOrganizer).setOnClickListener(v ->
@@ -429,6 +463,13 @@ public class MainActivity extends Activity
         Button btnDelete = findViewById(R.id.btnDelete);
         if (btnDelete != null) {
             btnDelete.setOnClickListener(v -> deleteCurrentFile());
+        }
+
+        // Tapping the "1 / N" position counter opens the details dialog for
+        // the file currently shown in the preview.
+        TextView posCounter = findViewById(R.id.positionCounter);
+        if (posCounter != null) {
+            posCounter.setOnClickListener(v -> showFileDetailsDialog());
         }
 
         tagAdapter.setTags(tagManager.getAllTags());
@@ -444,6 +485,12 @@ public class MainActivity extends Activity
         syncTagToggleButton(btnToggle, false);
 
         btnToggle.setOnClickListener(v -> {
+            if (tagManager != null && !tagManager.isTagsEnabled()) {
+                Toast.makeText(this,
+                        "Tags are disabled (Settings → Main Window)",
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
             boolean visible = tagPanel.getVisibility() == View.VISIBLE;
             if (visible) {
                 tagPanel.setVisibility(View.GONE);
@@ -540,6 +587,7 @@ public class MainActivity extends Activity
 
         fullList = flattened;
         sLatestFullList = new ArrayList<>(fullList);
+        sLatestTagList  = new ArrayList<>(tagManager.getAllTags());
         windowManager.setFullIndex(fullList);
 
         if (currentIndex >= 0 && currentIndex < fullList.size()) {
@@ -619,6 +667,7 @@ public class MainActivity extends Activity
     }
 
     private void executeDpad(List<GestureSettings.GestureStep> steps) {
+        if (gestureSettings != null && !gestureSettings.isDpadEnabled()) return;
         for (GestureSettings.GestureStep step : steps) {
             if (step.action == GestureSettings.GestureAction.APPLY_TAG
                     && !step.tag.isEmpty()) {
@@ -799,6 +848,12 @@ public class MainActivity extends Activity
     }
 
     private void showBatchTagDialog(final Map<String, Boolean> pendingEdits) {
+        if (tagManager != null && !tagManager.isTagsEnabled()) {
+            Toast.makeText(this,
+                    "Tags are disabled (Settings → Main Window)",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
         final List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
         if (selectedFiles.isEmpty()) return;
 
@@ -1295,6 +1350,7 @@ private Spinner makeSpinner(String[] options) {
         menu.getMenu().add("Date ↑");
         menu.getMenu().add("Date ↓");
         menu.getMenu().add("Type");
+        menu.getMenu().add("Shuffle");
         menu.setOnMenuItemClickListener(item -> {
             switch (item.getTitle().toString()) {
                 case "Name A-Z": sortManager.setSortBy(SortManager.SortBy.NAME_ASC);  break;
@@ -1304,6 +1360,7 @@ private Spinner makeSpinner(String[] options) {
                 case "Date ↑":   sortManager.setSortBy(SortManager.SortBy.DATE_ASC);  break;
                 case "Date ↓":   sortManager.setSortBy(SortManager.SortBy.DATE_DESC); break;
                 case "Type":     sortManager.setSortBy(SortManager.SortBy.TYPE);      break;
+                case "Shuffle":  sortManager.setSortBy(SortManager.SortBy.SHUFFLE);   break;
             }
             btnSort.setText(sortManager.getLabel());
             scheduleRefresh();
@@ -1417,8 +1474,22 @@ private Spinner makeSpinner(String[] options) {
 
         new AlertDialog.Builder(this)
             .setTitle("Delete " + selectedFiles.size() + " files?")
-            .setMessage("This cannot be undone. Files will be permanently deleted.")
-            .setPositiveButton("Delete", (d, w) -> {
+            .setMessage("\"Move to trash\u00a0\" moves them to a .trash folder "
+                    + "inside your first watched folder, so you can restore "
+                    + "them later with any file manager.\n\n"
+                    + "\"Delete permanently\" cannot be undone.")
+            .setNeutralButton("Move to trash", (d, w) -> {
+                int moved = moveSelectionToTrash(selectedFiles);
+                mediaAdapter.exitSelectMode();
+                btnScan.setText("SCAN");
+                btnScan.setOnClickListener(v -> startScan());
+                scheduleRefresh();
+                Toast.makeText(this,
+                        moved > 0 ? moved + " file(s) moved to trash"
+                                  : "Trash failed (no watched folder?)",
+                        Toast.LENGTH_SHORT).show();
+            })
+            .setPositiveButton("Delete permanently", (d, w) -> {
                 int deleted = 0;
                 for (MediaFile file : selectedFiles) {
                     if (indexer.deleteFile(file.getPath())) deleted++;
@@ -1431,6 +1502,86 @@ private Spinner makeSpinner(String[] options) {
             })
             .setNegativeButton("Cancel", null)
             .show();
+    }
+
+    /** Shows name/path/size/dimensions/date/status/tags for the current file. */
+    private void showFileDetailsDialog() {
+        if (currentIndex < 0 || currentIndex >= fullList.size()) {
+            Toast.makeText(this, "No file selected", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        MediaFile file = fullList.get(currentIndex);
+        if (file == null) return;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Name:  ").append(file.getName()).append("\n");
+        sb.append("Path:  ").append(file.getPath()).append("\n");
+        sb.append("Size:  ").append(file.getFormattedSize()).append("\n");
+        if (file.getWidth() > 0 && file.getHeight() > 0) {
+            sb.append("Dimensions:  ")
+              .append(file.getWidth()).append(" × ")
+              .append(file.getHeight()).append("\n");
+        }
+        sb.append("Type:  ").append(file.getType().name().toLowerCase()).append("\n");
+        if (file.getDateAdded() > 0) {
+            sb.append("Modified:  ").append(
+                new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm",
+                        java.util.Locale.getDefault())
+                    .format(new java.util.Date(file.getDateAdded()))).append("\n");
+        }
+        if (fileStatus != null) {
+            sb.append("Status:  ")
+              .append(fileStatus.getStatus(file.getPath()).name().toLowerCase())
+              .append("\n");
+        }
+        List<String> tags = file.getTags();
+        sb.append("Tags (").append(tags.size()).append("):  ");
+        if (tags.isEmpty()) {
+            sb.append("—");
+        } else {
+            for (int i = 0; i < tags.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(tags.get(i));
+            }
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("File details")
+            .setMessage(sb.toString())
+            .setPositiveButton("Close", null)
+            .show();
+    }
+
+    /** Moves each selected file into <first watched folder>/.trash. */
+    private int moveSelectionToTrash(List<MediaFile> selectedFiles) {
+        List<String> folders = folderManager.getFolders();
+        if (folders.isEmpty()) return 0;
+        java.io.File trashDir = new java.io.File(folders.get(0), ".trash");
+        if (!trashDir.exists() && !trashDir.mkdirs()) return 0;
+
+        int moved = 0;
+        for (MediaFile file : selectedFiles) {
+            java.io.File src = new java.io.File(file.getPath());
+            if (!src.exists()) continue;
+            java.io.File dst = new java.io.File(trashDir, src.getName());
+            int n = 1;
+            String base = src.getName();
+            int dot = base.lastIndexOf('.');
+            String stem = dot > 0 ? base.substring(0, dot) : base;
+            String ext  = dot > 0 ? base.substring(dot) : "";
+            while (dst.exists()) {
+                dst = new java.io.File(trashDir, stem + "(" + n + ")" + ext);
+                n++;
+            }
+            if (src.renameTo(dst)) {
+                // File already sits in .trash — drop it from the index/UI
+                // without deleteFile(), which would touch the disk again.
+                indexer.removeFromIndexOnly(file.getPath());
+                fileStatus.clearStatus(file.getPath());
+                moved++;
+            }
+        }
+        return moved;
     }
 
     // ── Search history / saved searches ─────────────────────────────────────
@@ -1586,6 +1737,12 @@ private Spinner makeSpinner(String[] options) {
     private void showQuickTagPopup(final List<MediaFile> targets,
                                    final Map<String, Boolean> pendingEdits) {
         if (targets == null || targets.isEmpty()) return;
+        if (tagManager != null && !tagManager.isTagsEnabled()) {
+            Toast.makeText(this,
+                    "Tags are disabled (Settings → Main Window)",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         final List<Tag> choices = getQuickTagChoices();
         if (choices.isEmpty()) {
