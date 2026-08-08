@@ -124,7 +124,9 @@ public final class RandomGenerator {
             }
             attempts++;
         }
-        return candidate.isEmpty() ? (cleanBase + "_0000") : candidate;
+        // Fallback: append one more random 4-char hex to make it statistically unique and avoid collision
+        String lastResort = candidate + "_" + String.format(java.util.Locale.US, "%04X", RAND.nextInt(0x10000));
+        return lastResort;
     }
 
     /**
