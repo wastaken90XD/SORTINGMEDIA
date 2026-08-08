@@ -3,20 +3,26 @@ package com.mediasorter;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
+import com.mediasorter.features.RandomGenerator;
+import com.mediasorter.models.Tag;
+import com.mediasorter.organizer.Rule;
+import com.mediasorter.organizer.RuleSerializer;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
-import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * Exports and imports all app settings to/from a JSON file on external storage.
+ * Backup / restore exporter module.
  * Covers: gestures, tag lists, organizer rules, watched folders, cache settings,
  * thumbnail settings, and file status data.
  */
@@ -37,20 +43,43 @@ public class SettingsExporter {
         "search_history_prefs" // search history
     };
 
-    /**
-     * Export all settings to a JSON file. Returns the file path on success, null on failure.
-     */
+    public static class ApplyResult {
+        public int preferencesCount = 0;
+        public int foldersCount = 0;
+        public int rulesCount = 0;
+        public int gesturesCount = 0;
+        public int macrosCount = 0;
+        public int rulesSkipped = 0;
+        public boolean isSuccess = false;
+        public String errorMessage = null;
+    }
+
     public static String exportSettings(Context context) {
+        String prefix = RandomGenerator.randomGroupPrefix(new java.util.HashSet<String>());
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US);
+        String dateStr = sdf.format(cal.getTime());
+        String defaultFilename = "export_" + prefix + "_" + dateStr + ".json";
+        
+        File exportDir = getBackupDir(context);
+        return exportSettings(context, exportDir.getAbsolutePath(), defaultFilename);
+    }
+
+    public static String exportSettings(Context context, String directoryPath, String filename) {
         try {
             JSONObject root = new JSONObject();
-            root.put("version", 1);
-            root.put("exportDate", new SimpleDateFormat(
-                    "yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date()));
+            root.put("version", BuildConfig.VERSION_CODE);
+            root.put("timestamp", System.currentTimeMillis());
 
-            // For each prefs file, dump all key-value pairs
-            for (String prefsName : PREFS_KEYS) {
-                SharedPreferences prefs = context.getSharedPreferences(
-                        prefsName, Context.MODE_PRIVATE);
+            // Preferences
+            JSONObject prefsContainer = new JSONObject();
+            List<String> allPrefsKeys = new ArrayList<>(Arrays.asList(PREFS_KEYS));
+            if (!allPrefsKeys.contains("tag_preset_prefs")) {
+                allPrefsKeys.add("tag_preset_prefs");
+            }
+
+            for (String prefsName : allPrefsKeys) {
+                SharedPreferences prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE);
                 JSONObject prefsObj = new JSONObject();
                 Map<String, ?> all = prefs.getAll();
                 for (Map.Entry<String, ?> entry : all.entrySet()) {
@@ -62,7 +91,6 @@ public class SettingsExporter {
                     else if (val instanceof Float)     prefsObj.put(key, val);
                     else if (val instanceof Boolean)   prefsObj.put(key, val);
                     else if (val instanceof java.util.Set) {
-                        // StringSet — convert to JSON array
                         JSONArray arr = new JSONArray();
                         for (Object item : (java.util.Set<?>) val) {
                             arr.put(item.toString());
@@ -70,22 +98,89 @@ public class SettingsExporter {
                         prefsObj.put(key, arr);
                     }
                 }
-                root.put(prefsName, prefsObj);
+                prefsContainer.put(prefsName, prefsObj);
+            }
+            root.put("preferences", prefsContainer);
+
+            // Folders
+            FolderManager folderManager = new FolderManager(context);
+            JSONArray foldersArr = new JSONArray();
+            for (String f : folderManager.getFolders()) {
+                foldersArr.put(f);
+            }
+            root.put("folders", foldersArr);
+
+            // Gestures
+            SharedPreferences gesturePrefs = context.getSharedPreferences("gesture_prefs", Context.MODE_PRIVATE);
+            JSONObject gesturesObj = new JSONObject();
+            String[] gestureKeys = {
+                "swipe_left_v2", "swipe_right_v2", "swipe_up_v2", "swipe_down_v2",
+                "dpad_up_v2", "dpad_down_v2", "dpad_left_v2", "dpad_right_v2", "dpad_center_v2"
+            };
+            for (String gk : gestureKeys) {
+                if (gesturePrefs.contains(gk)) {
+                    gesturesObj.put(gk, gesturePrefs.getString(gk, ""));
+                }
+            }
+            root.put("gestures", gesturesObj);
+
+            // Macros
+            String macrosStr = gesturePrefs.getString("gesture_macros", "[]");
+            root.put("macros", new JSONArray(macrosStr));
+
+            // Tag Presets
+            SharedPreferences presetPrefs = context.getSharedPreferences("tag_preset_prefs", Context.MODE_PRIVATE);
+            JSONArray presetsArr = new JSONArray();
+            for (int i = 0; i < 5; i++) {
+                presetsArr.put(presetPrefs.getString("preset_" + i, ""));
+            }
+            root.put("tag_presets", presetsArr);
+
+            // Rules
+            SharedPreferences organizerPrefs = context.getSharedPreferences("organizer_prefs", Context.MODE_PRIVATE);
+            String rulesStr = organizerPrefs.getString("rules", "[]");
+            root.put("rules", new JSONArray(rulesStr));
+
+            // Setup directories
+            File exportDir = new File(directoryPath);
+            if (!exportDir.exists() && !exportDir.mkdirs()) {
+                return null;
             }
 
-            // Write to file
-            String timestamp = new SimpleDateFormat(
-                    "yyyyMMdd_HHmmss", Locale.US).format(new Date());
-            File exportDir = getBackupDir(context);
-            if (!exportDir.exists()) exportDir.mkdirs();
-            File exportFile = new File(exportDir, "mediasorter_backup_" + timestamp + ".json");
+            File destFile = new File(exportDir, filename);
+            File tempFile = new File(exportDir, filename + ".tmp");
 
-            FileWriter writer = new FileWriter(exportFile);
-            writer.write(root.toString(2)); // pretty-print with indent=2
-            writer.close();
+            // Write via FileOutputStream with a 256KB buffer (matching MetadataWriter pattern)
+            java.io.FileOutputStream fos = null;
+            java.io.BufferedOutputStream bos = null;
+            try {
+                fos = new java.io.FileOutputStream(tempFile);
+                bos = new java.io.BufferedOutputStream(fos, 256 * 1024); // 256KB buffer
+                byte[] bytes = root.toString(2).getBytes("UTF-8");
+                bos.write(bytes);
+                bos.flush();
+            } finally {
+                if (bos != null) try { bos.close(); } catch (Exception ignored) {}
+                if (fos != null) try { fos.close(); } catch (Exception ignored) {}
+            }
 
-            Log.d(TAG, "Exported to " + exportFile.getAbsolutePath());
-            return exportFile.getAbsolutePath();
+            // Verify file exists and is non-zero
+            if (!tempFile.exists() || tempFile.length() == 0) {
+                if (tempFile.exists()) tempFile.delete();
+                return null;
+            }
+
+            // Atomic rename
+            if (destFile.exists()) {
+                destFile.delete();
+            }
+            if (!tempFile.renameTo(destFile)) {
+                tempFile.delete();
+                return null;
+            }
+
+            Log.d(TAG, "Exported successfully to " + destFile.getAbsolutePath());
+            return destFile.getAbsolutePath();
 
         } catch (Exception e) {
             Log.e(TAG, "Export failed: " + e.getMessage());
@@ -93,66 +188,144 @@ public class SettingsExporter {
         }
     }
 
-    /**
-     * Import settings from a JSON file. Returns true on success.
-     */
-    public static boolean importSettings(Context context, String filePath) {
+    public static void resetToDefaults(Context context) {
+        List<String> allPrefsKeys = new ArrayList<>(Arrays.asList(PREFS_KEYS));
+        if (!allPrefsKeys.contains("tag_preset_prefs")) {
+            allPrefsKeys.add("tag_preset_prefs");
+        }
+        for (String prefsName : allPrefsKeys) {
+            context.getSharedPreferences(prefsName, Context.MODE_PRIVATE).edit().clear().commit();
+        }
+    }
+
+    public static ApplyResult applyImport(Context context, JSONObject root) {
+        ApplyResult result = new ApplyResult();
         try {
-            File file = new File(filePath);
-            if (!file.exists()) return false;
-
-            // Read file
-            StringBuilder sb = new StringBuilder();
-            BufferedReader reader = new BufferedReader(new FileReader(file));
-            String line;
-            while ((line = reader.readLine()) != null) sb.append(line);
-            reader.close();
-
-            JSONObject root = new JSONObject(sb.toString());
-
-            for (String prefsName : PREFS_KEYS) {
-                if (!root.has(prefsName)) continue;
-                JSONObject prefsObj = root.getJSONObject(prefsName);
-                SharedPreferences.Editor editor = context.getSharedPreferences(
-                        prefsName, Context.MODE_PRIVATE).edit();
+            // 1. SharedPreferences (clear existing first, then write all)
+            JSONObject preferences = root.getJSONObject("preferences");
+            java.util.Iterator<String> keys = preferences.keys();
+            while (keys.hasNext()) {
+                String prefsName = keys.next();
+                JSONObject prefsObj = preferences.getJSONObject(prefsName);
+                SharedPreferences prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE);
+                
+                SharedPreferences.Editor editor = prefs.edit();
                 editor.clear();
-
-                java.util.Iterator<String> keys = prefsObj.keys();
-                while (keys.hasNext()) {
-                    String key = keys.next();
-                    Object val = prefsObj.get(key);
-                    if (val instanceof String)      editor.putString(key, (String) val);
-                    else if (val instanceof Integer) editor.putInt(key, (Integer) val);
-                    else if (val instanceof Long)    editor.putLong(key, (Long) val);
-                    else if (val instanceof Float)   editor.putFloat(key, (Float) val);
-                    else if (val instanceof Double)  {
-                        // JSON numbers may come back as Double
-                        // Check if it's actually a long
-                        double d = (Double) val;
-                        if (d == Math.floor(d) && !Double.isInfinite(d)) {
-                            editor.putLong(key, (long) d);
-                        } else {
-                            editor.putFloat(key, (float) d);
-                        }
-                    }
-                    else if (val instanceof Boolean) editor.putBoolean(key, (Boolean) val);
-                    else if (val instanceof JSONArray) {
+                
+                java.util.Iterator<String> pKeys = prefsObj.keys();
+                while (pKeys.hasNext()) {
+                    String pKey = pKeys.next();
+                    Object pVal = prefsObj.get(pKey);
+                    if (pVal instanceof String) {
+                        editor.putString(pKey, (String) pVal);
+                    } else if (pVal instanceof Integer) {
+                        editor.putInt(pKey, (Integer) pVal);
+                    } else if (pVal instanceof Long) {
+                        editor.putLong(pKey, (Long) pVal);
+                    } else if (pVal instanceof Double) {
+                        editor.putFloat(pKey, ((Double) pVal).floatValue());
+                    } else if (pVal instanceof Boolean) {
+                        editor.putBoolean(pKey, (Boolean) pVal);
+                    } else if (pVal instanceof JSONArray) {
+                        JSONArray arr = (JSONArray) pVal;
                         java.util.Set<String> set = new java.util.HashSet<>();
-                        JSONArray arr = (JSONArray) val;
-                        for (int i = 0; i < arr.length(); i++) set.add(arr.getString(i));
-                        editor.putStringSet(key, set);
+                        for (int i = 0; i < arr.length(); i++) {
+                            set.add(arr.getString(i));
+                        }
+                        editor.putStringSet(pKey, set);
                     }
+                    result.preferencesCount++;
                 }
-                editor.apply();
+                
+                if (!editor.commit()) {
+                    result.errorMessage = "Settings may not have saved — storage full?";
+                }
             }
 
-            Log.d(TAG, "Imported from " + filePath);
-            return true;
+            // 2. Watched folders (clear existing, then add all)
+            JSONArray foldersArr = root.getJSONArray("folders");
+            SharedPreferences folderPrefs = context.getSharedPreferences("folder_prefs", Context.MODE_PRIVATE);
+            SharedPreferences.Editor folderEditor = folderPrefs.edit();
+            folderEditor.clear();
+            java.util.Set<String> folderSet = new java.util.HashSet<>();
+            for (int i = 0; i < foldersArr.length(); i++) {
+                folderSet.add(foldersArr.getString(i));
+                result.foldersCount++;
+            }
+            folderEditor.putStringSet("watched_folders", folderSet);
+            if (!folderEditor.commit()) {
+                result.errorMessage = "Settings may not have saved — storage full?";
+            }
 
-        } catch (Exception e) {
-            Log.e(TAG, "Import failed: " + e.getMessage());
-            return false;
+            // 3. Rules (clear existing, then load all)
+            JSONArray rulesArr = root.getJSONArray("rules");
+            List<com.mediasorter.organizer.Rule> rulesList = new ArrayList<>();
+            for (int i = 0; i < rulesArr.length(); i++) {
+                try {
+                    JSONObject ruleObj = rulesArr.getJSONObject(i);
+                    JSONArray tempArr = new JSONArray();
+                    tempArr.put(ruleObj);
+                    List<com.mediasorter.organizer.Rule> parsed = RuleSerializer.loadRulesFromJsonStr(tempArr.toString());
+                    if (parsed != null && !parsed.isEmpty()) {
+                        rulesList.add(parsed.get(0));
+                        result.rulesCount++;
+                    } else {
+                        result.rulesSkipped++;
+                    }
+                } catch (Exception e) {
+                    result.rulesSkipped++;
+                }
+            }
+            com.mediasorter.organizer.RuleSerializer.saveRulesDirect(context, rulesList);
+
+            // 4. Gesture mappings (clear existing gesture_ keys, then write all)
+            JSONObject gesturesObj = root.getJSONObject("gestures");
+            SharedPreferences gesturePrefs = context.getSharedPreferences("gesture_prefs", Context.MODE_PRIVATE);
+            SharedPreferences.Editor gestureEditor = gesturePrefs.edit();
+            Map<String, ?> allGesturePrefs = gesturePrefs.getAll();
+            for (String gk : allGesturePrefs.keySet()) {
+                if (gk.startsWith("swipe_") || gk.startsWith("dpad_")) {
+                    gestureEditor.remove(gk);
+                }
+            }
+            java.util.Iterator<String> gKeys = gesturesObj.keys();
+            while (gKeys.hasNext()) {
+                String gk = gKeys.next();
+                gestureEditor.putString(gk, gesturesObj.getString(gk));
+                result.gesturesCount++;
+            }
+            if (!gestureEditor.commit()) {
+                result.errorMessage = "Settings may not have saved — storage full?";
+            }
+
+            // 5. Gesture macros (overwrite "gesture_macros" key)
+            JSONArray macrosArr = root.getJSONArray("macros");
+            SharedPreferences.Editor macrosEditor = gesturePrefs.edit();
+            macrosEditor.putString("gesture_macros", macrosArr.toString());
+            if (!macrosEditor.commit()) {
+                result.errorMessage = "Settings may not have saved — storage full?";
+            }
+            result.macrosCount = macrosArr.length();
+
+            // 6. Tag preset slots (overwrite all 5)
+            JSONArray presetsArr = root.getJSONArray("tag_presets");
+            SharedPreferences presetPrefs = context.getSharedPreferences("tag_preset_prefs", Context.MODE_PRIVATE);
+            SharedPreferences.Editor presetEditor = presetPrefs.edit();
+            presetEditor.clear();
+            for (int i = 0; i < Math.min(5, presetsArr.length()); i++) {
+                presetEditor.putString("preset_" + i, presetsArr.getString(i));
+            }
+            if (!presetEditor.commit()) {
+                result.errorMessage = "Settings may not have saved — storage full?";
+            }
+
+            result.isSuccess = true;
+        } catch (Throwable t) {
+            resetToDefaults(context);
+            result.isSuccess = false;
+            result.errorMessage = "Import failed — settings have been reset to defaults.";
         }
+        return result;
     }
 
     /**

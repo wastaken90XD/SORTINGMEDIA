@@ -2,6 +2,8 @@ package com.mediasorter;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.DialogInterface;
+import com.mediasorter.features.RandomGenerator;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.SharedPreferences;
@@ -171,6 +173,41 @@ public class SettingsActivity extends Activity {
         root.addView(makeMultiGestureRow("D-Pad Center",
             gestureSettings.getDpadCenter(), gestureSettings::setDpadCenter));
 
+        // ── Macros ────────────────────────────────────────────────────────────
+        root.addView(makeTitle("Gesture Macros"));
+        final LinearLayout macrosContainer = new LinearLayout(this);
+        macrosContainer.setOrientation(LinearLayout.VERTICAL);
+        root.addView(macrosContainer);
+
+        renderMacros(macrosContainer);
+
+        Button btnAddMacro = makeSmallButton("+ Add Macro");
+        btnAddMacro.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                List<GestureSettings.GestureMacro> mList = gestureSettings.loadMacros();
+                if (mList.size() >= 10) {
+                    Toast.makeText(SettingsActivity.this, "Maximum of 10 macros allowed", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                GestureSettings.GestureMacro newM = new GestureSettings.GestureMacro();
+                int maxId = 0;
+                for (GestureSettings.GestureMacro m : mList) {
+                    try {
+                        int parsed = Integer.parseInt(m.id);
+                        if (parsed > maxId) maxId = parsed;
+                    } catch (Exception ignored) {}
+                }
+                newM.id = String.valueOf(maxId + 1);
+                newM.name = "Macro " + newM.id;
+                newM.actions = new ArrayList<>();
+                mList.add(newM);
+                gestureSettings.saveMacros(mList);
+                renderMacros(macrosContainer);
+            }
+        });
+        root.addView(btnAddMacro);
+
         // ── Tag lists ─────────────────────────────────────────────────────────
         root.addView(makeTitle("Tag Lists"));
 
@@ -292,41 +329,242 @@ root.addView(btnBulkActive);
         root.addView(makeTitle("Backup & Restore"));
 
         Button btnExport = makeButton("Export Settings");
-        btnExport.setOnClickListener(v -> {
-            String path = SettingsExporter.exportSettings(this);
-            if (path != null) {
-                Toast.makeText(this, "Exported to:\n" + path, Toast.LENGTH_LONG).show();
-            } else {
-                Toast.makeText(this, "Export failed", Toast.LENGTH_SHORT).show();
+        btnExport.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String prefix = RandomGenerator.randomGroupPrefix(new java.util.HashSet<String>());
+                java.util.Calendar cal = java.util.Calendar.getInstance();
+                java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US);
+                String dateStr = sdf.format(cal.getTime());
+                String defaultFilename = "export_" + prefix + "_" + dateStr + ".json";
+
+                LinearLayout container = new LinearLayout(SettingsActivity.this);
+                container.setOrientation(LinearLayout.VERTICAL);
+
+                container.addView(makeLabel("Export Directory:"));
+                final EditText dirEdit = new EditText(SettingsActivity.this);
+                dirEdit.setText(SettingsExporter.getBackupDir(SettingsActivity.this).getAbsolutePath());
+                dirEdit.setTextColor(0xFFFFFFFF);
+                container.addView(dirEdit);
+
+                container.addView(makeLabel("Filename:"));
+                final EditText nameEdit = new EditText(SettingsActivity.this);
+                nameEdit.setText(defaultFilename);
+                nameEdit.setTextColor(0xFFFFFFFF);
+                container.addView(nameEdit);
+
+                android.widget.FrameLayout box = new android.widget.FrameLayout(SettingsActivity.this);
+                int pad = (int) (20 * getResources().getDisplayMetrics().density);
+                android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
+                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                        android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
+                lp.setMargins(pad, pad, pad, pad);
+                container.setLayoutParams(lp);
+                box.addView(container);
+
+                new AlertDialog.Builder(SettingsActivity.this)
+                        .setTitle("Export Settings")
+                        .setView(box)
+                        .setPositiveButton("Export", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                final String directoryPath = dirEdit.getText().toString().trim();
+                                String filename = nameEdit.getText().toString().trim();
+                                if (directoryPath.isEmpty() || filename.isEmpty()) {
+                                    Toast.makeText(SettingsActivity.this, "Fields cannot be empty", Toast.LENGTH_SHORT).show();
+                                    return;
+                                }
+                                if (!filename.endsWith(".json")) {
+                                    filename += ".json";
+                                }
+
+                                final String finalFilename = filename;
+                                final String path = SettingsExporter.exportSettings(SettingsActivity.this, directoryPath, finalFilename);
+                                if (path != null) {
+                                    Toast.makeText(SettingsActivity.this, "Exported successfully to:\n" + path, Toast.LENGTH_LONG).show();
+
+                                    // Backup rotation check
+                                    File dir = new File(directoryPath);
+                                    File[] files = dir.listFiles(new java.io.FilenameFilter() {
+                                        @Override
+                                        public boolean accept(File d, String name) {
+                                            return name.startsWith("export_") && name.endsWith(".json");
+                                        }
+                                    });
+
+                                    if (files != null && files.length > 5) {
+                                        final int toDeleteCount = files.length - 5;
+                                        // Sort ascending by lastModified to get oldest first
+                                        java.util.Arrays.sort(files, new java.util.Comparator<File>() {
+                                            @Override
+                                            public int compare(File f1, File f2) {
+                                                return Long.compare(f1.lastModified(), f2.lastModified());
+                                            }
+                                        });
+
+                                        final File[] sortedFiles = files;
+                                        new AlertDialog.Builder(SettingsActivity.this)
+                                                .setTitle("Backup Rotation")
+                                                .setMessage(toDeleteCount + " old backups found. Delete the oldest to keep only 5?")
+                                                .setPositiveButton("Yes", new DialogInterface.OnClickListener() {
+                                                    @Override
+                                                    public void onClick(DialogInterface dialogInterface, int whichButton) {
+                                                        int deleted = 0;
+                                                        for (int i = 0; i < toDeleteCount; i++) {
+                                                            if (sortedFiles[i].delete()) {
+                                                                deleted++;
+                                                            }
+                                                        }
+                                                        Toast.makeText(SettingsActivity.this, "Deleted " + deleted + " old backups", Toast.LENGTH_SHORT).show();
+                                                    }
+                                                })
+                                                .setNegativeButton("No", null)
+                                                .show();
+                                    }
+                                } else {
+                                    File checkDir = new File(directoryPath);
+                                    if (!checkDir.exists()) {
+                                        Toast.makeText(SettingsActivity.this, "Cannot write to that location", Toast.LENGTH_SHORT).show();
+                                    } else {
+                                        Toast.makeText(SettingsActivity.this, "Export failed — storage error", Toast.LENGTH_SHORT).show();
+                                    }
+                                }
+                            }
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show();
             }
         });
         root.addView(btnExport);
 
         Button btnImport = makeButton("Import Settings");
-        btnImport.setOnClickListener(v -> {
-            File[] backups = SettingsExporter.listBackups(this);
-            if (backups.length == 0) {
-                Toast.makeText(this, "No backups found", Toast.LENGTH_SHORT).show();
-                return;
+        btnImport.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                final File[] backups = SettingsExporter.listBackups(SettingsActivity.this);
+                if (backups.length == 0) {
+                    Toast.makeText(SettingsActivity.this, "No backups found", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                String[] names = new String[backups.length];
+                for (int i = 0; i < backups.length; i++) names[i] = backups[i].getName();
+                new AlertDialog.Builder(SettingsActivity.this)
+                    .setTitle("Select backup to import")
+                    .setItems(names, new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface d, final int whichIdx) {
+                            final File selectedFile = backups[whichIdx];
+                            if (!selectedFile.canRead()) {
+                                Toast.makeText(SettingsActivity.this, "Cannot read that file", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+
+                            // Read file and parse as JSONObject first for validation
+                            String jsonStr = "";
+                            java.io.FileInputStream fis = null;
+                            java.io.InputStreamReader isr = null;
+                            java.io.BufferedReader br = null;
+                            try {
+                                fis = new java.io.FileInputStream(selectedFile);
+                                isr = new java.io.InputStreamReader(fis, "UTF-8");
+                                br = new java.io.BufferedReader(isr);
+                                StringBuilder sb = new StringBuilder();
+                                String line;
+                                while ((line = br.readLine()) != null) {
+                                    sb.append(line).append("\n");
+                                }
+                                jsonStr = sb.toString();
+                            } catch (Exception e) {
+                                Toast.makeText(SettingsActivity.this, "Cannot read that file", Toast.LENGTH_SHORT).show();
+                                return;
+                            } finally {
+                                if (br != null) try { br.close(); } catch (Exception ignored) {}
+                                if (isr != null) try { isr.close(); } catch (Exception ignored) {}
+                                if (fis != null) try { fis.close(); } catch (Exception ignored) {}
+                            }
+
+                            final JSONObject rootObj;
+                            try {
+                                rootObj = new JSONObject(jsonStr);
+                            } catch (Exception e) {
+                                Toast.makeText(SettingsActivity.this, "Import failed — file is not a valid backup", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+
+                            // Validate top-level keys
+                            String[] requiredKeys = {"version", "timestamp", "preferences", "folders", "gestures", "macros", "tag_presets", "rules"};
+                            boolean malformed = false;
+                            for (String k : requiredKeys) {
+                                if (!rootObj.has(k)) {
+                                    malformed = true;
+                                    break;
+                                }
+                            }
+                            if (malformed) {
+                                Toast.makeText(SettingsActivity.this, "Import failed — file is not a valid backup", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+
+                            final Runnable doApplyAction = new Runnable() {
+                                @Override
+                                public void run() {
+                                    SettingsExporter.ApplyResult res = SettingsExporter.applyImport(SettingsActivity.this, rootObj);
+                                    if (res.isSuccess) {
+                                        // Trigger rescan of newly imported folders
+                                        FolderManager fm = new FolderManager(SettingsActivity.this);
+                                        indexer.scanFolders(fm.getFolders());
+
+                                        String summary = "Import complete — " 
+                                                + res.preferencesCount + " preferences, "
+                                                + res.foldersCount + " folders, "
+                                                + res.rulesCount + " rules, "
+                                                + res.gesturesCount + " gestures, "
+                                                + res.macrosCount + " macros restored.";
+                                        if (res.rulesSkipped > 0) {
+                                            summary += "\n" + res.rulesSkipped + " rules skipped (unreadable).";
+                                        }
+
+                                        new AlertDialog.Builder(SettingsActivity.this)
+                                                .setTitle("Import Successful")
+                                                .setMessage(summary)
+                                                .setPositiveButton("OK", new DialogInterface.OnClickListener() {
+                                                    @Override
+                                                    public void onClick(DialogInterface d3, int w3) {
+                                                        recreate();
+                                                    }
+                                                })
+                                                .show();
+                                    } else {
+                                        new AlertDialog.Builder(SettingsActivity.this)
+                                                .setTitle("Import Failed")
+                                                .setMessage(res.errorMessage != null ? res.errorMessage : "Import failed.")
+                                                .setPositiveButton("OK", null)
+                                                .show();
+                                    }
+                                }
+                            };
+
+                            // Forward compatibility detection
+                            int backupVersion = rootObj.optInt("version", 0);
+                            if (backupVersion > BuildConfig.VERSION_CODE) {
+                                new AlertDialog.Builder(SettingsActivity.this)
+                                        .setTitle("Version Warning")
+                                        .setMessage("This backup was made with a newer version. Some settings may not apply. Do you want to proceed?")
+                                        .setPositiveButton("Yes", new DialogInterface.OnClickListener() {
+                                            @Override
+                                            public void onClick(DialogInterface dialogInterface, int whichButton) {
+                                                doApplyAction.run();
+                                            }
+                                        })
+                                        .setNegativeButton("No", null)
+                                        .show();
+                            } else {
+                                doApplyAction.run();
+                            }
+                        }
+                    })
+                    .show();
             }
-            String[] names = new String[backups.length];
-            for (int i = 0; i < backups.length; i++) names[i] = backups[i].getName();
-            new AlertDialog.Builder(this)
-                .setTitle("Select backup to import")
-                .setItems(names, (d, w) -> {
-                    new AlertDialog.Builder(this)
-                        .setTitle("Import?")
-                        .setMessage("This will overwrite all current settings. Continue?")
-                        .setPositiveButton("Import", (d2, w2) -> {
-                            boolean ok = SettingsExporter.importSettings(this, backups[w].getAbsolutePath());
-                            Toast.makeText(this, ok ? "Imported! Restart app." : "Import failed",
-                                    Toast.LENGTH_LONG).show();
-                            if (ok) recreate();
-                        })
-                        .setNegativeButton("Cancel", null)
-                        .show();
-                })
-                .show();
         });
         root.addView(btnImport);
 
@@ -912,5 +1150,220 @@ root.addView(btnBulkActive);
         lp.setMarginStart(4);
         btn.setLayoutParams(lp);
         return btn;
+    }
+
+    private void renderMacros(final LinearLayout container) {
+        container.removeAllViews();
+        List<GestureSettings.GestureMacro> mList = gestureSettings.loadMacros();
+        for (int i = 0; i < mList.size(); i++) {
+            final int idx = i;
+            final GestureSettings.GestureMacro m = mList.get(i);
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.VERTICAL);
+            row.setBackgroundColor(0xFF1A1A2E);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.bottomMargin = 8;
+            row.setLayoutParams(lp);
+            row.setPadding(8, 8, 8, 8);
+
+            LinearLayout header = new LinearLayout(this);
+            header.setOrientation(LinearLayout.HORIZONTAL);
+            header.setGravity(Gravity.CENTER_VERTICAL);
+
+            EditText nameEdit = new EditText(this);
+            nameEdit.setText(m.name);
+            nameEdit.setTextColor(0xFFFFFFFF);
+            nameEdit.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+            nameEdit.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+                @Override public void onTextChanged(CharSequence s, int st, int b, int c) {}
+                @Override public void afterTextChanged(Editable s) {
+                    m.name = s.toString().trim();
+                    List<GestureSettings.GestureMacro> currentList = gestureSettings.loadMacros();
+                    for (GestureSettings.GestureMacro currentM : currentList) {
+                        if (currentM.id.equals(m.id)) {
+                            currentM.name = m.name;
+                            break;
+                        }
+                    }
+                    gestureSettings.saveMacros(currentList);
+                }
+            });
+            header.addView(nameEdit);
+
+            TextView stepCount = makeLabel("Steps: " + m.actions.size());
+            stepCount.setPadding(8, 0, 8, 0);
+            header.addView(stepCount);
+
+            Button btnEdit = makeSmallButton("Edit");
+            btnEdit.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showMacroStepBuilder(m, container);
+                }
+            });
+            header.addView(btnEdit);
+
+            Button btnDelete = makeSmallButton("Delete");
+            btnDelete.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    List<GestureSettings.GestureMacro> currentList = gestureSettings.loadMacros();
+                    for (int j = 0; j < currentList.size(); j++) {
+                        if (currentList.get(j).id.equals(m.id)) {
+                            currentList.remove(j);
+                            break;
+                        }
+                    }
+                    gestureSettings.saveMacros(currentList);
+                    renderMacros(container);
+                }
+            });
+            header.addView(btnDelete);
+
+            row.addView(header);
+            container.addView(row);
+        }
+    }
+
+    private void showMacroStepBuilder(final GestureSettings.GestureMacro macro, final LinearLayout macrosContainer) {
+        final List<com.mediasorter.organizer.Action> tempActions = new ArrayList<>(macro.actions);
+
+        LinearLayout mainLayout = new LinearLayout(this);
+        mainLayout.setOrientation(LinearLayout.VERTICAL);
+        mainLayout.setPadding(32, 16, 32, 16);
+
+        final LinearLayout stepsContainer = new LinearLayout(this);
+        stepsContainer.setOrientation(LinearLayout.VERTICAL);
+        mainLayout.addView(stepsContainer);
+
+        final Runnable renderStepsList = new Runnable() {
+            @Override
+            public void run() {
+                stepsContainer.removeAllViews();
+                for (int i = 0; i < tempActions.size(); i++) {
+                    final int stepIdx = i;
+                    com.mediasorter.organizer.Action act = tempActions.get(i);
+
+                    LinearLayout stepRow = new LinearLayout(SettingsActivity.this);
+                    stepRow.setOrientation(LinearLayout.HORIZONTAL);
+                    stepRow.setGravity(Gravity.CENTER_VERTICAL);
+                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+                    lp.bottomMargin = 4;
+                    stepRow.setLayoutParams(lp);
+
+                    TextView stepLbl = makeLabel(SettingsActivity.this, (stepIdx + 1) + ". " + act.describe());
+                    stepLbl.setLayoutParams(new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+                    stepRow.addView(stepLbl);
+
+                    Button btnUp = makeSmallButton("▲");
+                    btnUp.setEnabled(stepIdx > 0);
+                    btnUp.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            com.mediasorter.organizer.Action current = tempActions.remove(stepIdx);
+                            tempActions.add(stepIdx - 1, current);
+                            run();
+                        }
+                    });
+                    stepRow.addView(btnUp);
+
+                    Button btnDown = makeSmallButton("▼");
+                    btnDown.setEnabled(stepIdx < tempActions.size() - 1);
+                    btnDown.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            com.mediasorter.organizer.Action current = tempActions.remove(stepIdx);
+                            tempActions.add(stepIdx + 1, current);
+                            run();
+                        }
+                    });
+                    stepRow.addView(btnDown);
+
+                    Button btnEditStep = makeSmallButton("Edit");
+                    btnEditStep.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            com.mediasorter.organizer.ActionBuilderHelper helper = new com.mediasorter.organizer.ActionBuilderHelper(SettingsActivity.this);
+                            helper.showActionPickerDialog(tempActions.get(stepIdx), new com.mediasorter.organizer.ActionBuilderHelper.ActionCallback() {
+                                @Override
+                                public void onActionSelected(com.mediasorter.organizer.Action updatedAction) {
+                                    tempActions.set(stepIdx, updatedAction);
+                                    run();
+                                }
+                            });
+                        }
+                    });
+                    stepRow.addView(btnEditStep);
+
+                    Button btnDel = makeSmallButton("✕");
+                    btnDel.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            tempActions.remove(stepIdx);
+                            run();
+                        }
+                    });
+                    stepRow.addView(btnDel);
+
+                    stepsContainer.addView(stepRow);
+                }
+            }
+        };
+
+        renderStepsList.run();
+
+        Button btnAddStep = makeSmallButton("+ Add Step");
+        btnAddStep.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (tempActions.size() >= 10) {
+                    Toast.makeText(SettingsActivity.this, "Maximum of 10 steps per macro allowed", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                com.mediasorter.organizer.ActionBuilderHelper helper = new com.mediasorter.organizer.ActionBuilderHelper(SettingsActivity.this);
+                helper.showActionPickerDialog(null, new com.mediasorter.organizer.ActionBuilderHelper.ActionCallback() {
+                    @Override
+                    public void onActionSelected(com.mediasorter.organizer.Action action) {
+                        if (action != null) {
+                            tempActions.add(action);
+                            renderStepsList.run();
+                        }
+                    }
+                });
+            }
+        });
+        mainLayout.addView(btnAddStep);
+
+        ScrollView sv = new ScrollView(this);
+        sv.addView(mainLayout);
+
+        new AlertDialog.Builder(this)
+            .setTitle("Edit Macro: " + macro.name)
+            .setView(sv)
+            .setPositiveButton("Save", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface d, int w) {
+                    macro.actions = tempActions;
+                    List<GestureSettings.GestureMacro> mList = gestureSettings.loadMacros();
+                    for (GestureSettings.GestureMacro existingM : mList) {
+                        if (existingM.id.equals(macro.id)) {
+                            existingM.actions = macro.actions;
+                            break;
+                        }
+                    }
+                    gestureSettings.saveMacros(mList);
+                    renderMacros(macrosContainer);
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
     }
 }

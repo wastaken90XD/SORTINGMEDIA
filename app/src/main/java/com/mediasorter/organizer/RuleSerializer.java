@@ -273,4 +273,251 @@ public class RuleSerializer {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit().putString(KEY, arr.toString()).apply();
     }
+
+    public static JSONObject serializeAction(Action action) throws Exception {
+        JSONObject aObj = new JSONObject();
+        if (action == null) return aObj;
+        if (action instanceof MoveAction) {
+            MoveAction ma = (MoveAction) action;
+            aObj.put("actionType", "MOVE");
+            aObj.put("destFolder", ma.destFolder);
+            aObj.put("conflict", ma.conflict != null ? ma.conflict.name() : "SKIP");
+        } else if (action instanceof CopyAction) {
+            CopyAction ca = (CopyAction) action;
+            aObj.put("actionType", "COPY");
+            aObj.put("destFolder", ca.destFolder);
+            aObj.put("conflict", ca.conflict != null ? ca.conflict.name() : "SKIP");
+        } else if (action instanceof DeleteAction) {
+            DeleteAction da = (DeleteAction) action;
+            aObj.put("actionType", "DELETE");
+            aObj.put("useTrash", da.useTrash);
+            aObj.put("trashFolder", da.trashFolder != null ? da.trashFolder : "");
+        } else if (action instanceof TagAction) {
+            TagAction ta = (TagAction) action;
+            aObj.put("actionType", "TAG");
+            JSONArray addArr = new JSONArray();
+            JSONArray remArr = new JSONArray();
+            if (ta.tagsToAdd != null) {
+                for (String t : ta.tagsToAdd) addArr.put(t);
+            }
+            if (ta.tagsToRemove != null) {
+                for (String t : ta.tagsToRemove) remArr.put(t);
+            }
+            aObj.put("tagsToAdd", addArr);
+            aObj.put("tagsToRemove", remArr);
+        } else if (action instanceof StatusAction) {
+            StatusAction sa = (StatusAction) action;
+            aObj.put("actionType", "STATUS");
+            aObj.put("status", sa.status != null ? sa.status.name() : "NONE");
+            aObj.put("clear", sa.clear);
+        } else if (action instanceof RenameAction) {
+            RenameAction ra = (RenameAction) action;
+            aObj.put("actionType", "RENAME");
+            aObj.put("pattern", ra.pattern);
+        } else if (action instanceof SetDateAction) {
+            SetDateAction sda = (SetDateAction) action;
+            aObj.put("actionType", "SETDATE");
+            aObj.put("mode", sda.mode);
+            aObj.put("value", sda.value);
+        } else if (action instanceof ChangeExtensionAction) {
+            ChangeExtensionAction cea = (ChangeExtensionAction) action;
+            aObj.put("actionType", "EXTENSION");
+            aObj.put("newExtension", cea.newExtension);
+        } else if (action instanceof AffixAction) {
+            AffixAction aa = (AffixAction) action;
+            aObj.put("actionType", "AFFIX");
+            aObj.put("position", aa.position);
+            aObj.put("text", aa.text);
+        } else if (action instanceof StripMetadataAction) {
+            StripMetadataAction sma = (StripMetadataAction) action;
+            aObj.put("actionType", "STRIPMETA");
+            aObj.put("keepOrientation", sma.keepOrientation);
+        } else if (action instanceof MacroCompositeAction) {
+            MacroCompositeAction mca = (MacroCompositeAction) action;
+            aObj.put("actionType", "macro_composite");
+            JSONArray stepsArr = new JSONArray();
+            if (mca.getActions() != null) {
+                for (Action child : mca.getActions()) {
+                    if (child instanceof MacroCompositeAction) {
+                        android.util.Log.w("RuleSerializer", "Skipped nested MacroCompositeAction inside steps");
+                        continue;
+                    }
+                    try {
+                        stepsArr.put(serializeAction(child));
+                    } catch (Exception e) {
+                        android.util.Log.e("RuleSerializer", "Failed to serialize child action", e);
+                    }
+                }
+            }
+            aObj.put("steps", stepsArr);
+        }
+        return aObj;
+    }
+
+    public static Action deserializeAction(JSONObject aObj) throws Exception {
+        String aType = aObj.optString("actionType", "");
+        if ("MOVE".equals(aType)) {
+            String dest = aObj.optString("destFolder", "");
+            String conflictStr = aObj.optString("conflict", "SKIP");
+            Action.Conflict conflict = Action.Conflict.SKIP;
+            try { conflict = Action.Conflict.valueOf(conflictStr); } catch (Exception ignored) {}
+            return new MoveAction(dest, conflict);
+        } else if ("COPY".equals(aType)) {
+            String dest = aObj.optString("destFolder", "");
+            String conflictStr = aObj.optString("conflict", "SKIP");
+            Action.Conflict conflict = Action.Conflict.SKIP;
+            try { conflict = Action.Conflict.valueOf(conflictStr); } catch (Exception ignored) {}
+            return new CopyAction(dest, conflict);
+        } else if ("DELETE".equals(aType)) {
+            boolean useTrash = aObj.optBoolean("useTrash", true);
+            String trashFolder = aObj.optString("trashFolder", "");
+            return new DeleteAction(useTrash, trashFolder);
+        } else if ("TAG".equals(aType)) {
+            JSONArray addArr = aObj.optJSONArray("tagsToAdd");
+            JSONArray remArr = aObj.optJSONArray("tagsToRemove");
+            List<String> addTags = new ArrayList<>();
+            List<String> remTags = new ArrayList<>();
+            if (addArr != null) {
+                for (int k = 0; k < addArr.length(); k++) addTags.add(addArr.getString(k));
+            }
+            if (remArr != null) {
+                for (int k = 0; k < remArr.length(); k++) remTags.add(remArr.getString(k));
+            }
+            return new TagAction(addTags, remTags);
+        } else if ("STATUS".equals(aType)) {
+            String statusStr = aObj.optString("status", "NONE");
+            com.mediasorter.FileStatus.Status status = com.mediasorter.FileStatus.Status.NONE;
+            try { status = com.mediasorter.FileStatus.Status.valueOf(statusStr); } catch (Exception ignored) {}
+            boolean clear = aObj.optBoolean("clear", false);
+            return new StatusAction(status, clear);
+        } else if ("RENAME".equals(aType)) {
+            String pattern = aObj.optString("pattern", "");
+            return new RenameAction(pattern);
+        } else if ("SETDATE".equals(aType)) {
+            String mode = aObj.optString("mode", "OFFSET");
+            long value = aObj.optLong("value", 0);
+            return new SetDateAction(mode, value);
+        } else if ("EXTENSION".equals(aType)) {
+            String ext = aObj.optString("newExtension", "");
+            return new ChangeExtensionAction(ext);
+        } else if ("AFFIX".equals(aType)) {
+            String pos = aObj.optString("position", "PREFIX");
+            String txt = aObj.optString("text", "");
+            return new AffixAction(pos, txt);
+        } else if ("STRIPMETA".equals(aType)) {
+            boolean keepOrient = aObj.optBoolean("keepOrientation", false);
+            return new StripMetadataAction(keepOrient);
+        } else if ("macro_composite".equals(aType)) {
+            JSONArray stepsArr = aObj.optJSONArray("steps");
+            if (stepsArr == null || stepsArr.length() == 0) {
+                android.util.Log.w("RuleSerializer", "steps array is missing or empty for macro_composite action");
+                return null;
+            }
+            List<Action> steps = new ArrayList<>();
+            for (int i = 0; i < stepsArr.length(); i++) {
+                try {
+                    JSONObject childObj = stepsArr.getJSONObject(i);
+                    Action child = deserializeAction(childObj);
+                    if (child != null) {
+                        steps.add(child);
+                    } else {
+                        android.util.Log.e("RuleSerializer", "Failed to deserialize step at index " + i + " (returned null)");
+                    }
+                } catch (Exception e) {
+                    android.util.Log.e("RuleSerializer", "Failed to deserialize step at index " + i, e);
+                }
+            }
+            if (steps.isEmpty()) {
+                return null;
+            }
+            return new MacroCompositeAction(steps);
+        }
+        return null;
+    }
+    public static List<Rule> loadRulesDirect(String json) {
+        return loadRulesFromJsonStr(json);
+    }
+
+    public static List<Rule> loadRulesFromJsonStr(String json) {
+        List<Rule> rules = new ArrayList<>();
+        try {
+            JSONArray arr = new JSONArray(json);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject obj = arr.getJSONObject(i);
+                Rule r = new Rule();
+                r.name = obj.optString("name", "Unnamed");
+                r.enabled = obj.optBoolean("enabled", true);
+                r.autoApply = obj.optBoolean("autoApply", false);
+
+                // Conditions
+                r.conditions = new ArrayList<>();
+                if (obj.has("conditions")) {
+                    JSONArray condArr = obj.getJSONArray("conditions");
+                    for (int j = 0; j < condArr.length(); j++) {
+                        JSONObject cObj = condArr.getJSONObject(j);
+                        String cType = cObj.optString("condType", "");
+                        Condition cond = null;
+                        if ("TAG".equals(cType)) {
+                            JSONArray tagsArr = cObj.optJSONArray("tags");
+                            List<String> tags = new ArrayList<>();
+                            if (tagsArr != null) {
+                                for (int k = 0; k < tagsArr.length(); k++) tags.add(tagsArr.getString(k));
+                            }
+                            boolean matchAny = cObj.optBoolean("matchAny", true);
+                            boolean negate = cObj.optBoolean("negate", false);
+                            cond = new TagCondition(tags, matchAny, negate);
+                        } else if ("NAME".equals(cType)) {
+                            String pattern = cObj.optString("pattern", "");
+                            String matchStr = cObj.optString("matchType", "CONTAINS");
+                            Condition.MatchType matchType = Condition.MatchType.CONTAINS;
+                            try { matchType = Condition.MatchType.valueOf(matchStr); } catch (Exception ignored) {}
+                            boolean negate = cObj.optBoolean("negate", false);
+                            cond = new NameCondition(pattern, matchType, negate);
+                        } else if ("TYPE".equals(cType)) {
+                            String typeStr = cObj.optString("typeValue", "UNSUPPORTED");
+                            com.mediasorter.models.MediaFile.Type type = com.mediasorter.models.MediaFile.Type.UNSUPPORTED;
+                            try { type = com.mediasorter.models.MediaFile.Type.valueOf(typeStr); } catch (Exception ignored) {}
+                            boolean negate = cObj.optBoolean("negate", false);
+                            cond = new TypeCondition(type, negate);
+                        } else if ("SIZE".equals(cType)) {
+                            long threshold = cObj.optLong("threshold", 0);
+                            boolean greaterThan = cObj.optBoolean("greaterThan", true);
+                            boolean negate = cObj.optBoolean("negate", false);
+                            cond = new SizeCondition(threshold, greaterThan, negate);
+                        } else if ("DATE".equals(cType)) {
+                            int days = cObj.optInt("days", 0);
+                            boolean olderThan = cObj.optBoolean("olderThan", true);
+                            boolean negate = cObj.optBoolean("negate", false);
+                            cond = new DateCondition(days, olderThan, negate);
+                        } else if ("STATUS".equals(cType)) {
+                            String statusStr = cObj.optString("status", "NONE");
+                            com.mediasorter.FileStatus.Status status = com.mediasorter.FileStatus.Status.NONE;
+                            try { status = com.mediasorter.FileStatus.Status.valueOf(statusStr); } catch (Exception ignored) {}
+                            boolean negate = cObj.optBoolean("negate", false);
+                            cond = new StatusCondition(status, negate);
+                        } else if ("FOLDER".equals(cType)) {
+                            String folderPath = cObj.optString("folderPath", "");
+                            boolean negate = cObj.optBoolean("negate", false);
+                            cond = new FolderCondition(folderPath, negate);
+                        }
+                        if (cond != null) r.conditions.add(cond);
+                    }
+                }
+
+                // Action
+                r.action = null;
+                if (obj.has("action")) {
+                    JSONObject aObj = obj.getJSONObject("action");
+                    r.action = deserializeAction(aObj);
+                }
+
+                rules.add(r);
+            }
+        } catch (Exception ignored) {}
+        return rules;
+    }
+
+    public static void saveRulesDirect(Context context, List<Rule> rules) {
+        saveRules(context, rules);
+    }
 }

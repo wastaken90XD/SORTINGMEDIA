@@ -3,6 +3,8 @@ package com.mediasorter;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.DialogInterface;
+import com.mediasorter.features.RandomGenerator;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -223,6 +225,7 @@ public class MainActivity extends Activity
                                                     "Rename selected",
                                                     "Analyze colors",
                                                     "Delete selected",
+                                                    "Auto-Link Sequential",
                                                     "Cancel"
                                             },
                                             (d, which) -> {
@@ -232,6 +235,7 @@ public class MainActivity extends Activity
                                                 else if (which == 3) showBatchRenameDialog();
                                                 else if (which == 4) showColorAnalysisDialog();
                                                 else if (which == 5) showBatchDeleteDialog();
+                                                else if (which == 6) showAutoLinkSequentialDialog();
                                                 else                 mediaAdapter.exitSelectMode();
                                             })
                                     .show());
@@ -317,11 +321,17 @@ public class MainActivity extends Activity
 
         progressLabel = findViewById(R.id.progressLabel);
         searchBar     = findViewById(R.id.searchBar);
+        if (searchBar != null) {
+            searchBar.setHint("Search " + RandomGenerator.randomSyllableTag() + "…");
+        }
 
         searchBar.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
             @Override public void afterTextChanged(Editable s) {}
             @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                if (searchBar != null && s.toString().trim().isEmpty()) {
+                    searchBar.setHint("Search " + RandomGenerator.randomSyllableTag() + "…");
+                }
                 scheduleRefresh();
             }
         });
@@ -444,21 +454,76 @@ public class MainActivity extends Activity
             return true;
         });
 
-        findViewById(R.id.btnGroupBy).setOnClickListener(v -> showGroupMenu(v));
+        findViewById(R.id.btnGroupBy).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showGroupMenu(v);
+            }
+        });
 
-        findViewById(R.id.btnDashboard).setOnClickListener(v -> {
-    // No Intent extras: the full index can be thousands of Serializable
-    // MediaFiles, which overflows the binder transaction limit
-    // (TransactionTooLargeException). DashboardActivity reads the static
-    // snapshots instead; extras stay as a compatibility fallback there.
-    startActivity(new Intent(this, DashboardActivity.class));
-});
+        findViewById(R.id.btnDashboard).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // No Intent extras: the full index can be thousands of Serializable
+                // MediaFiles, which overflows the binder transaction limit
+                // (TransactionTooLargeException). DashboardActivity reads the static
+                // snapshots instead; extras stay as a compatibility fallback there.
+                startActivity(new Intent(MainActivity.this, DashboardActivity.class));
+            }
+        });
 
-        findViewById(R.id.btnOrganizer).setOnClickListener(v ->
-            startActivity(new Intent(this, RulesActivity.class)));
+        findViewById(R.id.btnSurprise).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (fullList == null || fullList.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Nothing to pick from", Toast.LENGTH_SHORT).show();
+                    return;
+                }
 
-        findViewById(R.id.btnSettings).setOnClickListener(v ->
-                startActivity(new Intent(this, SettingsActivity.class)));
+                RecyclerView.LayoutManager lm = fileBrowser.getLayoutManager();
+                int firstVisible = -1;
+                if (lm instanceof LinearLayoutManager) {
+                    firstVisible = ((LinearLayoutManager) lm).findFirstVisibleItemPosition();
+                }
+                final int previousVisiblePos = firstVisible;
+
+                int pickedIndex = RandomGenerator.pick(fullList.size());
+                if (pickedIndex < 0) return;
+                if (pickedIndex >= fullList.size()) {
+                    pickedIndex = fullList.size() - 1;
+                }
+
+                final MediaFile pickedFile = fullList.get(pickedIndex);
+                java.io.File fileObj = new java.io.File(pickedFile.getPath());
+                if (!fileObj.exists() || !fileObj.canRead()) {
+                    if (previousVisiblePos >= 0) {
+                        fileBrowser.scrollToPosition(previousVisiblePos);
+                    }
+                    Toast.makeText(MainActivity.this, "Failed to load picked file", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                currentIndex = pickedIndex;
+                loadFileAtIndex(currentIndex);
+
+                centerScrollToPosition(currentIndex, previousVisiblePos);
+                Toast.makeText(MainActivity.this, "Surprise! Picked a random file.", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        findViewById(R.id.btnOrganizer).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, RulesActivity.class));
+            }
+        });
+
+        findViewById(R.id.btnSettings).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, SettingsActivity.class));
+            }
+        });
 
         Button btnDelete = findViewById(R.id.btnDelete);
         if (btnDelete != null) {
@@ -616,6 +681,7 @@ public class MainActivity extends Activity
             // Also try to keep it visible in the list
             scrollFileListToCurrent(currentIndex);
         }
+        updateEmptyState();
     }
 
     private void shiftWindowIfNeeded(int absoluteIndex) {
@@ -660,6 +726,10 @@ public class MainActivity extends Activity
                 mediaAdapter.updateFileTags(file);
                 refreshSidePanel();
                 updateProgress();
+            } else if (step.action == GestureSettings.GestureAction.MACRO) {
+                executeMacro(step.tag);
+            } else if (step.action == GestureSettings.GestureAction.REPEAT_LAST_MACRO) {
+                executeRepeatLastMacro();
             } else {
                 executeAction(step.action);
             }
@@ -678,6 +748,10 @@ public class MainActivity extends Activity
                 mediaAdapter.updateFileTags(file);
                 refreshSidePanel();
                 updateProgress();
+            } else if (step.action == GestureSettings.GestureAction.MACRO) {
+                executeMacro(step.tag);
+            } else if (step.action == GestureSettings.GestureAction.REPEAT_LAST_MACRO) {
+                executeRepeatLastMacro();
             } else {
                 executeAction(step.action);
             }
@@ -693,6 +767,61 @@ public class MainActivity extends Activity
             case DONE:         handleDone();    break;
             case FILTER_CYCLE: cycleFilter();   break;
             case NOTHING:      break;
+        }
+    }
+
+    private String lastRunMacroId = "";
+
+    private void executeMacro(String id) {
+        if (id == null || id.isEmpty()) return;
+        GestureSettings.GestureMacro macro = gestureSettings.getMacro(id);
+        if (macro == null) {
+            Toast.makeText(this, "Macro not found", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        lastRunMacroId = id;
+
+        List<MediaFile> targets = new ArrayList<>();
+        if (mediaAdapter != null && mediaAdapter.isSelectMode() && !mediaAdapter.getSelectedFiles().isEmpty()) {
+            targets.addAll(mediaAdapter.getSelectedFiles());
+        } else {
+            if (currentIndex >= 0 && currentIndex < fullList.size()) {
+                targets.add(fullList.get(currentIndex));
+            }
+        }
+
+        if (targets.isEmpty()) {
+            Toast.makeText(this, "No file selected", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        com.mediasorter.organizer.Rule syntheticRule = new com.mediasorter.organizer.Rule();
+        syntheticRule.name = macro.name;
+        syntheticRule.enabled = true;
+        syntheticRule.conditions = new ArrayList<>();
+        syntheticRule.action = new com.mediasorter.organizer.MacroCompositeAction(macro.actions);
+
+        int failedStep = autoOrganizer.execute(syntheticRule, targets);
+
+        if (failedStep == -1) {
+            Toast.makeText(this, "Macro '" + macro.name + "' applied", Toast.LENGTH_SHORT).show();
+            for (MediaFile f : targets) {
+                mediaAdapter.updateFile(f);
+            }
+            scheduleRefresh();
+        } else {
+            autoOrganizer.undoLastRun();
+            Toast.makeText(this, "Macro '" + macro.name + "' failed at step " + (failedStep + 1), Toast.LENGTH_SHORT).show();
+            scheduleRefresh();
+        }
+    }
+
+    private void executeRepeatLastMacro() {
+        if (lastRunMacroId == null || lastRunMacroId.isEmpty()) {
+            Toast.makeText(this, "No macro run yet.", Toast.LENGTH_SHORT).show();
+        } else {
+            executeMacro(lastRunMacroId);
         }
     }
 
@@ -844,10 +973,10 @@ public class MainActivity extends Activity
     // ── Batch dialogs ─────────────────────────────────────────────────────────
 
     private void showBatchTagDialog() {
-        showBatchTagDialog(null);
+        showBatchTagDialog((Map<String, Integer>) null);
     }
 
-    private void showBatchTagDialog(final Map<String, Boolean> pendingEdits) {
+    private void showBatchTagDialog(final Map<String, Integer> pendingStates) {
         if (tagManager != null && !tagManager.isTagsEnabled()) {
             Toast.makeText(this,
                     "Tags are disabled (Settings → Main Window)",
@@ -868,40 +997,50 @@ public class MainActivity extends Activity
             return;
         }
 
-        final String[]  tagNames = new String[allTags.size()];
-        final boolean[] checked  = new boolean[allTags.size()];
-        for (int i = 0; i < allTags.size(); i++) {
-            tagNames[i] = allTags.get(i).getName();
-            // Pre-check tags that every selected file already carries
-            boolean allHave = true;
+        final List<QuickTagItem> items = new ArrayList<>();
+        for (Tag choice : allTags) {
+            String name = choice.getName();
+            int count = choice.getUsageCount();
+            int hasCount = 0;
             for (MediaFile f : selectedFiles) {
-                if (!f.hasTag(tagNames[i])) { allHave = false; break; }
+                if (f.hasTag(name)) {
+                    hasCount++;
+                }
             }
-            checked[i] = allHave;
+            int initialType;
+            if (hasCount == selectedFiles.size()) {
+                initialType = 1; // all have it
+            } else if (hasCount == 0) {
+                initialType = 0; // none have it
+            } else {
+                initialType = 2; // some have it (mixed)
+            }
+            
+            QuickTagItem item = new QuickTagItem(name, count, initialType);
+            if (pendingStates != null && pendingStates.containsKey(name)) {
+                item.currentType = pendingStates.get(name);
+            }
+            items.add(item);
         }
-        // Only boxes the user toggles are applied/removed (delta semantics) —
-        // untouched boxes leave partially tagged files exactly as they were.
-        final boolean[] initial = checked.clone();
 
-        // Re-apply edits captured before the "＋ New tag" detour (must happen
-        // AFTER cloning `initial`, which always mirrors file state).
-        if (pendingEdits != null) {
-            for (int i = 0; i < tagNames.length; i++) {
-                Boolean pending = pendingEdits.get(tagNames[i]);
-                if (pending != null) checked[i] = pending;
-            }
-        }
+        ListView listView = new ListView(this);
+        listView.setBackgroundColor(0xFF161616); // match background color of dark theme
+        listView.setDivider(new android.graphics.drawable.ColorDrawable(0xFF2A2A3E));
+        listView.setDividerHeight((int) (1 * getResources().getDisplayMetrics().density));
+        listView.setAdapter(new QuickTagListAdapter(items));
 
         new AlertDialog.Builder(this)
                 .setTitle("Tag " + selectedFiles.size() + " files")
-                .setMultiChoiceItems(tagNames, checked,
-                        (d, which, isChecked) -> checked[which] = isChecked)
+                .setView(listView)
                 .setPositiveButton("Apply", (d, w) -> {
-                    for (int i = 0; i < tagNames.length; i++) {
-                        if (checked[i] == initial[i]) continue;
+                    for (QuickTagItem item : items) {
+                        if (item.currentType == item.initialType) continue;
                         for (MediaFile file : selectedFiles) {
-                            if (checked[i]) tagManager.applyTag(file, tagNames[i]);
-                            else            tagManager.removeTag(file, tagNames[i]);
+                            if (item.currentType == 1) {
+                                tagManager.applyTag(file, item.name);
+                            } else if (item.currentType == 0) {
+                                tagManager.removeTag(file, item.name);
+                            }
                         }
                     }
                     for (MediaFile file : selectedFiles) mediaAdapter.updateFile(file);
@@ -913,10 +1052,9 @@ public class MainActivity extends Activity
                             Toast.LENGTH_SHORT).show();
                 })
                 .setNeutralButton("＋ New tag", (d, w) -> {
-                    // Snapshot the unapplied checkbox state so the detour into
-                    // the create dialog doesn't discard it
-                    Map<String, Boolean> edits = new java.util.HashMap<>();
-                    for (int i = 0; i < tagNames.length; i++) edits.put(tagNames[i], checked[i]);
+                    // Snapshot the current states
+                    Map<String, Integer> edits = new java.util.HashMap<>();
+                    for (QuickTagItem item : items) edits.put(item.name, item.currentType);
                     showNewTagDialog(selectedFiles, () -> showBatchTagDialog(edits));
                 })
                 .setNegativeButton("Cancel", null)
@@ -1580,6 +1718,12 @@ private Spinner makeSpinner(String[] options) {
             .setTitle("File details")
             .setMessage(sb.toString())
             .setPositiveButton("Close", null)
+            .setNeutralButton("Rename", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    showFileRenameDialog(file);
+                }
+            })
             .show();
     }
 
@@ -1762,11 +1906,11 @@ private Spinner makeSpinner(String[] options) {
      * checkbox edits survive the detour into the create dialog.
      */
     private void showQuickTagPopup(final List<MediaFile> targets) {
-        showQuickTagPopup(targets, null);
+        showQuickTagPopup(targets, (Map<String, Integer>) null);
     }
 
     private void showQuickTagPopup(final List<MediaFile> targets,
-                                   final Map<String, Boolean> pendingEdits) {
+                                   final Map<String, Integer> pendingStates) {
         if (targets == null || targets.isEmpty()) return;
         if (tagManager != null && !tagManager.isTagsEnabled()) {
             Toast.makeText(this,
@@ -1794,84 +1938,102 @@ private Spinner makeSpinner(String[] options) {
                 ? "Quick tags — " + targets.get(0).getName()
                 : "Quick tags — " + targets.size() + " files";
 
-        final String[]  names   = new String[choices.size()];
-        final boolean[] checked = new boolean[choices.size()];
-        for (int i = 0; i < choices.size(); i++) {
-            names[i] = choices.get(i).getName();
-            boolean allHave = true;
+        final List<QuickTagItem> items = new ArrayList<>();
+        for (Tag choice : choices) {
+            String name = choice.getName();
+            int count = choice.getUsageCount();
+            int hasCount = 0;
             for (MediaFile f : targets) {
-                if (!f.hasTag(names[i])) { allHave = false; break; }
+                if (f.hasTag(name)) {
+                    hasCount++;
+                }
             }
-            checked[i] = allHave;
-        }
-        // Snapshot of the initial state. Only boxes the user actually toggles
-        // are applied/removed — untouched boxes must leave files that only
-        // *partially* carry a tag exactly as they were (no silent stripping).
-        final boolean[] initial = checked.clone();
-
-        // Re-apply edits captured before the "＋ New tag" detour. This must
-        // happen AFTER cloning `initial` (which always mirrors file state) so
-        // the restored boxes still count as user toggles for the delta apply.
-        if (pendingEdits != null) {
-            for (int i = 0; i < names.length; i++) {
-                Boolean pending = pendingEdits.get(names[i]);
-                if (pending != null) checked[i] = pending;
+            int initialType;
+            if (hasCount == targets.size()) {
+                initialType = 1; // all have it
+            } else if (hasCount == 0) {
+                initialType = 0; // none have it
+            } else {
+                initialType = 2; // some have it (mixed)
             }
+            
+            QuickTagItem item = new QuickTagItem(name, count, initialType);
+            if (pendingStates != null && pendingStates.containsKey(name)) {
+                item.currentType = pendingStates.get(name);
+            }
+            items.add(item);
         }
 
-        // Keep the chooser open while several tags are selected. Applying the
-        // final checked state also allows tags to be removed in the same pass.
+        ListView listView = new ListView(this);
+        listView.setBackgroundColor(0xFF161616); // match background color of dark theme
+        listView.setDivider(new android.graphics.drawable.ColorDrawable(0xFF2A2A3E));
+        listView.setDividerHeight((int) (1 * getResources().getDisplayMetrics().density));
+        listView.setAdapter(new QuickTagListAdapter(items));
+
         new AlertDialog.Builder(this)
                 .setTitle(title)
-                .setMultiChoiceItems(names, checked,
-                        (dialog, which, isChecked) -> checked[which] = isChecked)
-                .setPositiveButton("Apply", (dialog, which) ->
-                        applyTagDelta(targets, names, initial, checked))
+                .setView(listView)
+                .setPositiveButton("Apply", (dialog, which) -> {
+                    for (QuickTagItem item : items) {
+                        if (item.currentType == item.initialType) continue; // untouched
+                        for (MediaFile f : targets) {
+                            if (item.currentType == 1) {
+                                tagManager.applyTag(f, item.name);
+                            } else if (item.currentType == 0) {
+                                tagManager.removeTag(f, item.name);
+                            }
+                        }
+                    }
+                    for (MediaFile f : targets) mediaAdapter.updateFileTags(f);
+                    syncUiAfterTagging(targets);
+                    if (mediaAdapter.isSelectMode()) {
+                        mediaAdapter.exitSelectMode();
+                        btnScan.setText("SCAN");
+                        btnScan.setOnClickListener(v -> startScan());
+                    }
+                    Toast.makeText(this,
+                            targets.size() == 1 ? "Tags updated"
+                                                : "Tagged " + targets.size() + " files",
+                            Toast.LENGTH_SHORT).show();
+                })
                 .setNeutralButton("＋ New tag", (dialog, which) -> {
-                    // Snapshot the unapplied checkbox state so the detour into
-                    // the create dialog doesn't discard it
-                    Map<String, Boolean> edits = new java.util.HashMap<>();
-                    for (int i = 0; i < names.length; i++) edits.put(names[i], checked[i]);
+                    Map<String, Integer> edits = new java.util.HashMap<>();
+                    for (QuickTagItem item : items) edits.put(item.name, item.currentType);
                     showNewTagDialog(targets, () -> showQuickTagPopup(targets, edits));
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
     }
 
-    /**
-     * Applies the difference between the popup's initial and final checked
-     * states to every target, then refreshes the UI. Checkboxes the user did
-     * not touch are deliberately skipped: when only some targets carried a
-     * tag, forcing the (unchecked) state onto all of them would silently
-     * strip that tag from the files that had it.
-     */
-    private void applyTagDelta(List<MediaFile> targets, String[] names,
-                               boolean[] initial, boolean[] checked) {
-        for (int i = 0; i < names.length; i++) {
-            if (checked[i] == initial[i]) continue;  // untouched — leave as-is
-            for (MediaFile f : targets) {
-                if (checked[i]) tagManager.applyTag(f, names[i]);
-                else            tagManager.removeTag(f, names[i]);
-            }
-        }
-        for (MediaFile f : targets) mediaAdapter.updateFileTags(f);
-        syncUiAfterTagging(targets);
-        if (mediaAdapter.isSelectMode()) {
-            mediaAdapter.exitSelectMode();
-            btnScan.setText("SCAN");
-            btnScan.setOnClickListener(v -> startScan());
-        }
-        Toast.makeText(this,
-                targets.size() == 1 ? "Tags updated"
-                                    : "Tagged " + targets.size() + " files",
-                Toast.LENGTH_SHORT).show();
-    }
-
     /** Dialog that creates a brand-new tag and applies it to the targets. */
     private void showNewTagDialog(final List<MediaFile> targets, final Runnable onDone) {
+        showNewTagDialog(targets, onDone, "");
+    }
+
+    private void showNewTagDialog(final List<MediaFile> targets, final Runnable onDone, final String prefilledName) {
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.HORIZONTAL);
+        container.setGravity(Gravity.CENTER_VERTICAL);
+
         final EditText input = new EditText(this);
         input.setHint("Tag name");
         input.setTextColor(0xFFFFFFFF);
+        if (prefilledName != null && !prefilledName.isEmpty()) {
+            input.setText(prefilledName);
+            input.setSelection(prefilledName.length());
+        }
+        LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
+        input.setLayoutParams(inputLp);
+
+        Button btnRand = new Button(this);
+        btnRand.setText("🎲");
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        btnRand.setLayoutParams(btnLp);
+
+        container.addView(input);
+        container.addView(btnRand);
 
         FrameLayout box = new FrameLayout(this);
         int pad = (int) (20 * getResources().getDisplayMetrics().density);
@@ -1879,8 +2041,8 @@ private Spinner makeSpinner(String[] options) {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT);
         lp.setMargins(pad, 0, pad, 0);
-        input.setLayoutParams(lp);
-        box.addView(input);
+        container.setLayoutParams(lp);
+        box.addView(container);
 
         String title = "Create tag";
         if (targets != null && !targets.isEmpty()) {
@@ -1889,38 +2051,741 @@ private Spinner makeSpinner(String[] options) {
                     : " — applied to " + targets.size() + " files";
         }
 
-        new AlertDialog.Builder(this)
+        final AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle(title)
                 .setView(box)
-                .setPositiveButton("Create", (d, w) -> {
-                    String name = input.getText().toString().trim();
-                    if (!name.isEmpty()) {
-                        if (name.contains(",")) {
-                            // Commas break the recent-tags persistence format
-                            Toast.makeText(this, "Tag names can't contain commas",
-                                    Toast.LENGTH_SHORT).show();
-                            if (onDone != null) onDone.run();
-                            return;
-                        }
-                        boolean existed = tagManager.hasTagName(name);
-                        tagManager.createTag(name);
-                        if (targets != null) {
-                            for (MediaFile f : targets) {
-                                tagManager.applyTag(f, name);
-                                mediaAdapter.updateFileTags(f);
-                            }
-                            syncUiAfterTagging(targets);
-                        }
-                        Toast.makeText(this,
-                                existed ? "Tag \"" + name + "\" applied"
-                                        : "Tag \"" + name + "\" created",
-                                Toast.LENGTH_SHORT).show();
+                .setPositiveButton("Create", null)
+                .setNegativeButton("Back", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        if (onDone != null) onDone.run();
                     }
-                    if (onDone != null) onDone.run();
                 })
-                .setNegativeButton("Back", (d, w) -> {
+                .create();
+
+        dialog.show();
+
+        dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String name = input.getText().toString().trim();
+                if (!name.isEmpty()) {
+                    if (name.contains(",")) {
+                        Toast.makeText(MainActivity.this, "Tag names can't contain commas",
+                                Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    boolean existed = tagManager.hasTagName(name);
+                    tagManager.createTag(name);
+                    if (targets != null) {
+                        for (MediaFile f : targets) {
+                            tagManager.applyTag(f, name);
+                            mediaAdapter.updateFileTags(f);
+                        }
+                        syncUiAfterTagging(targets);
+                    }
+                    Toast.makeText(MainActivity.this,
+                            existed ? "Tag \"" + name + "\" applied"
+                                    : "Tag \"" + name + "\" created",
+                            Toast.LENGTH_SHORT).show();
+                    dialog.dismiss();
                     if (onDone != null) onDone.run();
+                } else {
+                    Toast.makeText(MainActivity.this, "Please enter a tag name", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+
+        final int[] cycleState = new int[]{0};
+
+        btnRand.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (input == null) return;
+                String currentInput = input.getText().toString().trim();
+                java.util.Set<String> existingTags = new java.util.HashSet<String>();
+                java.util.List<Tag> allTagsSnapshot = new java.util.ArrayList<Tag>(tagManager.getAllTags());
+                for (Tag t : allTagsSnapshot) {
+                    existingTags.add(t.getName());
+                }
+
+                if (currentInput.isEmpty()) {
+                    String generated = "";
+                    if (cycleState[0] == 0) {
+                        generated = RandomGenerator.randomPlaceholderTag();
+                        cycleState[0] = 1;
+                    } else if (cycleState[0] == 1) {
+                        generated = RandomGenerator.randomSyllableTag();
+                        cycleState[0] = 2;
+                    } else {
+                        generated = RandomGenerator.generateThirdCycleTag(existingTags);
+                        cycleState[0] = 0;
+                    }
+                    if (input != null) {
+                        input.setText(generated);
+                        input.setSelection(generated.length());
+                    }
+                } else {
+                    String generated = RandomGenerator.uniqueSuffixTag(currentInput, existingTags);
+                    if (input != null) {
+                        input.setText(generated);
+                        input.setSelection(generated.length());
+                    }
+                }
+            }
+        });
+    }
+
+    private void showAutoLinkSequentialDialog() {
+        final List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
+        if (selectedFiles.isEmpty()) return;
+
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+
+        TextView countView = new TextView(this);
+        countView.setText("Selected files to link: " + selectedFiles.size());
+        countView.setTextColor(0xFFFFFFFF);
+        countView.setTextSize(16);
+        container.addView(countView);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        final EditText prefixInput = new EditText(this);
+        final java.util.Set<String> usedPrefixes = new java.util.HashSet<String>();
+        for (Tag t : tagManager.getAllTags()) {
+            if (t.getName().startsWith("link_")) {
+                usedPrefixes.add(t.getName().substring(5));
+            }
+        }
+        String initPrefix = RandomGenerator.randomGroupPrefix(usedPrefixes);
+        prefixInput.setText(initPrefix);
+        prefixInput.setTextColor(0xFFFFFFFF);
+        LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
+        prefixInput.setLayoutParams(inputLp);
+
+        Button btnRand = new Button(this);
+        btnRand.setText("🎲");
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        btnRand.setLayoutParams(btnLp);
+
+        row.addView(prefixInput);
+        row.addView(btnRand);
+        container.addView(row);
+
+        final TextView previewView = new TextView(this);
+        previewView.setTextColor(0xFFAAAAAA);
+        previewView.setPadding(0, 10, 0, 10);
+        container.addView(previewView);
+
+        final Runnable updatePreview = new Runnable() {
+            @Override
+            public void run() {
+                String prefix = prefixInput.getText().toString().trim();
+                if (prefix.isEmpty()) {
+                    previewView.setText("Preview: enter a prefix");
+                    return;
+                }
+                String groupTag = "link_" + prefix;
+                StringBuilder sb = new StringBuilder();
+                sb.append("Group Tag: ").append(groupTag).append("\nSequence Preview:\n");
+
+                int limit = Math.min(3, selectedFiles.size());
+                java.util.Set<String> tempSet = new java.util.HashSet<String>();
+                for (Tag t : tagManager.getAllTags()) {
+                    tempSet.add(t.getName());
+                }
+                java.util.List<String> previewTags = RandomGenerator.allocateSequenceTags(groupTag, selectedFiles.size(), tempSet);
+                for (int i = 0; i < limit; i++) {
+                    sb.append(" - ").append(previewTags.get(i)).append("\n");
+                }
+                if (selectedFiles.size() > 3) {
+                    sb.append(" - ...\n");
+                }
+                sb.append("Total sequence tags to apply: ").append(selectedFiles.size());
+                previewView.setText(sb.toString());
+            }
+        };
+
+        prefixInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) { updatePreview.run(); }
+        });
+
+        updatePreview.run();
+
+        btnRand.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String current = prefixInput.getText().toString().trim();
+                if (!current.isEmpty()) {
+                    usedPrefixes.add(current);
+                }
+                String nextPrefix = RandomGenerator.randomGroupPrefix(usedPrefixes);
+                prefixInput.setText(nextPrefix);
+                prefixInput.setSelection(nextPrefix.length());
+            }
+        });
+
+        FrameLayout box = new FrameLayout(this);
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(pad, pad, pad, pad);
+        container.setLayoutParams(lp);
+        box.addView(container);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Sequential Auto-Link")
+                .setView(box)
+                .setPositiveButton("Link Files", null)
+                .setNegativeButton("Cancel", null)
+                .create();
+
+        dialog.show();
+
+        dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                final String prefix = prefixInput.getText().toString().trim();
+                if (prefix.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Prefix cannot be empty", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (prefix.contains(",")) {
+                    Toast.makeText(MainActivity.this, "Prefix cannot contain commas", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                final String groupTag = "link_" + prefix;
+                tagManager.createTag(groupTag);
+
+                java.util.Set<String> existingTags = new java.util.HashSet<String>();
+                for (Tag t : tagManager.getAllTags()) {
+                    existingTags.add(t.getName());
+                }
+
+                java.util.List<String> sequenceTags = RandomGenerator.allocateSequenceTags(groupTag, selectedFiles.size(), existingTags);
+
+                for (int i = 0; i < selectedFiles.size(); i++) {
+                    MediaFile file = selectedFiles.get(i);
+                    String seqTag = sequenceTags.get(i);
+
+                    tagManager.createTag(seqTag);
+
+                    tagManager.applyTag(file, groupTag);
+                    tagManager.applyTag(file, seqTag);
+                }
+
+                for (MediaFile file : selectedFiles) {
+                    mediaAdapter.updateFile(file);
+                }
+                mediaAdapter.exitSelectMode();
+                btnScan.setText("SCAN");
+                btnScan.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v2) {
+                        startScan();
+                    }
+                });
+                scheduleRefresh();
+
+                dialog.dismiss();
+
+                if (prefix == null || prefix.trim().isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Operation complete", Toast.LENGTH_LONG).show();
+                    return;
+                }
+
+                if (MainActivity.this.isFinishing()) {
+                    return;
+                }
+
+                Toast.makeText(MainActivity.this, "Linked " + selectedFiles.size() + " files as link_" + prefix, Toast.LENGTH_LONG).show();
+
+                final String searchPrefix = groupTag;
+                final java.lang.ref.WeakReference<MainActivity> activityRef = new java.lang.ref.WeakReference<MainActivity>(MainActivity.this);
+
+                new AlertDialog.Builder(MainActivity.this)
+                        .setPositiveButton("View", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface d, int w) {
+                                MainActivity act = activityRef.get();
+                                if (act != null && !act.isFinishing()) {
+                                    if (act.searchBar != null) {
+                                        act.searchBar.setText(searchPrefix);
+                                    } else {
+                                        android.util.Log.w("MainActivity", "searchBar is null when View action fired");
+                                    }
+                                }
+                            }
+                        })
+                        .setNegativeButton("Dismiss", null)
+                        .show();
+            }
+        });
+    }
+
+    private void showFileRenameDialog(final MediaFile file) {
+        if (file == null) return;
+        final String origName = file.getName();
+        final int dot = origName.lastIndexOf('.');
+        final String ext = dot >= 0 ? origName.substring(dot) : "";
+
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.HORIZONTAL);
+        container.setGravity(Gravity.CENTER_VERTICAL);
+
+        final EditText nameEdit = new EditText(this);
+        nameEdit.setText(origName);
+        nameEdit.setTextColor(0xFFFFFFFF);
+        LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
+        nameEdit.setLayoutParams(inputLp);
+
+        Button btnRand = new Button(this);
+        btnRand.setText("🎲");
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        btnRand.setLayoutParams(btnLp);
+
+        container.addView(nameEdit);
+        container.addView(btnRand);
+
+        FrameLayout box = new FrameLayout(this);
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(pad, 0, pad, 0);
+        container.setLayoutParams(lp);
+        box.addView(container);
+
+        btnRand.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String inputVal = nameEdit.getText().toString().trim();
+                java.io.File parent = new java.io.File(file.getPath()).getParentFile();
+                java.util.Set<String> existingFilenames = new java.util.HashSet<String>();
+                if (parent != null && parent.exists() && parent.isDirectory()) {
+                    String[] files = parent.list();
+                    if (files != null) {
+                        for (String f : files) {
+                            existingFilenames.add(f);
+                        }
+                    }
+                }
+
+                if (inputVal.isEmpty()) {
+                    String generated = RandomGenerator.randomSyllableTag() + ext;
+                    nameEdit.setText(generated);
+                    nameEdit.setSelection(generated.length());
+                } else {
+                    String generated = RandomGenerator.uniqueSuffixTag(inputVal, existingFilenames);
+                    nameEdit.setText(generated);
+                    nameEdit.setSelection(generated.length());
+                }
+            }
+        });
+
+        new AlertDialog.Builder(this)
+                .setTitle("Rename File")
+                .setView(box)
+                .setPositiveButton("Rename", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        String newName = nameEdit.getText().toString().trim();
+                        if (!newName.isEmpty() && !newName.equals(origName)) {
+                            java.io.File src = new java.io.File(file.getPath());
+                            java.io.File dst = new java.io.File(src.getParent(), newName);
+                            if (dst.exists()) {
+                                Toast.makeText(MainActivity.this, "File already exists", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+                            if (src.renameTo(dst)) {
+                                file.setPath(dst.getAbsolutePath());
+                                scheduleRefresh();
+                                Toast.makeText(MainActivity.this, "File renamed successfully", Toast.LENGTH_SHORT).show();
+                            } else {
+                                Toast.makeText(MainActivity.this, "Rename failed", Toast.LENGTH_SHORT).show();
+                            }
+                        }
+                    }
                 })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showRenameSequenceDialog() {
+        final List<MediaFile> selectedFiles = mediaAdapter.getSelectedFiles();
+        if (selectedFiles.isEmpty()) return;
+
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+
+        TextView countView = new TextView(this);
+        countView.setText("Files to rename: " + selectedFiles.size());
+        countView.setTextColor(0xFFFFFFFF);
+        countView.setTextSize(16);
+        container.addView(countView);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        final EditText prefixInput = new EditText(this);
+        final java.util.Set<String> usedPrefixes = new java.util.HashSet<String>();
+        String initPrefix = RandomGenerator.randomGroupPrefix(usedPrefixes);
+        prefixInput.setText(initPrefix);
+        prefixInput.setTextColor(0xFFFFFFFF);
+        LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
+        prefixInput.setLayoutParams(inputLp);
+
+        Button btnRand = new Button(this);
+        btnRand.setText("🎲");
+        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        btnRand.setLayoutParams(btnLp);
+
+        row.addView(prefixInput);
+        row.addView(btnRand);
+        container.addView(row);
+
+        final TextView previewView = new TextView(this);
+        previewView.setTextColor(0xFFAAAAAA);
+        previewView.setPadding(0, 10, 0, 10);
+        container.addView(previewView);
+
+        final Runnable updatePreview = new Runnable() {
+            @Override
+            public void run() {
+                String prefix = prefixInput.getText().toString().trim();
+                if (prefix.isEmpty()) {
+                    previewView.setText("Preview: enter a prefix");
+                    return;
+                }
+                StringBuilder sb = new StringBuilder();
+                sb.append("Rename Preview:\n");
+                int limit = Math.min(3, selectedFiles.size());
+                for (int i = 0; i < limit; i++) {
+                    MediaFile file = selectedFiles.get(i);
+                    String origName = file.getName();
+                    int dot = origName.lastIndexOf('.');
+                    String ext = dot >= 0 ? origName.substring(dot) : "";
+                    sb.append(" - ").append(origName).append(" → ").append(prefix).append("_seq_").append(RandomGenerator.sequenceLabel(i)).append(ext).append("\n");
+                }
+                if (selectedFiles.size() > 3) {
+                    sb.append(" - ...\n");
+                }
+                sb.append("Total files: ").append(selectedFiles.size());
+                previewView.setText(sb.toString());
+            }
+        };
+
+        prefixInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) { updatePreview.run(); }
+        });
+
+        updatePreview.run();
+
+        btnRand.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String current = prefixInput.getText().toString().trim();
+                if (!current.isEmpty()) {
+                    usedPrefixes.add(current);
+                }
+                String nextPrefix = RandomGenerator.randomGroupPrefix(usedPrefixes);
+                prefixInput.setText(nextPrefix);
+                prefixInput.setSelection(nextPrefix.length());
+            }
+        });
+
+        FrameLayout box = new FrameLayout(this);
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(pad, pad, pad, pad);
+        container.setLayoutParams(lp);
+        box.addView(container);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Rename Sequence")
+                .setView(box)
+                .setPositiveButton("Rename", null)
+                .setNegativeButton("Cancel", null)
+                .create();
+
+        dialog.show();
+
+        dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                final String prefix = prefixInput.getText().toString().trim();
+                if (prefix.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Prefix cannot be empty", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                int successCount = 0;
+                for (int i = 0; i < selectedFiles.size(); i++) {
+                    MediaFile file = selectedFiles.get(i);
+                    java.io.File src = new java.io.File(file.getPath());
+                    java.io.File parent = src.getParentFile();
+
+                    java.util.Set<String> existingFilenames = new java.util.HashSet<String>();
+                    if (parent != null && parent.exists() && parent.isDirectory()) {
+                        String[] list = parent.list();
+                        if (list != null) {
+                            for (String s : list) {
+                                existingFilenames.add(s);
+                            }
+                        }
+                    }
+
+                    String name = src.getName();
+                    int dot = name.lastIndexOf('.');
+                    String ext = dot >= 0 ? name.substring(dot) : "";
+
+                    int idx = i;
+                    String newName;
+                    while (true) {
+                        String seqLabel = RandomGenerator.sequenceLabel(idx);
+                        newName = prefix + "_seq_" + seqLabel + ext;
+                        if (!existingFilenames.contains(newName)) {
+                            break;
+                        }
+                        idx++;
+                    }
+
+                    java.io.File dst = new java.io.File(parent, newName);
+                    if (src.renameTo(dst)) {
+                        file.setPath(dst.getAbsolutePath());
+                        successCount++;
+                    }
+                }
+
+                mediaAdapter.exitSelectMode();
+                btnScan.setText("SCAN");
+                btnScan.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v2) {
+                        startScan();
+                    }
+                });
+                scheduleRefresh();
+
+                dialog.dismiss();
+
+                if (prefix == null || prefix.trim().isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Operation complete", Toast.LENGTH_LONG).show();
+                    return;
+                }
+
+                if (MainActivity.this.isFinishing()) {
+                    return;
+                }
+
+                Toast.makeText(MainActivity.this, "Sequence renamed: " + successCount + " files with prefix " + prefix, Toast.LENGTH_LONG).show();
+
+                final String searchPrefix = prefix;
+                final java.lang.ref.WeakReference<MainActivity> activityRef = new java.lang.ref.WeakReference<MainActivity>(MainActivity.this);
+
+                new AlertDialog.Builder(MainActivity.this)
+                        .setPositiveButton("View", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface d, int w) {
+                                MainActivity act = activityRef.get();
+                                if (act != null && !act.isFinishing()) {
+                                    if (act.searchBar != null) {
+                                        act.searchBar.setText(searchPrefix);
+                                    } else {
+                                        android.util.Log.w("MainActivity", "searchBar is null when View action fired");
+                                    }
+                                }
+                            }
+                        })
+                        .setNegativeButton("Dismiss", null)
+                        .show();
+            }
+        });
+    }
+
+    private void centerScrollToPosition(final int pickedIndex, final int previousVisiblePos) {
+        if (fileBrowser == null) return;
+
+        if (fileBrowser.isAnimating()) {
+            final java.lang.ref.WeakReference<RecyclerView> rvRef = new java.lang.ref.WeakReference<RecyclerView>(fileBrowser);
+            fileBrowser.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    RecyclerView rv = rvRef.get();
+                    if (rv != null) {
+                        centerScrollToPosition(pickedIndex, previousVisiblePos);
+                    }
+                }
+            }, 50);
+            return;
+        }
+
+        final int rvHeight = fileBrowser.getHeight();
+        if (rvHeight == 0) {
+            final java.lang.ref.WeakReference<RecyclerView> rvRef = new java.lang.ref.WeakReference<RecyclerView>(fileBrowser);
+            fileBrowser.post(new Runnable() {
+                @Override
+                public void run() {
+                    RecyclerView rv = rvRef.get();
+                    if (rv == null) return;
+                    int secondTryHeight = rv.getHeight();
+                    if (secondTryHeight == 0) {
+                        rv.scrollToPosition(pickedIndex);
+                    } else {
+                        executeCenteredScroll(pickedIndex, secondTryHeight);
+                    }
+                }
+            });
+        } else {
+            executeCenteredScroll(pickedIndex, rvHeight);
+        }
+    }
+
+    private void executeCenteredScroll(final int pickedIndex, int rvHeight) {
+        if (fileBrowser == null) return;
+        RecyclerView.LayoutManager lm = fileBrowser.getLayoutManager();
+        if (!(lm instanceof LinearLayoutManager)) {
+            fileBrowser.scrollToPosition(pickedIndex);
+            return;
+        }
+
+        LinearLayoutManager llm = (LinearLayoutManager) lm;
+
+        int estimatedItemHeight = 0;
+        int firstCompletelyVisible = llm.findFirstCompletelyVisibleItemPosition();
+        if (firstCompletelyVisible != RecyclerView.NO_POSITION) {
+            RecyclerView.ViewHolder vh = fileBrowser.findViewHolderForAdapterPosition(firstCompletelyVisible);
+            if (vh != null && vh.itemView != null) {
+                estimatedItemHeight = vh.itemView.getHeight();
+            }
+        }
+
+        if (estimatedItemHeight == 0) {
+            int firstPartiallyVisible = llm.findFirstVisibleItemPosition();
+            if (firstPartiallyVisible != RecyclerView.NO_POSITION) {
+                RecyclerView.ViewHolder vh = fileBrowser.findViewHolderForAdapterPosition(firstPartiallyVisible);
+                if (vh != null && vh.itemView != null) {
+                    estimatedItemHeight = vh.itemView.getHeight();
+                }
+            }
+        }
+
+        if (estimatedItemHeight == 0) {
+            float density = getResources().getDisplayMetrics().density;
+            estimatedItemHeight = (int) (72 * density);
+        }
+
+        int offset = (rvHeight / 2) - (estimatedItemHeight / 2);
+        if (offset < 0) {
+            offset = 0;
+        }
+
+        llm.scrollToPositionWithOffset(pickedIndex, offset);
+
+        final int targetIndex = pickedIndex;
+        final java.lang.ref.WeakReference<RecyclerView> rvRef = new java.lang.ref.WeakReference<RecyclerView>(fileBrowser);
+        fileBrowser.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                RecyclerView rv = rvRef.get();
+                if (rv == null) return;
+                RecyclerView.LayoutManager currentLm = rv.getLayoutManager();
+                if (currentLm != null) {
+                    final View pickedView = currentLm.findViewByPosition(targetIndex);
+                    if (pickedView != null) {
+                        // Store the current background drawable
+                        final android.graphics.drawable.Drawable originalBg = pickedView.getBackground();
+
+                        // Derive highlight tint from selection color 0xFF1A1A4E
+                        int baseColor = 0xFF1A1A4E;
+                        if (originalBg instanceof android.graphics.drawable.ColorDrawable) {
+                            int color = ((android.graphics.drawable.ColorDrawable) originalBg).getColor();
+                            if (color != 0) {
+                                baseColor = color;
+                            }
+                        }
+
+                        int r = android.graphics.Color.red(baseColor);
+                        int g = android.graphics.Color.green(baseColor);
+                        int b = android.graphics.Color.blue(baseColor);
+                        int highlightTint = android.graphics.Color.argb(100, r, g, b);
+
+                        // Highlight using derived tint
+                        pickedView.setBackgroundColor(highlightTint);
+
+                        // Restore original background drawable after 600ms
+                        pickedView.postDelayed(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (pickedView != null) {
+                                    pickedView.setBackground(originalBg);
+                                }
+                            }
+                        }, 600);
+                    }
+                }
+            }
+        }, 150);
+    }
+
+    private void updateEmptyState() {
+        TextView emptyView = findViewById(R.id.emptyStateView);
+        if (emptyView == null) return;
+
+        if (fullList == null || fullList.isEmpty()) {
+            emptyView.setVisibility(View.VISIBLE);
+
+            final String suggestedTag = RandomGenerator.randomSyllableTag();
+            String fullText = "No files found.\n\nSuggested tag: " + suggestedTag + "\n(Tap to create)";
+
+            android.text.SpannableString ss = new android.text.SpannableString(fullText);
+            int start = fullText.indexOf(suggestedTag);
+            int end = start + suggestedTag.length();
+
+            if (start >= 0) {
+                ss.setSpan(new android.text.style.ClickableSpan() {
+                    @Override
+                    public void onClick(View widget) {
+                        showNewTagDialogPreFilled(suggestedTag);
+                    }
+
+                    @Override
+                    public void updateDrawState(android.text.TextPaint ds) {
+                        super.updateDrawState(ds);
+                        ds.setColor(0xFFE94560);
+                        ds.setUnderlineText(true);
+                    }
+                }, start, end, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+
+            emptyView.setText(ss);
+            emptyView.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
+        } else {
+            emptyView.setVisibility(View.GONE);
+        }
+    }
+
+    private void showNewTagDialogPreFilled(final String prefilledName) {
+        showNewTagDialog(null, null, prefilledName);
+    }
                 .show();
     }
 
@@ -2035,4 +2900,98 @@ private Spinner makeSpinner(String[] options) {
             updateProgress();
         });
     }
-}
+
+    private static class QuickTagItem {
+        String name;
+        int count;
+        int initialType; // 0 = none, 1 = all, 2 = some (mixed)
+        int currentType; // 0 = none, 1 = all, 2 = some (mixed)
+
+        QuickTagItem(String name, int count, int initialType) {
+            this.name = name;
+            this.count = count;
+            this.initialType = initialType;
+            this.currentType = initialType;
+        }
+    }
+
+    private class QuickTagListAdapter extends android.widget.BaseAdapter {
+        private final List<QuickTagItem> items;
+        private final android.view.LayoutInflater inflater;
+
+        QuickTagListAdapter(List<QuickTagItem> items) {
+            this.items = items;
+            this.inflater = android.view.LayoutInflater.from(MainActivity.this);
+        }
+
+        @Override
+        public int getCount() { return items.size(); }
+
+        @Override
+        public Object getItem(int position) { return items.get(position); }
+
+        @Override
+        public long getItemId(int position) { return position; }
+
+        @Override
+        public android.view.View getView(int position, android.view.View convertView, android.view.ViewGroup parent) {
+            if (convertView == null) {
+                convertView = inflater.inflate(R.layout.item_tag, parent, false);
+            }
+
+            final QuickTagItem item = items.get(position);
+            android.widget.TextView tagName = convertView.findViewById(R.id.tagName);
+            android.widget.TextView tagCount = convertView.findViewById(R.id.tagCount);
+            android.widget.CheckBox tagCheck = convertView.findViewById(R.id.tagCheck);
+
+            tagCount.setText(String.valueOf(item.count));
+
+            tagCheck.setOnCheckedChangeListener(null);
+            if (item.currentType == 1) {
+                tagCheck.setChecked(true);
+                tagCheck.setAlpha(1.0f);
+                if (item.initialType == 1) {
+                    tagName.setText(item.name);
+                } else {
+                    tagName.setText(item.name + " (add to all)");
+                }
+            } else if (item.currentType == 0) {
+                tagCheck.setChecked(false);
+                tagCheck.setAlpha(1.0f);
+                if (item.initialType == 1 || item.initialType == 2) {
+                    tagName.setText(item.name + " (remove from all)");
+                } else {
+                    tagName.setText(item.name);
+                }
+            } else { // mixed (currentType == 2)
+                tagCheck.setChecked(false);
+                tagCheck.setAlpha(0.5f);
+                tagName.setText(item.name + " (some files)");
+            }
+
+            android.view.View.OnClickListener clickListener = new android.view.View.OnClickListener() {
+                @Override
+                public void onClick(android.view.View v) {
+                    if (item.initialType == 0) {
+                        item.currentType = (item.currentType == 0) ? 1 : 0;
+                    } else if (item.initialType == 1) {
+                        item.currentType = (item.currentType == 1) ? 0 : 1;
+                    } else { // mixed
+                        if (item.currentType == 2) {
+                            item.currentType = 1;
+                        } else if (item.currentType == 1) {
+                            item.currentType = 0;
+                        } else {
+                            item.currentType = 2;
+                        }
+                    }
+                    notifyDataSetChanged();
+                }
+            };
+
+            convertView.setOnClickListener(clickListener);
+            tagCheck.setOnClickListener(clickListener);
+
+            return convertView;
+        }
+    }
