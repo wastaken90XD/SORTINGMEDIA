@@ -167,12 +167,19 @@ public class PreviewManager {
 
         // Create runtime overlay & hint text view in previewMediaRoot
         if (previewMediaRoot != null) {
+            TypedValue typedValue = new TypedValue();
+            context.getTheme().resolveAttribute(R.attr.colorAccent, typedValue, true);
+            int colorAccent = typedValue.data;
+            
             tintOverlay = new View(context);
             FrameLayout.LayoutParams tintLp = new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT);
             tintOverlay.setLayoutParams(tintLp);
-            tintOverlay.setBackgroundColor(0x33E94560);
+            
+            // Derive flash color (20% alpha) from colorAccent
+            int flashColor = (colorAccent & 0x00FFFFFF) | 0x33000000;
+            tintOverlay.setBackgroundColor(flashColor);
             tintOverlay.setClickable(false);
             tintOverlay.setFocusable(false);
             tintOverlay.setVisibility(View.GONE);
@@ -187,7 +194,7 @@ public class PreviewManager {
             hintTextView.setFocusable(false);
             hintTextView.setFocusableInTouchMode(false);
             hintTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-            hintTextView.setTextColor(0xFFE94560);
+            hintTextView.setTextColor(colorAccent);
             hintTextView.setBackground(null);
             hintTextView.setVisibility(View.GONE);
 

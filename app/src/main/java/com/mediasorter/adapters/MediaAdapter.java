@@ -7,6 +7,7 @@ import android.view.ViewGroup;
 import android.widget.CheckBox;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.util.TypedValue;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 import com.mediasorter.R;
@@ -17,6 +18,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> {
+
+    private int colorAccent = 0xFFE94560; // default fallback
 
     public interface OnFileClickListener {
         void onFileClick(MediaFile file);
@@ -42,6 +45,15 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     public MediaAdapter(ThumbnailLoader loader, OnFileClickListener listener) {
         this.loader   = loader;
         this.listener = listener;
+    }
+
+    @Override
+    public void onAttachedToRecyclerView(@NonNull RecyclerView recyclerView) {
+        super.onAttachedToRecyclerView(recyclerView);
+        TypedValue typedValue = new TypedValue();
+        if (recyclerView.getContext().getTheme().resolveAttribute(R.attr.colorAccent, typedValue, true)) {
+            colorAccent = typedValue.data;
+        }
     }
 
     public void setSelectionListener(OnSelectionChangedListener l) {
@@ -316,7 +328,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
                 // Make it circular
                 GradientDrawable bg = new GradientDrawable();
                 bg.setShape(GradientDrawable.OVAL);
-                bg.setColor(0xFFE94560);
+                bg.setColor(colorAccent);
                 holder.selectionOrder.setBackground(bg);
             } else {
                 holder.selectionOrder.setVisibility(View.GONE);
@@ -345,7 +357,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
                 text = "(" + tags.size() + ") " + text;
             }
             holder.fileTags.setText(text);
-            holder.fileTags.setTextColor(0xFFE94560);
+            holder.fileTags.setTextColor(colorAccent);
         }
     }
 
