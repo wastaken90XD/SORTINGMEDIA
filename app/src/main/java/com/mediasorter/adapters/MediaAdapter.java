@@ -304,8 +304,12 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
             holder.checkBox.setChecked(isSel);
             holder.itemView.setBackgroundColor(isSel ? 0xFF2A2A6E : 0x00000000);
 
-            // Show selection order badge
-            if (isSel) {
+            // Show selection order badge if enabled
+            boolean showSeqLabels = holder.itemView.getContext()
+                    .getSharedPreferences("settings_prefs", android.content.Context.MODE_PRIVATE)
+                    .getBoolean("show_seq_labels", true);
+
+            if (isSel && showSeqLabels) {
                 int order = getSelectionOrder(file.getPath());
                 holder.selectionOrder.setVisibility(View.VISIBLE);
                 holder.selectionOrder.setText(String.valueOf(order));
@@ -328,11 +332,19 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     /** Extracted so partial-update can call just this. */
     private void bindTags(ViewHolder holder, MediaFile file) {
         List<String> tags = file.getTags();
+        boolean showTagCount = holder.itemView.getContext()
+                .getSharedPreferences("settings_prefs", android.content.Context.MODE_PRIVATE)
+                .getBoolean("show_tag_count", true);
+
         if (tags.isEmpty()) {
             holder.fileTags.setText("No tags");
             holder.fileTags.setTextColor(0xFF666666);
         } else {
-            holder.fileTags.setText(join("  ", tags));
+            String text = join("  ", tags);
+            if (showTagCount) {
+                text = "(" + tags.size() + ") " + text;
+            }
+            holder.fileTags.setText(text);
             holder.fileTags.setTextColor(0xFFE94560);
         }
     }

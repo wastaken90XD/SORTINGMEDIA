@@ -6,15 +6,20 @@ import android.content.DialogInterface;
 import com.mediasorter.features.RandomGenerator;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -39,6 +44,12 @@ public class SettingsActivity extends Activity {
     private TagManager      tagManager;
     private MediaIndexer    indexer;
 
+    private SharedPreferences settingsPrefs;
+
+    // View references for onResume re-read
+    private CheckBox precacheCheck, videoAutoplayCheck, videoLoopCheck;
+    private View precacheRadiusRow, videoLoopRow;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -49,7 +60,28 @@ public class SettingsActivity extends Activity {
         tagListManager  = new TagListManager(this);
         tagManager      = new TagManager(this);
         indexer         = new MediaIndexer();
+        settingsPrefs   = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+
         buildSettings();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Re-read settings state
+        if (settingsPrefs == null) {
+            settingsPrefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        }
+        if (precacheCheck != null && precacheRadiusRow != null) {
+            boolean precacheOn = settingsPrefs.getBoolean("precache_enabled", true);
+            precacheCheck.setChecked(precacheOn);
+            precacheRadiusRow.setVisibility(precacheOn ? View.VISIBLE : View.GONE);
+        }
+        if (videoAutoplayCheck != null && videoLoopRow != null) {
+            boolean autoplayOn = settingsPrefs.getBoolean("video_autoplay", false);
+            videoAutoplayCheck.setChecked(autoplayOn);
+            videoLoopRow.setVisibility(autoplayOn ? View.VISIBLE : View.GONE);
+        }
     }
 
     private void buildSettings() {
@@ -60,118 +92,155 @@ public class SettingsActivity extends Activity {
 
         root.addView(makeTitle("Settings"));
 
-        // ── Cache ─────────────────────────────────────────────────────────────
+        // ── 1. Cache ──────────────────────────────────────────────────────────
         root.addView(makeTitle("Cache"));
 
-        TextView cacheSizeLabel = makeLabel(
+        final TextView cacheSizeLabel = makeLabel(
             "Current: " + cacheManager.getFormattedCacheSize()
             + " / " + cacheManager.getLimitMB() + " MB");
         root.addView(cacheSizeLabel);
 
-        TextView limitLabel = makeLabel("Cache limit: " + cacheManager.getLimitMB() + " MB");
+        final TextView limitLabel = makeLabel("Cache limit: " + cacheManager.getLimitMB() + " MB");
         root.addView(limitLabel);
 
         SeekBar limitSeek = new SeekBar(this);
         limitSeek.setMax(500);
         limitSeek.setProgress(cacheManager.getLimitMB());
-        limitSeek.setOnSeekBarChangeListener(simple((progress) -> {
-            int mb = Math.max(10, progress);
-            cacheManager.setLimitMB(mb);
-            limitLabel.setText("Cache limit: " + mb + " MB");
+        limitSeek.setOnSeekBarChangeListener(simple(new ProgressCallback() {
+            @Override
+            public void onProgress(int progress) {
+                int mb = Math.max(10, progress);
+                cacheManager.setLimitMB(mb);
+                limitLabel.setText("Cache limit: " + mb + " MB");
+            }
         }));
         root.addView(limitSeek);
 
         Button btnClear = makeButton("Clear Cache");
-        btnClear.setOnClickListener(v -> {
-            cacheManager.clearAll();
-            cacheSizeLabel.setText("Current: " + cacheManager.getFormattedCacheSize());
-            Toast.makeText(this, "Cache cleared", Toast.LENGTH_SHORT).show();
+        btnClear.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                cacheManager.clearAll();
+                cacheSizeLabel.setText("Current: " + cacheManager.getFormattedCacheSize());
+                Toast.makeText(SettingsActivity.this, "Cache cleared", Toast.LENGTH_SHORT).show();
+            }
         });
         root.addView(btnClear);
 
-        // ── Thumbnails ────────────────────────────────────────────────────────
+        // ── 2. Thumbnails ─────────────────────────────────────────────────────
         root.addView(makeTitle("Thumbnails"));
 
-        TextView qualityLabel = makeLabel(
+        final TextView qualityLabel = makeLabel(
             "Quality: " + qualityName(thumbnailLoader.getQuality()));
         root.addView(qualityLabel);
 
         SeekBar qualitySeek = new SeekBar(this);
         qualitySeek.setMax(2);
         qualitySeek.setProgress(qualityIndex(thumbnailLoader.getQuality()));
-        qualitySeek.setOnSeekBarChangeListener(simple((progress) -> {
-            int size = qualityFromIndex(progress);
-            thumbnailLoader.setQuality(size);
-            qualityLabel.setText("Quality: " + qualityName(size));
+        qualitySeek.setOnSeekBarChangeListener(simple(new ProgressCallback() {
+            @Override
+            public void onProgress(int progress) {
+                int size = qualityFromIndex(progress);
+                thumbnailLoader.setQuality(size);
+                qualityLabel.setText("Quality: " + qualityName(size));
+            }
         }));
         root.addView(qualitySeek);
 
-        TextView memLabel = makeLabel(
+        final TextView memLabel = makeLabel(
             "Max thumbnail memory: " + thumbnailLoader.getMaxMB() + " MB");
         root.addView(memLabel);
 
         SeekBar memSeek = new SeekBar(this);
         memSeek.setMax(90);
         memSeek.setProgress(thumbnailLoader.getMaxMB() - 10);
-        memSeek.setOnSeekBarChangeListener(simple((progress) -> {
-            int mb = progress + 10;
-            thumbnailLoader.setMaxMB(mb);
-            memLabel.setText("Max thumbnail memory: " + mb + " MB");
+        memSeek.setOnSeekBarChangeListener(simple(new ProgressCallback() {
+            @Override
+            public void onProgress(int progress) {
+                int mb = progress + 10;
+                thumbnailLoader.setMaxMB(mb);
+                memLabel.setText("Max thumbnail memory: " + mb + " MB");
+            }
         }));
         root.addView(memSeek);
 
-        // ── Memory window ─────────────────────────────────────────────────────
+        // ── 3. Memory window ──────────────────────────────────────────────────
         root.addView(makeTitle("Memory Window"));
 
-        SharedPreferences windowPrefs =
+        final SharedPreferences windowPrefs =
             getSharedPreferences("window_prefs", MODE_PRIVATE);
         int currentWindow = windowPrefs.getInt("window_size", 20);
 
-        TextView windowLabel = makeLabel("Window size: " + currentWindow + " files");
+        final TextView windowLabel = makeLabel("Window size: " + currentWindow + " files");
         root.addView(windowLabel);
 
         SeekBar windowSeek = new SeekBar(this);
         windowSeek.setMax(90);
         windowSeek.setProgress(currentWindow - 10);
-        windowSeek.setOnSeekBarChangeListener(simple((progress) -> {
-            int size = progress + 10;
-            windowPrefs.edit().putInt("window_size", size).apply();
-            windowLabel.setText("Window size: " + size + " files");
+        windowSeek.setOnSeekBarChangeListener(simple(new ProgressCallback() {
+            @Override
+            public void onProgress(int progress) {
+                int size = progress + 10;
+                windowPrefs.edit().putInt("window_size", size).apply();
+                windowLabel.setText("Window size: " + size + " files");
+            }
         }));
         root.addView(windowSeek);
 
-        // ── Main window UI toggles ────────────────────────────────────────────
+        // ── 4. Main window UI toggles ─────────────────────────────────────────
         root.addView(makeTitle("Main Window"));
         root.addView(makeToggleRow("D-Pad control",
             gestureSettings.isDpadEnabled(),
-            enabled -> gestureSettings.setDpadEnabled(enabled)));
+            new ToggleHandler() {
+                @Override public void onToggle(boolean enabled) { gestureSettings.setDpadEnabled(enabled); }
+            }));
         root.addView(makeToggleRow("Tag menus & prompts",
             tagManager.isTagsEnabled(),
-            enabled -> tagManager.setTagsEnabled(enabled)));
+            new ToggleHandler() {
+                @Override public void onToggle(boolean enabled) { tagManager.setTagsEnabled(enabled); }
+            }));
 
-        // ── Swipe gestures ────────────────────────────────────────────────────
+        // ── 5. Swipe gestures ─────────────────────────────────────────────────
         root.addView(makeTitle("Swipe Gestures"));
         root.addView(makeMultiGestureRow("Swipe Left",
-            gestureSettings.getLeft(),  gestureSettings::setLeft));
+            gestureSettings.getLeft(), new MultiGestureCallback() {
+                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setLeft(steps); }
+            }));
         root.addView(makeMultiGestureRow("Swipe Right",
-            gestureSettings.getRight(), gestureSettings::setRight));
+            gestureSettings.getRight(), new MultiGestureCallback() {
+                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setRight(steps); }
+            }));
         root.addView(makeMultiGestureRow("Swipe Up",
-            gestureSettings.getUp(),    gestureSettings::setUp));
+            gestureSettings.getUp(), new MultiGestureCallback() {
+                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setUp(steps); }
+            }));
         root.addView(makeMultiGestureRow("Swipe Down",
-            gestureSettings.getDown(),  gestureSettings::setDown));
+            gestureSettings.getDown(), new MultiGestureCallback() {
+                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setDown(steps); }
+            }));
 
-        // ── D-pad gestures ────────────────────────────────────────────────────
+        // ── 6. D-pad gestures ─────────────────────────────────────────────────
         root.addView(makeTitle("D-Pad Gestures"));
         root.addView(makeMultiGestureRow("D-Pad Up",
-            gestureSettings.getDpadUp(),     gestureSettings::setDpadUp));
+            gestureSettings.getDpadUp(), new MultiGestureCallback() {
+                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setDpadUp(steps); }
+            }));
         root.addView(makeMultiGestureRow("D-Pad Down",
-            gestureSettings.getDpadDown(),   gestureSettings::setDpadDown));
+            gestureSettings.getDpadDown(), new MultiGestureCallback() {
+                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setDpadDown(steps); }
+            }));
         root.addView(makeMultiGestureRow("D-Pad Left",
-            gestureSettings.getDpadLeft(),   gestureSettings::setDpadLeft));
+            gestureSettings.getDpadLeft(), new MultiGestureCallback() {
+                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setDpadLeft(steps); }
+            }));
         root.addView(makeMultiGestureRow("D-Pad Right",
-            gestureSettings.getDpadRight(),  gestureSettings::setDpadRight));
+            gestureSettings.getDpadRight(), new MultiGestureCallback() {
+                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setDpadRight(steps); }
+            }));
         root.addView(makeMultiGestureRow("D-Pad Center",
-            gestureSettings.getDpadCenter(), gestureSettings::setDpadCenter));
+            gestureSettings.getDpadCenter(), new MultiGestureCallback() {
+                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setDpadCenter(steps); }
+            }));
 
         // ── Macros ────────────────────────────────────────────────────────────
         root.addView(makeTitle("Gesture Macros"));
@@ -238,14 +307,18 @@ public class SettingsActivity extends Activity {
             nameRow.addView(listName);
 
             Button btnEdit = makeSmallButton("Edit");
-            btnEdit.setOnClickListener(v -> showEditListDialog(idx));
+            btnEdit.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { showEditListDialog(idx); }
+            });
             nameRow.addView(btnEdit);
 
             if (!list.isDefault()) {
                 Button btnDel = makeSmallButton("Delete");
-                btnDel.setOnClickListener(v -> {
-                    tagListManager.deleteList(idx);
-                    recreate();
+                btnDel.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        tagListManager.deleteList(idx);
+                        recreate();
+                    }
                 });
                 nameRow.addView(btnDel);
             }
@@ -263,39 +336,45 @@ public class SettingsActivity extends Activity {
         }
 
         Button btnNewList = makeButton("+ New Tag List");
-        btnNewList.setOnClickListener(v -> showNewListDialog());
+        btnNewList.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showNewListDialog(); }
+        });
         root.addView(btnNewList);
 
         Button btnBulkActive = makeButton("Auto-fill active list from all tags");
-btnBulkActive.setOnClickListener(v -> {
-    List<Tag> allTags = tagManager.getAllTags();
-    List<String> tagNames = new ArrayList<>();
-    for (Tag t : allTags) tagNames.add(t.getName());
-    int added = tagListManager.bulkAddToActiveList(tagNames);
-    Toast.makeText(this,
-        added + " tags added to " + tagListManager.getActiveList().getName(),
-        Toast.LENGTH_SHORT).show();
-    recreate();
-});
-root.addView(btnBulkActive);
+        btnBulkActive.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                List<Tag> allTags = tagManager.getAllTags();
+                List<String> tagNames = new ArrayList<>();
+                for (Tag t : allTags) tagNames.add(t.getName());
+                int added = tagListManager.bulkAddToActiveList(tagNames);
+                Toast.makeText(SettingsActivity.this,
+                    added + " tags added to " + tagListManager.getActiveList().getName(),
+                    Toast.LENGTH_SHORT).show();
+                recreate();
+            }
+        });
+        root.addView(btnBulkActive);
 
-        // Auto-populate from scanned files
         Button btnAutoPopulate = makeButton("Auto-populate lists from scanned files");
-        btnAutoPopulate.setOnClickListener(v ->
-            Toast.makeText(this,
-                "Rescan files — tags auto-import on scan complete",
-                Toast.LENGTH_LONG).show());
+        btnAutoPopulate.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Toast.makeText(SettingsActivity.this,
+                    "Rescan files — tags auto-import on scan complete",
+                    Toast.LENGTH_LONG).show();
+            }
+        });
         root.addView(btnAutoPopulate);
 
-        // ── Folders ───────────────────────────────────────────────────────────
+        // ── 8. Watched Folders ────────────────────────────────────────────────
         root.addView(makeTitle("Watched Folders"));
 
         List<String> folders = folderManager.getFolders();
         if (folders.isEmpty()) {
             root.addView(makeLabel("No folders added"));
         } else {
-            for (String folder : folders) {
-                LinearLayout row = new LinearLayout(this);
+            for (final String folder : folders) {
+                final LinearLayout row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(Gravity.CENTER_VERTICAL);
 
@@ -305,9 +384,11 @@ root.addView(btnBulkActive);
                 row.addView(lbl);
 
                 Button rm = makeButton("Remove");
-                rm.setOnClickListener(v -> {
-                    folderManager.removeFolder(folder);
-                    root.removeView(row);
+                rm.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        folderManager.removeFolder(folder);
+                        root.removeView(row);
+                    }
                 });
                 row.addView(rm);
                 root.addView(row);
@@ -315,17 +396,21 @@ root.addView(btnBulkActive);
         }
 
         Button btnAdd = makeButton("+ Add Folder");
-        btnAdd.setOnClickListener(v -> showAddFolderDialog());
+        btnAdd.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showAddFolderDialog(); }
+        });
         root.addView(btnAdd);
 
         Button btnFullRescan = makeButton("Full Rescan");
-        btnFullRescan.setOnClickListener(v -> {
-            indexer.fullReset(folderManager.getFolders());
-            Toast.makeText(this, "Full rescan started", Toast.LENGTH_SHORT).show();
+        btnFullRescan.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                indexer.fullReset(folderManager.getFolders());
+                Toast.makeText(SettingsActivity.this, "Full rescan started", Toast.LENGTH_SHORT).show();
+            }
         });
         root.addView(btnFullRescan);
 
-        // ── Export / Import ────────────────────────────────────────────────────
+        // ── 9. Backup & Restore ───────────────────────────────────────────────
         root.addView(makeTitle("Backup & Restore"));
 
         Button btnExport = makeButton("Export Settings");
@@ -568,79 +653,312 @@ root.addView(btnBulkActive);
         });
         root.addView(btnImport);
 
-        // ── Duplicate Finder ──────────────────────────────────────────────────
+        // ── 10. Duplicate Files ───────────────────────────────────────────────
         root.addView(makeTitle("Duplicate Files"));
 
         Button btnDupes = makeButton("Find Duplicates");
-        btnDupes.setOnClickListener(v -> {
-            List<MediaFile> files = MainActivity.getLatestFullList();
-            if (files.isEmpty()) {
-                Toast.makeText(this, "No files scanned yet", Toast.LENGTH_SHORT).show();
-                return;
+        btnDupes.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                final List<MediaFile> files = MainActivity.getLatestFullList();
+                if (files.isEmpty()) {
+                    Toast.makeText(SettingsActivity.this, "No files scanned yet", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                Toast.makeText(SettingsActivity.this, "Scanning for duplicates...", Toast.LENGTH_SHORT).show();
+                new Thread(new Runnable() {
+                    @Override public void run() {
+                        final List<DuplicateFinder.DuplicateGroup> dupes =
+                                DuplicateFinder.findDuplicates(files, new DuplicateFinder.ProgressListener() {
+                                    @Override public void onProgress(int scanned, int total, String name) {}
+                                });
+                        runOnUiThread(new Runnable() {
+                            @Override public void run() {
+                                if (dupes.isEmpty()) {
+                                    Toast.makeText(SettingsActivity.this, "No duplicates found", Toast.LENGTH_SHORT).show();
+                                    return;
+                                }
+                                int totalDupes = 0;
+                                for (DuplicateFinder.DuplicateGroup g : dupes) totalDupes += g.files.size() - 1;
+                                StringBuilder sb = new StringBuilder();
+                                sb.append(dupes.size()).append(" groups, ").append(totalDupes).append(" extra copies\n\n");
+                                int shown = Math.min(dupes.size(), 15);
+                                for (int i = 0; i < shown; i++) {
+                                    DuplicateFinder.DuplicateGroup g = dupes.get(i);
+                                    sb.append("[").append(g.files.size()).append(" files, ")
+                                      .append(g.size / 1024).append(" KB]\n");
+                                    for (MediaFile f : g.files) sb.append("  ").append(f.getName()).append("\n");
+                                    sb.append("\n");
+                                }
+                                if (dupes.size() > 15) sb.append("... and ").append(dupes.size() - 15).append(" more");
+                                new AlertDialog.Builder(SettingsActivity.this)
+                                    .setTitle("Duplicates")
+                                    .setMessage(sb.toString())
+                                    .setPositiveButton("OK", null)
+                                    .show();
+                            }
+                        });
+                    }
+                }).start();
             }
-            Toast.makeText(this, "Scanning for duplicates...", Toast.LENGTH_SHORT).show();
-            new Thread(() -> {
-                List<DuplicateFinder.DuplicateGroup> dupes =
-                        DuplicateFinder.findDuplicates(files, (scanned, total, name) -> {});
-                runOnUiThread(() -> {
-                    if (dupes.isEmpty()) {
-                        Toast.makeText(this, "No duplicates found", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    int totalDupes = 0;
-                    for (DuplicateFinder.DuplicateGroup g : dupes) totalDupes += g.files.size() - 1;
-                    StringBuilder sb = new StringBuilder();
-                    sb.append(dupes.size()).append(" groups, ").append(totalDupes).append(" extra copies\n\n");
-                    int shown = Math.min(dupes.size(), 15);
-                    for (int i = 0; i < shown; i++) {
-                        DuplicateFinder.DuplicateGroup g = dupes.get(i);
-                        sb.append("[").append(g.files.size()).append(" files, ")
-                          .append(g.size / 1024).append(" KB]\n");
-                        for (MediaFile f : g.files) sb.append("  ").append(f.getName()).append("\n");
-                        sb.append("\n");
-                    }
-                    if (dupes.size() > 15) sb.append("... and ").append(dupes.size() - 15).append(" more");
-                    new AlertDialog.Builder(this)
-                        .setTitle("Duplicates")
-                        .setMessage(sb.toString())
-                        .setPositiveButton("OK", null)
-                        .show();
-                });
-            }).start();
         });
         root.addView(btnDupes);
 
-        // ── Crash log ─────────────────────────────────────────────────────────
+        // ── 11. Crash Log ─────────────────────────────────────────────────────
         root.addView(makeTitle("Crash Log"));
 
         Button btnLog = makeButton("View Crash Log");
-        btnLog.setOnClickListener(v -> {
-            String log = CrashLogger.readLog(this);
-            ScrollView sv = new ScrollView(this);
-            TextView tv = new TextView(this);
-            tv.setText(log);
-            tv.setTextColor(0xFFCCCCCC);
-            tv.setTextSize(10f);
-            tv.setPadding(16, 16, 16, 16);
-            sv.addView(tv);
-            new AlertDialog.Builder(this)
-                .setTitle("Crash Log")
-                .setView(sv)
-                .setPositiveButton("Copy", (d, w) -> {
-                    ClipboardManager cm =
-                        (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                    cm.setPrimaryClip(ClipData.newPlainText("crash", log));
-                    Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show();
-                })
-                .setNegativeButton("Clear", (d, w) -> CrashLogger.clearLog(this))
-                .setNeutralButton("Close", null)
-                .show();
+        btnLog.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                final String log = CrashLogger.readLog(SettingsActivity.this);
+                ScrollView sv = new ScrollView(SettingsActivity.this);
+                TextView tv = new TextView(SettingsActivity.this);
+                tv.setText(log);
+                tv.setTextColor(0xFFCCCCCC);
+                tv.setTextSize(10f);
+                tv.setPadding(16, 16, 16, 16);
+                sv.addView(tv);
+                new AlertDialog.Builder(SettingsActivity.this)
+                    .setTitle("Crash Log")
+                    .setView(sv)
+                    .setPositiveButton("Copy", new DialogInterface.OnClickListener() {
+                        @Override public void onClick(DialogInterface d, int w) {
+                            ClipboardManager cm =
+                                (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                            cm.setPrimaryClip(ClipData.newPlainText("crash", log));
+                            Toast.makeText(SettingsActivity.this, "Copied", Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .setNegativeButton("Clear", new DialogInterface.OnClickListener() {
+                        @Override public void onClick(DialogInterface d, int w) {
+                            CrashLogger.clearLog(SettingsActivity.this);
+                        }
+                    })
+                    .setNeutralButton("Close", null)
+                    .show();
+            }
         });
         root.addView(btnLog);
 
-        // ── Back ──────────────────────────────────────────────────────────────
+        // ======================================================================
+        // EXPANDED SETTINGS (PART 2)
+        // ======================================================================
+
+        // ── 12. Browsing ──────────────────────────────────────────────────────
+        root.addView(makeTitle("Browsing"));
+
+        String[] sortOptions = {"Name A-Z", "Name Z-A", "Date Newest", "Oldest", "Size Largest", "Smallest", "Type"};
+        String currentSort = settingsPrefs.getString("default_sort", "Name A-Z");
+        int sortIdx = 0;
+        for (int i = 0; i < sortOptions.length; i++) {
+            if (sortOptions[i].equalsIgnoreCase(currentSort)) { sortIdx = i; break; }
+        }
+        root.addView(makeSpinnerRow("Default sort:", sortOptions, sortIdx, new OnSpinnerSelectedListener() {
+            @Override public void onSelected(String value, int pos) { saveString("default_sort", value); }
+        }));
+
+        int currentWindowSize = getSharedPreferences("window_prefs", MODE_PRIVATE).getInt("window_size", 20);
+        int currentPageSize = settingsPrefs.getInt("page_size", currentWindowSize);
+        root.addView(makeNumericInputRow("Page size (10-500):", currentPageSize, 10, 500, new OnNumericChangeListener() {
+            @Override public void onChange(int val) {
+                saveInt("page_size", val);
+                getSharedPreferences("window_prefs", MODE_PRIVATE).edit().putInt("window_size", val).apply();
+            }
+        }));
+
+        root.addView(makeCheckBoxRow("Info overlay default", settingsPrefs.getBoolean("info_overlay_default", false), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) { saveBoolean("info_overlay_default", checked); }
+        }));
+
+        root.addView(makeCheckBoxRow("Skip videos", settingsPrefs.getBoolean("skip_videos", false), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) {
+                saveBoolean("skip_videos", checked);
+                checkBothSkipWarning();
+            }
+        }));
+
+        root.addView(makeCheckBoxRow("Skip images", settingsPrefs.getBoolean("skip_images", false), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) {
+                saveBoolean("skip_images", checked);
+                checkBothSkipWarning();
+            }
+        }));
+
+        root.addView(makeCheckBoxRow("Show hidden files", settingsPrefs.getBoolean("show_hidden", false), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) { saveBoolean("show_hidden", checked); }
+        }));
+
+        // ── 13. Sorting Behavior ──────────────────────────────────────────────
+        root.addView(makeTitle("Sorting Behavior"));
+
+        String[] swipeOptions = {"Next", "Skip", "Flag", "Trash", "Add last tag"};
+        int leftIdx = settingsPrefs.getInt("swipe_left_default", 0);
+        root.addView(makeSpinnerRow("Swipe left default:", swipeOptions, leftIdx, new OnSpinnerSelectedListener() {
+            @Override public void onSelected(String value, int pos) {
+                saveInt("swipe_left_default", pos);
+                updateSwipeGesture(true, pos);
+            }
+        }));
+
+        int rightIdx = settingsPrefs.getInt("swipe_right_default", 0);
+        root.addView(makeSpinnerRow("Swipe right default:", swipeOptions, rightIdx, new OnSpinnerSelectedListener() {
+            @Override public void onSelected(String value, int pos) {
+                saveInt("swipe_right_default", pos);
+                updateSwipeGesture(false, pos);
+            }
+        }));
+
+        root.addView(makeCheckBoxRow("Auto-advance after tag", settingsPrefs.getBoolean("auto_advance_tag", false), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) { saveBoolean("auto_advance_tag", checked); }
+        }));
+
+        root.addView(makeCheckBoxRow("Auto-advance after flag", settingsPrefs.getBoolean("auto_advance_flag", false), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) { saveBoolean("auto_advance_flag", checked); }
+        }));
+
+        root.addView(makeConfirmationCheckBoxRow("Confirm delete", "confirm_delete", true, "Disable confirmation warning before permanently deleting files?"));
+        root.addView(makeConfirmationCheckBoxRow("Confirm trash", "confirm_trash", true, "Disable confirmation warning before moving files to trash?"));
+
+        // ── 14. Preview ───────────────────────────────────────────────────────
+        root.addView(makeTitle("Preview"));
+
+        String[] zoomOptions = {"Fit", "Fill", "100%"};
+        String currentZoom = settingsPrefs.getString("default_zoom", "Fit");
+        int zoomIdx = 0;
+        for (int i = 0; i < zoomOptions.length; i++) {
+            if (zoomOptions[i].equalsIgnoreCase(currentZoom)) { zoomIdx = i; break; }
+        }
+        root.addView(makeSpinnerRow("Default zoom:", zoomOptions, zoomIdx, new OnSpinnerSelectedListener() {
+            @Override public void onSelected(String value, int pos) { saveString("default_zoom", value); }
+        }));
+
+        boolean precacheOn = settingsPrefs.getBoolean("precache_enabled", true);
+        int precacheRad = settingsPrefs.getInt("precache_radius", 2);
+        precacheRadiusRow = makeNumericInputRow("Precache radius (1-10):", precacheRad, 1, 10, new OnNumericChangeListener() {
+            @Override public void onChange(int val) { saveInt("precache_radius", val); }
+        });
+        precacheRadiusRow.setVisibility(precacheOn ? View.VISIBLE : View.GONE);
+
+        precacheCheck = (CheckBox) makeCheckBoxRow("Enable precache", precacheOn, new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) {
+                saveBoolean("precache_enabled", checked);
+                if (precacheRadiusRow != null) precacheRadiusRow.setVisibility(checked ? View.VISIBLE : View.GONE);
+            }
+        }).findViewById(R.id.settingCheckbox);
+
+        root.addView(precacheCheck.getParent() instanceof View ? (View) precacheCheck.getParent() : precacheCheck);
+        root.addView(precacheRadiusRow);
+
+        boolean autoplayOn = settingsPrefs.getBoolean("video_autoplay", false);
+        boolean loopOn = settingsPrefs.getBoolean("video_loop", false);
+
+        videoLoopRow = makeCheckBoxRow("Video loop", loopOn, new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) { saveBoolean("video_loop", checked); }
+        });
+        videoLoopRow.setVisibility(autoplayOn ? View.VISIBLE : View.GONE);
+
+        videoAutoplayCheck = (CheckBox) makeCheckBoxRow("Video autoplay", autoplayOn, new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) {
+                saveBoolean("video_autoplay", checked);
+                if (videoLoopRow != null) videoLoopRow.setVisibility(checked ? View.VISIBLE : View.GONE);
+            }
+        }).findViewById(R.id.settingCheckbox);
+
+        root.addView(videoAutoplayCheck.getParent() instanceof View ? (View) videoAutoplayCheck.getParent() : videoAutoplayCheck);
+        root.addView(videoLoopRow);
+
+        // ── 15. Metadata ──────────────────────────────────────────────────────
+        root.addView(makeTitle("Metadata"));
+
+        root.addView(makeCheckBoxRow("Write metadata immediately", settingsPrefs.getBoolean("metadata_write_immediate", true), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) { saveBoolean("metadata_write_immediate", checked); }
+        }));
+
+        root.addView(makeCheckBoxRow("Backup metadata on edit", settingsPrefs.getBoolean("metadata_backup", false), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) { saveBoolean("metadata_backup", checked); }
+        }));
+
+        root.addView(makeCheckBoxRow("Strip metadata on move", settingsPrefs.getBoolean("strip_on_move", false), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) { saveBoolean("strip_on_move", checked); }
+        }));
+
+        // ── 16. Duplicates ────────────────────────────────────────────────────
+        root.addView(makeTitle("Duplicates"));
+
+        String[] hashOptions = {"MD5", "SHA256"};
+        String currentHash = settingsPrefs.getString("hash_algorithm", "MD5");
+        int hashIdx = "SHA256".equalsIgnoreCase(currentHash) ? 1 : 0;
+        root.addView(makeSpinnerRow("Hash algorithm:", hashOptions, hashIdx, new OnSpinnerSelectedListener() {
+            @Override public void onSelected(String value, int pos) { saveString("hash_algorithm", value); }
+        }));
+
+        root.addView(makeCheckBoxRow("Auto-skip duplicates", settingsPrefs.getBoolean("auto_skip_dupes", false), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) { saveBoolean("auto_skip_dupes", checked); }
+        }));
+
+        // ── 17. Controls ──────────────────────────────────────────────────────
+        root.addView(makeTitle("Controls"));
+
+        root.addView(makeCheckBoxRow("D-Pad enabled", gestureSettings.isDpadEnabled() && settingsPrefs.getBoolean("dpad_enabled", true), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) {
+                saveBoolean("dpad_enabled", checked);
+                gestureSettings.setDpadEnabled(checked);
+            }
+        }));
+
+        root.addView(makeCheckBoxRow("Volume keys navigation", settingsPrefs.getBoolean("volume_keys_enabled", true), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) { saveBoolean("volume_keys_enabled", checked); }
+        }));
+
+        root.addView(makeNumericInputRow("Swipe min distance (20-200):", settingsPrefs.getInt("swipe_min_distance", 50), 20, 200, new OnNumericChangeListener() {
+            @Override public void onChange(int val) { saveInt("swipe_min_distance", val); }
+        }));
+
+        root.addView(makeNumericInputRow("Swipe min velocity (50-1000):", settingsPrefs.getInt("swipe_min_velocity", 200), 50, 1000, new OnNumericChangeListener() {
+            @Override public void onChange(int val) { saveInt("swipe_min_velocity", val); }
+        }));
+
+        root.addView(makeNumericInputRow("Long press duration ms (200-2000):", settingsPrefs.getInt("long_press_duration", 500), 200, 2000, new OnNumericChangeListener() {
+            @Override public void onChange(int val) { saveInt("long_press_duration", val); }
+        }));
+
+        // ── 18. Organization ──────────────────────────────────────────────────
+        root.addView(makeTitle("Organization"));
+
+        root.addView(makeTextInputRow("Default move path:", settingsPrefs.getString("default_move_path", ""), new OnTextChangeListener() {
+            @Override public void onChange(String text) { saveString("default_move_path", text); }
+        }));
+
+        List<String> watchedFolders = folderManager.getFolders();
+        String defaultTrash = (!watchedFolders.isEmpty()) ? (watchedFolders.get(0) + "/.trash") : "/sdcard/.trash";
+        root.addView(makeTextInputRow("Trash path:", settingsPrefs.getString("trash_path", defaultTrash), new OnTextChangeListener() {
+            @Override public void onChange(String text) { saveString("trash_path", text); }
+        }));
+
+        root.addView(makeNumericInputRow("Max undo history (1-100):", settingsPrefs.getInt("max_undo_history", 20), 1, 100, new OnNumericChangeListener() {
+            @Override public void onChange(int val) { saveInt("max_undo_history", val); }
+        }));
+
+        // ── 19. Appearance ────────────────────────────────────────────────────
+        root.addView(makeTitle("Appearance"));
+
+        String[] themeOptions = {"AppTheme"};
+        root.addView(makeSpinnerRow("App theme:", themeOptions, 0, new OnSpinnerSelectedListener() {
+            @Override public void onSelected(String value, int pos) { recreate(); }
+        }));
+
+        root.addView(makeCheckBoxRow("Show selection order badges", settingsPrefs.getBoolean("show_seq_labels", true), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) { saveBoolean("show_seq_labels", checked); }
+        }));
+
+        root.addView(makeCheckBoxRow("Show tag count in list", settingsPrefs.getBoolean("show_tag_count", true), new OnCheckedChangeListener() {
+            @Override public void onChecked(boolean checked) { saveBoolean("show_tag_count", checked); }
+        }));
+
+        // ── Back Button ───────────────────────────────────────────────────────
         Button btnBack = makeButton("← Back");
-        btnBack.setOnClickListener(v -> finish());
+        btnBack.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { finish(); }
+        });
         LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -653,6 +971,284 @@ root.addView(btnBulkActive);
         setContentView(scroll);
     }
 
+    // ── Helper methods for Expanded Settings ──────────────────────────────────
+
+    private void saveBoolean(String key, boolean val) {
+        boolean ok = settingsPrefs.edit().putBoolean(key, val).commit();
+        if (!ok) Toast.makeText(this, "Failed to save " + key, Toast.LENGTH_SHORT).show();
+    }
+
+    private void saveInt(String key, int val) {
+        boolean ok = settingsPrefs.edit().putInt(key, val).commit();
+        if (!ok) Toast.makeText(this, "Failed to save " + key, Toast.LENGTH_SHORT).show();
+    }
+
+    private void saveString(String key, String val) {
+        boolean ok = settingsPrefs.edit().putString(key, val).commit();
+        if (!ok) Toast.makeText(this, "Failed to save " + key, Toast.LENGTH_SHORT).show();
+    }
+
+    private void checkBothSkipWarning() {
+        boolean skipV = settingsPrefs.getBoolean("skip_videos", false);
+        boolean skipI = settingsPrefs.getBoolean("skip_images", false);
+        if (skipV && skipI) {
+            Toast.makeText(this, "Warning: Both skip videos and skip images are enabled", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void updateSwipeGesture(boolean isLeft, int optionPos) {
+        GestureSettings.GestureAction action;
+        switch (optionPos) {
+            case 1:  action = GestureSettings.GestureAction.SKIP;      break;
+            case 2:  action = GestureSettings.GestureAction.FLAG;      break;
+            case 3:  action = GestureSettings.GestureAction.DONE;      break;
+            case 4:  action = GestureSettings.GestureAction.APPLY_TAG; break;
+            default: action = GestureSettings.GestureAction.NEXT_FILE; break;
+        }
+        List<GestureSettings.GestureStep> steps = new ArrayList<>();
+        steps.add(new GestureSettings.GestureStep(action, ""));
+        if (isLeft) {
+            gestureSettings.setLeft(steps);
+        } else {
+            gestureSettings.setRight(steps);
+        }
+    }
+
+    private interface OnCheckedChangeListener {
+        void onChecked(boolean checked);
+    }
+
+    private interface OnNumericChangeListener {
+        void onChange(int value);
+    }
+
+    private interface OnTextChangeListener {
+        void onChange(String text);
+    }
+
+    private interface OnSpinnerSelectedListener {
+        void onSelected(String value, int pos);
+    }
+
+    private View makeCheckBoxRow(String label, boolean initial, final OnCheckedChangeListener listener) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = 4;
+        rowLp.bottomMargin = 4;
+        row.setLayoutParams(rowLp);
+
+        TextView lbl = makeLabel(label);
+        lbl.setLayoutParams(new LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(lbl);
+
+        CheckBox cb = new CheckBox(this);
+        cb.setId(R.id.settingCheckbox);
+        cb.setChecked(initial);
+        cb.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                listener.onChecked(isChecked);
+            }
+        });
+        row.addView(cb);
+        return row;
+    }
+
+    private View makeConfirmationCheckBoxRow(final String label, final String key, boolean defaultVal, final String warnMessage) {
+        boolean initial = settingsPrefs.getBoolean(key, defaultVal);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = 4;
+        rowLp.bottomMargin = 4;
+        row.setLayoutParams(rowLp);
+
+        TextView lbl = makeLabel(label);
+        lbl.setLayoutParams(new LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(lbl);
+
+        final CheckBox cb = new CheckBox(this);
+        cb.setChecked(initial);
+        cb.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                final boolean target = cb.isChecked();
+                if (!target) {
+                    // Changing from true to false: warn OK/Cancel
+                    new AlertDialog.Builder(SettingsActivity.this)
+                        .setTitle(label)
+                        .setMessage(warnMessage)
+                        .setPositiveButton("OK", new DialogInterface.OnClickListener() {
+                            @Override public void onClick(DialogInterface d, int w) {
+                                saveBoolean(key, false);
+                            }
+                        })
+                        .setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+                            @Override public void onClick(DialogInterface d, int w) {
+                                cb.setChecked(true);
+                                saveBoolean(key, true);
+                            }
+                        })
+                        .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                            @Override public void onCancel(DialogInterface dialog) {
+                                cb.setChecked(true);
+                                saveBoolean(key, true);
+                            }
+                        })
+                        .show();
+                } else {
+                    saveBoolean(key, true);
+                }
+            }
+        });
+        row.addView(cb);
+        return row;
+    }
+
+    private View makeNumericInputRow(final String label, final int initial, final int min, final int max, final OnNumericChangeListener listener) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = 4;
+        rowLp.bottomMargin = 4;
+        row.setLayoutParams(rowLp);
+
+        TextView lbl = makeLabel(label);
+        lbl.setLayoutParams(new LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(lbl);
+
+        final int[] validVal = {initial};
+        final EditText input = new EditText(this);
+        input.setText(String.valueOf(initial));
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        input.setTextColor(0xFFFFFFFF);
+        input.setTextSize(12f);
+        input.setGravity(Gravity.END);
+        input.setLayoutParams(new LinearLayout.LayoutParams(
+            (int) (80 * getResources().getDisplayMetrics().density),
+            LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(Editable s) {
+                String txt = s.toString().trim();
+                if (txt.isEmpty()) return;
+                try {
+                    int val = Integer.parseInt(txt);
+                    if (val >= min && val <= max) {
+                        validVal[0] = val;
+                        listener.onChange(val);
+                    }
+                } catch (Exception ignored) {}
+            }
+        });
+
+        input.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View v, boolean hasFocus) {
+                if (!hasFocus) {
+                    String txt = input.getText().toString().trim();
+                    try {
+                        int val = Integer.parseInt(txt);
+                        if (val < min || val > max) {
+                            Toast.makeText(SettingsActivity.this, "Invalid " + label + " (" + min + "-" + max + ")", Toast.LENGTH_SHORT).show();
+                            input.setText(String.valueOf(validVal[0]));
+                        } else {
+                            validVal[0] = val;
+                            listener.onChange(val);
+                        }
+                    } catch (Exception e) {
+                        Toast.makeText(SettingsActivity.this, "Invalid " + label, Toast.LENGTH_SHORT).show();
+                        input.setText(String.valueOf(validVal[0]));
+                    }
+                }
+            }
+        });
+
+        row.addView(input);
+        return row;
+    }
+
+    private View makeTextInputRow(String label, String initial, final OnTextChangeListener listener) {
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams colLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        colLp.topMargin = 4;
+        colLp.bottomMargin = 8;
+        col.setLayoutParams(colLp);
+
+        TextView lbl = makeLabel(label);
+        col.addView(lbl);
+
+        final EditText input = new EditText(this);
+        input.setText(initial != null ? initial : "");
+        input.setTextColor(0xFFFFFFFF);
+        input.setTextSize(12f);
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(Editable s) {
+                listener.onChange(s.toString().trim());
+            }
+        });
+        col.addView(input);
+        return col;
+    }
+
+    private View makeSpinnerRow(String label, final String[] options, int initialPos, final OnSpinnerSelectedListener listener) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = 4;
+        rowLp.bottomMargin = 4;
+        row.setLayoutParams(rowLp);
+
+        TextView lbl = makeLabel(label);
+        lbl.setLayoutParams(new LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(lbl);
+
+        Spinner spinner = new Spinner(this);
+        ArrayAdapter<String> ad = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, options);
+        ad.setDropDownViewResource(
+            android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(ad);
+        if (initialPos >= 0 && initialPos < options.length) {
+            spinner.setSelection(initialPos);
+        }
+        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                listener.onSelected(options[position], position);
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        row.addView(spinner);
+        return row;
+    }
+
     // ── Multi-gesture row ─────────────────────────────────────────────────────
 
     interface MultiGestureCallback {
@@ -661,7 +1257,7 @@ root.addView(btnBulkActive);
 
     private LinearLayout makeMultiGestureRow(String label,
             List<GestureSettings.GestureStep> current,
-            MultiGestureCallback callback) {
+            final MultiGestureCallback callback) {
 
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
@@ -673,38 +1269,42 @@ root.addView(btnBulkActive);
         col.setBackgroundColor(0xFF1A1A2E);
         col.setPadding(8, 8, 8, 8);
 
-        TextView lbl = makeLabel(label + ": " + gestureSettings.getSummary(current));
+        final TextView lbl = makeLabel(label + ": " + gestureSettings.getSummary(current));
         col.addView(lbl);
 
-        LinearLayout stepsList = new LinearLayout(this);
+        final LinearLayout stepsList = new LinearLayout(this);
         stepsList.setOrientation(LinearLayout.VERTICAL);
         col.addView(stepsList);
 
-        List<GestureSettings.GestureStep> steps = new ArrayList<>(current);
-        renderSteps(stepsList, steps, lbl, label, callback);
+        final List<GestureSettings.GestureStep> steps = new ArrayList<>(current);
+        final String gestureLabel = label;
+        renderSteps(stepsList, steps, lbl, gestureLabel, callback);
 
         Button btnAdd = makeSmallButton("+ Add Step");
-        btnAdd.setOnClickListener(v -> {
-            steps.add(new GestureSettings.GestureStep(
-                GestureSettings.GestureAction.NOTHING, ""));
-            callback.set(steps);
-            renderSteps(stepsList, steps, lbl, label, callback);
+        btnAdd.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                steps.add(new GestureSettings.GestureStep(
+                    GestureSettings.GestureAction.NOTHING, ""));
+                callback.set(steps);
+                renderSteps(stepsList, steps, lbl, gestureLabel, callback);
+            }
         });
         col.addView(btnAdd);
 
         return col;
     }
 
-    private void renderSteps(LinearLayout container,
-            List<GestureSettings.GestureStep> steps,
-            TextView summaryLabel,
-            String gestureLabel,
-            MultiGestureCallback callback) {
+    private void renderSteps(final LinearLayout container,
+            final List<GestureSettings.GestureStep> steps,
+            final TextView summaryLabel,
+            final String gestureLabel,
+            final MultiGestureCallback callback) {
 
         container.removeAllViews();
 
-        List<Tag> allTags = tagManager.getAllTags();
-        String[]  allTagNames = new String[allTags.size() + 1];
+        final List<Tag> allTags = tagManager.getAllTags();
+        final String[] allTagNames = new String[allTags.size() + 1];
         allTagNames[0] = "(no tag)";
         for (int i = 0; i < allTags.size(); i++) {
             allTagNames[i + 1] = allTags.get(i).getName();
@@ -725,7 +1325,7 @@ root.addView(btnBulkActive);
 
             // Action spinner
             Spinner actionSpin = new Spinner(this);
-            String[] actionLabels = gestureSettings.getAllLabels();
+            final String[] actionLabels = gestureSettings.getAllLabels();
             ArrayAdapter<String> actionAd = new ArrayAdapter<>(this,
                 android.R.layout.simple_spinner_item, actionLabels);
             actionAd.setDropDownViewResource(
@@ -745,7 +1345,7 @@ root.addView(btnBulkActive);
             row.addView(actionSpin);
 
             // Tag search input
-            EditText tagSearch = new EditText(this);
+            final EditText tagSearch = new EditText(this);
             tagSearch.setHint("Search tag…");
             tagSearch.setTextColor(0xFFFFFFFF);
             tagSearch.setHintTextColor(0xFF666666);
@@ -755,7 +1355,7 @@ root.addView(btnBulkActive);
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
             // Tag spinner
-            Spinner tagSpin = new Spinner(this);
+            final Spinner tagSpin = new Spinner(this);
             ArrayAdapter<String> tagAd = new ArrayAdapter<>(this,
                 android.R.layout.simple_spinner_item, allTagNames);
             tagAd.setDropDownViewResource(
@@ -764,7 +1364,6 @@ root.addView(btnBulkActive);
             tagSpin.setLayoutParams(new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-            // Set current tag
             if (!step.tag.isEmpty()) {
                 for (int j = 1; j < allTagNames.length; j++) {
                     if (allTagNames[j].equals(step.tag)) {
@@ -774,50 +1373,49 @@ root.addView(btnBulkActive);
                 }
             }
 
-            boolean isApply =
-                step.action == GestureSettings.GestureAction.APPLY_TAG;
+            boolean isApply = step.action == GestureSettings.GestureAction.APPLY_TAG;
             tagSearch.setVisibility(isApply ? View.VISIBLE : View.GONE);
             tagSpin.setVisibility(isApply ? View.VISIBLE : View.GONE);
 
             row.addView(tagSearch);
             row.addView(tagSpin);
 
-            // Tag search filter
             tagSearch.addTextChangedListener(new TextWatcher() {
-    @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
-    @Override public void afterTextChanged(Editable s) {}
-    @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
-        String q = s.toString().toLowerCase().trim();
-        List<String> filtered = new ArrayList<>();
-        filtered.add("(no tag)");
-        for (Tag t : allTags) {
-            if (q.isEmpty() || t.getName().toLowerCase().contains(q)) {
-                filtered.add(t.getName());
-            }
-        }
-        ArrayAdapter<String> fa = new ArrayAdapter<>(
-            SettingsActivity.this,
-            android.R.layout.simple_spinner_item,
-            filtered.toArray(new String[0]));
-        fa.setDropDownViewResource(
-            android.R.layout.simple_spinner_dropdown_item);
-        tagSpin.setAdapter(fa);
-        tagSpin.setVisibility(View.VISIBLE);
-    }
-});
+                @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+                @Override public void afterTextChanged(Editable s) {}
+                @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                    String q = s.toString().toLowerCase().trim();
+                    List<String> filtered = new ArrayList<>();
+                    filtered.add("(no tag)");
+                    for (Tag t : allTags) {
+                        if (q.isEmpty() || t.getName().toLowerCase().contains(q)) {
+                            filtered.add(t.getName());
+                        }
+                    }
+                    ArrayAdapter<String> fa = new ArrayAdapter<>(
+                        SettingsActivity.this,
+                        android.R.layout.simple_spinner_item,
+                        filtered.toArray(new String[0]));
+                    fa.setDropDownViewResource(
+                        android.R.layout.simple_spinner_dropdown_item);
+                    tagSpin.setAdapter(fa);
+                    tagSpin.setVisibility(View.VISIBLE);
+                }
+            });
 
-            // Remove button
             Button btnRemove = makeSmallButton("✕");
-            btnRemove.setOnClickListener(v -> {
-                steps.remove(idx);
-                callback.set(steps);
-                summaryLabel.setText(gestureLabel + ": "
-                    + gestureSettings.getSummary(steps));
-                renderSteps(container, steps, summaryLabel, gestureLabel, callback);
+            btnRemove.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    steps.remove(idx);
+                    callback.set(steps);
+                    summaryLabel.setText(gestureLabel + ": "
+                        + gestureSettings.getSummary(steps));
+                    renderSteps(container, steps, summaryLabel, gestureLabel, callback);
+                }
             });
             row.addView(btnRemove);
 
-            // Action spinner listener
             actionSpin.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
                 public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
@@ -834,7 +1432,6 @@ root.addView(btnBulkActive);
                 @Override public void onNothingSelected(AdapterView<?> p) {}
             });
 
-            // Tag spinner listener
             tagSpin.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
                 public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
@@ -854,23 +1451,26 @@ root.addView(btnBulkActive);
     // ── Tag list dialogs ──────────────────────────────────────────────────────
 
     private void showNewListDialog() {
-        EditText input = new EditText(this);
+        final EditText input = new EditText(this);
         input.setHint("List name");
         new AlertDialog.Builder(this)
             .setTitle("New Tag List")
             .setView(input)
-            .setPositiveButton("Create", (d, w) -> {
-                String name = input.getText().toString().trim();
-                if (!name.isEmpty()) {
-                    tagListManager.createList(name);
-                    recreate();
+            .setPositiveButton("Create", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface d, int w) {
+                    String name = input.getText().toString().trim();
+                    if (!name.isEmpty()) {
+                        tagListManager.createList(name);
+                        recreate();
+                    }
                 }
             })
             .setNegativeButton("Cancel", null)
             .show();
     }
 
-    private void showEditListDialog(int listIndex) {
+    private void showEditListDialog(final int listIndex) {
         TagList list = tagListManager.getList(listIndex);
         if (list == null) return;
 
@@ -878,17 +1478,17 @@ root.addView(btnBulkActive);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(32, 16, 32, 16);
 
-        EditText nameInput = new EditText(this);
+        final EditText nameInput = new EditText(this);
         nameInput.setText(list.getName());
         layout.addView(makeLabel("List name:"));
         layout.addView(nameInput);
 
         layout.addView(makeLabel("Tags in list:"));
-        LinearLayout tagRows = new LinearLayout(this);
+        final LinearLayout tagRows = new LinearLayout(this);
         tagRows.setOrientation(LinearLayout.VERTICAL);
 
-        for (String tag : list.getTags()) {
-            LinearLayout tagRow = new LinearLayout(this);
+        for (final String tag : list.getTags()) {
+            final LinearLayout tagRow = new LinearLayout(this);
             tagRow.setOrientation(LinearLayout.HORIZONTAL);
             tagRow.setGravity(Gravity.CENTER_VERTICAL);
 
@@ -898,9 +1498,12 @@ root.addView(btnBulkActive);
             tagRow.addView(tagLbl);
 
             Button rm = makeSmallButton("✕");
-            rm.setOnClickListener(v -> {
-                tagListManager.removeTagFromList(listIndex, tag);
-                tagRows.removeView(tagRow);
+            rm.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    tagListManager.removeTagFromList(listIndex, tag);
+                    tagRows.removeView(tagRow);
+                }
             });
             tagRow.addView(rm);
             tagRows.addView(tagRow);
@@ -909,20 +1512,19 @@ root.addView(btnBulkActive);
 
         layout.addView(makeLabel("Add tag from library:"));
 
-        // Searchable tag picker
         EditText tagSearchInput = new EditText(this);
         tagSearchInput.setHint("Search tags…");
         tagSearchInput.setTextColor(0xFFFFFFFF);
         tagSearchInput.setHintTextColor(0xFF666666);
         layout.addView(tagSearchInput);
 
-        List<Tag> allTags = tagManager.getAllTags();
+        final List<Tag> allTags = tagManager.getAllTags();
         String[] tagNames = new String[allTags.size()];
         for (int i = 0; i < allTags.size(); i++) {
             tagNames[i] = allTags.get(i).getName();
         }
 
-        Spinner tagPicker = new Spinner(this);
+        final Spinner tagPicker = new Spinner(this);
         ArrayAdapter<String> tagAd = new ArrayAdapter<>(this,
             android.R.layout.simple_spinner_item, tagNames);
         tagAd.setDropDownViewResource(
@@ -950,27 +1552,31 @@ root.addView(btnBulkActive);
         });
 
         Button btnAddToList = makeButton("Add Selected Tag");
-        btnAddToList.setOnClickListener(v -> {
-            if (tagPicker.getSelectedItemPosition() >= 0
-                    && tagPicker.getAdapter().getCount() > 0) {
-                String sel = tagPicker.getSelectedItem().toString();
-                tagListManager.addTagToList(listIndex, sel);
-                Toast.makeText(this, sel + " added", Toast.LENGTH_SHORT).show();
+        btnAddToList.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (tagPicker.getSelectedItemPosition() >= 0
+                        && tagPicker.getAdapter().getCount() > 0) {
+                    String sel = tagPicker.getSelectedItem().toString();
+                    tagListManager.addTagToList(listIndex, sel);
+                    Toast.makeText(SettingsActivity.this, sel + " added", Toast.LENGTH_SHORT).show();
+                }
             }
         });
         layout.addView(btnAddToList);
         
         Button btnBulkAdd = makeButton("Add all tags from scanned files");
-        btnBulkAdd.setOnClickListener(v -> {
-        List<Tag> scanTags = tagManager.getAllTags();
-        List<String> scanNames = new ArrayList<>();
-        for (Tag t : scanTags) scanNames.add(t.getName());
-        int added = tagListManager.bulkAddToList(listIndex, scanNames);
-        Toast.makeText(this,
-            added + " tags added",
-            Toast.LENGTH_SHORT).show();
-    });
-    layout.addView(btnBulkAdd);
+        btnBulkAdd.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                List<Tag> scanTags = tagManager.getAllTags();
+                List<String> scanNames = new ArrayList<>();
+                for (Tag t : scanTags) scanNames.add(t.getName());
+                int added = tagListManager.bulkAddToList(listIndex, scanNames);
+                Toast.makeText(SettingsActivity.this, added + " tags added", Toast.LENGTH_SHORT).show();
+            }
+        });
+        layout.addView(btnBulkAdd);
 
         ScrollView sv = new ScrollView(this);
         sv.addView(layout);
@@ -978,10 +1584,13 @@ root.addView(btnBulkActive);
         new AlertDialog.Builder(this)
             .setTitle("Edit: " + list.getName())
             .setView(sv)
-            .setPositiveButton("Save", (d, w) -> {
-                String newName = nameInput.getText().toString().trim();
-                if (!newName.isEmpty()) tagListManager.renameList(listIndex, newName);
-                recreate();
+            .setPositiveButton("Save", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface d, int w) {
+                    String newName = nameInput.getText().toString().trim();
+                    if (!newName.isEmpty()) tagListManager.renameList(listIndex, newName);
+                    recreate();
+                }
             })
             .setNegativeButton("Cancel", null)
             .show();
@@ -990,17 +1599,20 @@ root.addView(btnBulkActive);
     // ── Folder dialog ─────────────────────────────────────────────────────────
 
     private void showAddFolderDialog() {
-        EditText input = new EditText(this);
+        final EditText input = new EditText(this);
         input.setHint("/sdcard/DCIM");
         new AlertDialog.Builder(this)
             .setTitle("Add Folder")
             .setView(input)
-            .setPositiveButton("Add", (d, w) -> {
-                String path = input.getText().toString().trim();
-                if (!path.isEmpty()) {
-                    folderManager.addFolder(path);
-                    Toast.makeText(this, "Folder added", Toast.LENGTH_SHORT).show();
-                    recreate();
+            .setPositiveButton("Add", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface d, int w) {
+                    String path = input.getText().toString().trim();
+                    if (!path.isEmpty()) {
+                        folderManager.addFolder(path);
+                        Toast.makeText(SettingsActivity.this, "Folder added", Toast.LENGTH_SHORT).show();
+                        recreate();
+                    }
                 }
             })
             .setNegativeButton("Cancel", null)
@@ -1011,7 +1623,7 @@ root.addView(btnBulkActive);
 
     interface ProgressCallback { void onProgress(int progress); }
 
-    private SeekBar.OnSeekBarChangeListener simple(ProgressCallback cb) {
+    private SeekBar.OnSeekBarChangeListener simple(final ProgressCallback cb) {
         return new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar sb, int p, boolean u) {
                 cb.onProgress(p);
@@ -1045,13 +1657,11 @@ root.addView(btnBulkActive);
 
     // ── View helpers ──────────────────────────────────────────────────────────
 
-    /** Small callback for the toggle rows in "Main Window". */
     private interface ToggleHandler {
         void onToggle(boolean enabled);
     }
 
-    /** Label + ON/OFF button row, matching the app's flat button style. */
-    private View makeToggleRow(String label, boolean initial, ToggleHandler handler) {
+    private View makeToggleRow(String label, boolean initial, final ToggleHandler handler) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -1066,17 +1676,20 @@ root.addView(btnBulkActive);
             0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         row.addView(lbl);
 
-        Button btn = new Button(this);
+        final Button btn = new Button(this);
         btn.setTextColor(0xFFFFFFFF);
         btn.setTextSize(12f);
         final boolean[] state = {initial};
         btn.setText(state[0] ? "ON" : "OFF");
         btn.setBackgroundColor(state[0] ? 0xFFE94560 : 0xFF2A2A3E);
-        btn.setOnClickListener(v -> {
-            state[0] = !state[0];
-            btn.setText(state[0] ? "ON" : "OFF");
-            btn.setBackgroundColor(state[0] ? 0xFFE94560 : 0xFF2A2A3E);
-            handler.onToggle(state[0]);
+        btn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                state[0] = !state[0];
+                btn.setText(state[0] ? "ON" : "OFF");
+                btn.setBackgroundColor(state[0] ? 0xFFE94560 : 0xFF2A2A3E);
+                handler.onToggle(state[0]);
+            }
         });
         LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -1085,7 +1698,6 @@ root.addView(btnBulkActive);
         row.addView(btn);
         return row;
     }
-
 
     private TextView makeTitle(String text) {
         TextView tv = new TextView(this);

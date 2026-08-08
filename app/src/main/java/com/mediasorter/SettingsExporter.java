@@ -40,7 +40,8 @@ public class SettingsExporter {
         "thumb_prefs",         // thumbnail settings
         "file_status_prefs",   // skip/flag/done status
         "window_prefs",        // window size
-        "search_history_prefs" // search history
+        "search_history_prefs",// search history
+        "settings_prefs"       // expanded settings
     };
 
     public static class ApplyResult {
@@ -346,7 +347,12 @@ public class SettingsExporter {
     public static File[] listBackups(Context context) {
         File dir = getBackupDir(context);
         if (!dir.exists()) return new File[0];
-        File[] files = dir.listFiles((d, name) -> name.endsWith(".json"));
+        File[] files = dir.listFiles(new java.io.FilenameFilter() {
+            @Override
+            public boolean accept(File d, String name) {
+                return name != null && name.endsWith(".json");
+            }
+        });
         return files != null ? files : new File[0];
     }
 }

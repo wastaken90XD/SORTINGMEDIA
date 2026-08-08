@@ -113,7 +113,9 @@ public class MainActivity extends Activity
     // instant: D-pad visibility and the whole tag panel follow the toggles.
     private void applyUiToggles() {
         if (previewManager != null && gestureSettings != null) {
-            previewManager.setDpadVisible(gestureSettings.isDpadEnabled());
+            android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+            boolean dpadOn = sp.getBoolean("dpad_enabled", true) && gestureSettings.isDpadEnabled();
+            previewManager.setDpadVisible(dpadOn);
         }
         applyTagsGate();
     }
@@ -149,6 +151,102 @@ public class MainActivity extends Activity
             btnScan.setOnClickListener(v -> startScan());
         } else {
             super.onBackPressed();
+        }
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, android.view.KeyEvent event) {
+        if (isDpadKey(keyCode)) {
+            android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+            boolean dpadEnabled = sp.getBoolean("dpad_enabled", true) && (gestureSettings == null || gestureSettings.isDpadEnabled());
+            if (!dpadEnabled) return false;
+
+            List<GestureSettings.GestureStep> steps = getDpadStepsForKey(keyCode);
+            boolean isUnassigned = (steps == null || steps.isEmpty() ||
+                    (steps.size() == 1 && steps.get(0).action == GestureSettings.GestureAction.NOTHING));
+            if (!isUnassigned && gestureSettings != null) {
+                String summary = gestureSettings.getSummary(steps);
+                if (summary != null && !summary.isEmpty() && !"Nothing".equalsIgnoreCase(summary.trim())) {
+                    if (previewManager != null) previewManager.showHintLabel(summary);
+                } else {
+                    if (previewManager != null) {
+                        previewManager.hideHintLabel();
+                        previewManager.flashPreviewRoot();
+                    }
+                }
+            } else {
+                if (previewManager != null) {
+                    previewManager.hideHintLabel();
+                    previewManager.flashPreviewRoot();
+                }
+            }
+            return true;
+        }
+
+        if (isVolumeKey(keyCode)) {
+            android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+            boolean volumeEnabled = sp.getBoolean("volume_keys_enabled", true);
+            if (!volumeEnabled) return false;
+
+            String label = (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) ? "Next File" : "Prev File";
+            if (previewManager != null) previewManager.showHintLabel(label);
+            return true;
+        }
+
+        return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, android.view.KeyEvent event) {
+        if (isDpadKey(keyCode)) {
+            android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+            boolean dpadEnabled = sp.getBoolean("dpad_enabled", true) && (gestureSettings == null || gestureSettings.isDpadEnabled());
+            if (!dpadEnabled) return false;
+
+            if (previewManager != null) previewManager.hideHintLabel();
+            List<GestureSettings.GestureStep> steps = getDpadStepsForKey(keyCode);
+            executeDpad(steps);
+            return true;
+        }
+
+        if (isVolumeKey(keyCode)) {
+            android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+            boolean volumeEnabled = sp.getBoolean("volume_keys_enabled", true);
+            if (!volumeEnabled) return false;
+
+            if (previewManager != null) previewManager.hideHintLabel();
+            if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) navigateNext();
+            else navigatePrev();
+            return true;
+        }
+
+        return super.onKeyUp(keyCode, event);
+    }
+
+    private boolean isDpadKey(int keyCode) {
+        return keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP
+            || keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN
+            || keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT
+            || keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT
+            || keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER
+            || keyCode == android.view.KeyEvent.KEYCODE_ENTER;
+    }
+
+    private boolean isVolumeKey(int keyCode) {
+        return keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
+            || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN;
+    }
+
+    private List<GestureSettings.GestureStep> getDpadStepsForKey(int keyCode) {
+        if (gestureSettings == null) return new ArrayList<>();
+        switch (keyCode) {
+            case android.view.KeyEvent.KEYCODE_DPAD_UP:    return gestureSettings.getDpadUp();
+            case android.view.KeyEvent.KEYCODE_DPAD_DOWN:  return gestureSettings.getDpadDown();
+            case android.view.KeyEvent.KEYCODE_DPAD_LEFT:  return gestureSettings.getDpadLeft();
+            case android.view.KeyEvent.KEYCODE_DPAD_RIGHT: return gestureSettings.getDpadRight();
+            case android.view.KeyEvent.KEYCODE_DPAD_CENTER:
+            case android.view.KeyEvent.KEYCODE_ENTER:     return gestureSettings.getDpadCenter();
+            default:                                       return new ArrayList<>();
         }
     }
                 
@@ -594,7 +692,6 @@ public class MainActivity extends Activity
         List<String> tags = active.getTags();
         previewManager.setSidePanelTags(tags, file.getTags());
         updateDpadLabels();
-        previewManager.updateGestureLabels(gestureSettings);
     }
 
     private void updateDpadLabels() {
@@ -1727,11 +1824,18 @@ private Spinner makeSpinner(String[] options) {
             .show();
     }
 
-    /** Moves each selected file into <first watched folder>/.trash. */
+    /** Moves each selected file into <first watched folder>/.trash or configured trash_path. */
     private int moveSelectionToTrash(List<MediaFile> selectedFiles) {
         List<String> folders = folderManager.getFolders();
         if (folders.isEmpty()) return 0;
-        java.io.File trashDir = new java.io.File(folders.get(0), ".trash");
+        android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        String customTrash = sp.getString("trash_path", "");
+        java.io.File trashDir;
+        if (customTrash != null && !customTrash.trim().isEmpty()) {
+            trashDir = new java.io.File(customTrash.trim());
+        } else {
+            trashDir = new java.io.File(folders.get(0), ".trash");
+        }
         if (!trashDir.exists() && !trashDir.mkdirs()) return 0;
 
         int moved = 0;

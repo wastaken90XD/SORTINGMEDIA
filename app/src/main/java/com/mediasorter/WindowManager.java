@@ -22,7 +22,7 @@ public class WindowManager {
 
     public void setWindowSize(int size) {
         synchronized (lock) {
-            this.windowSize = Math.max(MIN_WINDOW, size);
+            this.windowSize = Math.max(10, Math.min(500, size));
         }
     }
 
