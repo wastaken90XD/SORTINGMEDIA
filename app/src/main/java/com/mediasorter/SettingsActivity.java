@@ -2,6 +2,8 @@ package com.mediasorter;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.DialogInterface;
+import com.mediasorter.features.RandomGenerator;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.SharedPreferences;
@@ -292,12 +294,60 @@ root.addView(btnBulkActive);
         root.addView(makeTitle("Backup & Restore"));
 
         Button btnExport = makeButton("Export Settings");
-        btnExport.setOnClickListener(v -> {
-            String path = SettingsExporter.exportSettings(this);
-            if (path != null) {
-                Toast.makeText(this, "Exported to:\n" + path, Toast.LENGTH_LONG).show();
-            } else {
-                Toast.makeText(this, "Export failed", Toast.LENGTH_SHORT).show();
+        btnExport.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String prefix = RandomGenerator.randomGroupPrefix(new java.util.HashSet<String>());
+                java.util.Calendar cal = java.util.Calendar.getInstance();
+                java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US);
+                String dateStr = sdf.format(cal.getTime());
+                String defaultFilename = "export_" + prefix + "_" + dateStr + ".json";
+
+                LinearLayout container = new LinearLayout(SettingsActivity.this);
+                container.setOrientation(LinearLayout.VERTICAL);
+
+                final EditText nameEdit = new EditText(SettingsActivity.this);
+                nameEdit.setText(defaultFilename);
+                nameEdit.setTextColor(0xFFFFFFFF);
+                LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+                nameEdit.setLayoutParams(inputLp);
+                container.addView(nameEdit);
+
+                android.widget.FrameLayout box = new android.widget.FrameLayout(SettingsActivity.this);
+                int pad = (int) (20 * getResources().getDisplayMetrics().density);
+                android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
+                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                        android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
+                lp.setMargins(pad, pad, pad, pad);
+                container.setLayoutParams(lp);
+                box.addView(container);
+
+                new AlertDialog.Builder(SettingsActivity.this)
+                        .setTitle("Export Settings")
+                        .setView(box)
+                        .setPositiveButton("Export", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                String filename = nameEdit.getText().toString().trim();
+                                if (filename.isEmpty()) {
+                                    Toast.makeText(SettingsActivity.this, "Filename cannot be empty", Toast.LENGTH_SHORT).show();
+                                    return;
+                                }
+                                if (!filename.endsWith(".json")) {
+                                    filename += ".json";
+                                }
+                                String path = SettingsExporter.exportSettings(SettingsActivity.this, filename);
+                                if (path != null) {
+                                    Toast.makeText(SettingsActivity.this, "Exported to:\n" + path, Toast.LENGTH_LONG).show();
+                                } else {
+                                    Toast.makeText(SettingsActivity.this, "Export failed", Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show();
             }
         });
         root.addView(btnExport);

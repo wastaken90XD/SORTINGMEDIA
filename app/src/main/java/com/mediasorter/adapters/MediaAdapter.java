@@ -128,6 +128,10 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         }
     }
 
+    public String getSelectedPath() {
+        return selectedPath;
+    }
+
     // ── Multi-select ──────────────────────────────────────────────────────────
 
     public void enterSelectMode() {

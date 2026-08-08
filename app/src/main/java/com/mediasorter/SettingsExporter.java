@@ -41,6 +41,12 @@ public class SettingsExporter {
      * Export all settings to a JSON file. Returns the file path on success, null on failure.
      */
     public static String exportSettings(Context context) {
+        String timestamp = new SimpleDateFormat(
+                "yyyyMMdd_HHmmss", Locale.US).format(new Date());
+        return exportSettings(context, "mediasorter_backup_" + timestamp + ".json");
+    }
+
+    public static String exportSettings(Context context, String filename) {
         try {
             JSONObject root = new JSONObject();
             root.put("version", 1);
@@ -73,12 +79,9 @@ public class SettingsExporter {
                 root.put(prefsName, prefsObj);
             }
 
-            // Write to file
-            String timestamp = new SimpleDateFormat(
-                    "yyyyMMdd_HHmmss", Locale.US).format(new Date());
             File exportDir = getBackupDir(context);
             if (!exportDir.exists()) exportDir.mkdirs();
-            File exportFile = new File(exportDir, "mediasorter_backup_" + timestamp + ".json");
+            File exportFile = new File(exportDir, filename);
 
             FileWriter writer = new FileWriter(exportFile);
             writer.write(root.toString(2)); // pretty-print with indent=2
