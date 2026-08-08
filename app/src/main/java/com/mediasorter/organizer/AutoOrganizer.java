@@ -55,6 +55,14 @@ public class AutoOrganizer {
                         entry.newPath = f.getPath();
                         entry.newTags = new ArrayList<>(f.getTags());
                         entry.newStatus = fileStatus.getStatus(f.getPath());
+                        if (!entry.newPath.equals(entry.originalPath)) {
+                            if (entry.newPath.contains("/.trash/")) {
+                                entry.wasTrashed = true;
+                                entry.trashPath = entry.newPath;
+                            } else {
+                                entry.wasMoved = true;
+                            }
+                        }
                         batch.add(entry);
                         log.add(rule.name + " applied to " + (f.getName() != null ? f.getName() : f.getPath()));
                     } else {
@@ -248,6 +256,14 @@ public class AutoOrganizer {
                 entry.newPath = f.getPath();
                 entry.newTags = new ArrayList<>(f.getTags());
                 entry.newStatus = fileStatus.getStatus(f.getPath());
+                if (!entry.newPath.equals(entry.originalPath)) {
+                    if (entry.newPath.contains("/.trash/")) {
+                        entry.wasTrashed = true;
+                        entry.trashPath = entry.newPath;
+                    } else {
+                        entry.wasMoved = true;
+                    }
+                }
                 batch.add(entry);
                 log.add(rule.name + " applied to " + (f.getName() != null ? f.getName() : f.getPath()));
             } else {

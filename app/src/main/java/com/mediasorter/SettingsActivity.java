@@ -1291,7 +1291,8 @@ root.addView(btnBulkActive);
                     btnEditStep.setOnClickListener(new View.OnClickListener() {
                         @Override
                         public void onClick(View v) {
-                            RulesActivity.showActionPickerDialog(SettingsActivity.this, tempActions.get(stepIdx), new RulesActivity.ActionCallback() {
+                            com.mediasorter.organizer.ActionBuilderHelper helper = new com.mediasorter.organizer.ActionBuilderHelper(SettingsActivity.this);
+                            helper.showActionPickerDialog(tempActions.get(stepIdx), new com.mediasorter.organizer.ActionBuilderHelper.ActionCallback() {
                                 @Override
                                 public void onActionSelected(com.mediasorter.organizer.Action updatedAction) {
                                     tempActions.set(stepIdx, updatedAction);
@@ -1327,7 +1328,8 @@ root.addView(btnBulkActive);
                     Toast.makeText(SettingsActivity.this, "Maximum of 10 steps per macro allowed", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                RulesActivity.showActionPickerDialog(SettingsActivity.this, null, new RulesActivity.ActionCallback() {
+                com.mediasorter.organizer.ActionBuilderHelper helper = new com.mediasorter.organizer.ActionBuilderHelper(SettingsActivity.this);
+                helper.showActionPickerDialog(null, new com.mediasorter.organizer.ActionBuilderHelper.ActionCallback() {
                     @Override
                     public void onActionSelected(com.mediasorter.organizer.Action action) {
                         if (action != null) {
