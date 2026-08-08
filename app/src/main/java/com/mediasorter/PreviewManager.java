@@ -6,12 +6,15 @@ import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.TypedValue;
 import android.view.GestureDetector;
+import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.MediaController;
@@ -47,6 +50,7 @@ public class PreviewManager {
     private final Handler         mainHandler = new Handler(Looper.getMainLooper());
 
     // Views
+    private FrameLayout  previewMediaRoot;
     private ImageView    imagePreview;
     private VideoView    videoPreview;
     private View         unsupportedPreview;
@@ -69,8 +73,16 @@ public class PreviewManager {
     private Spinner      tagListSpinner;
     private RecyclerView sidePanelTagList;
     private View         dpadContainer;
-    private View         gestureOverlay;
-    private TextView     swipeLeftLabel, swipeRightLabel, swipeUpLabel, swipeDownLabel;
+
+    // Runtime centered gesture hint view & flash tint overlay
+    private TextView        hintTextView;
+    private View            tintOverlay;
+    private GestureSettings gestureSettings;
+
+    // Swipe tracking for runtime hint
+    private float   downX = 0f;
+    private float   downY = 0f;
+    private boolean hasFlashedForCurrentSwipe = false;
 
     private ActionListener       actionListener;
     private FileStatus           fileStatus;
@@ -81,11 +93,8 @@ public class PreviewManager {
 
     private boolean panelVisible = false;
 
-    // Path of the file most recently passed to load(); decode tasks that
-    // finish for any older path discard their bitmap instead of showing it.
+    // Path of the file most recently passed to load()
     private volatile String  currentPath = null;
-    // Bitmap decoded by loadImage itself (never a cached thumbnail!) that is
-    // currently owned by us; recycled once it is replaced or released.
     private Bitmap           ownBitmap   = null;
     private volatile boolean released    = false;
 
@@ -98,20 +107,29 @@ public class PreviewManager {
 
     private static final float MIN_ZOOM = 1.0f;
     private static final float MAX_ZOOM = 8.0f;
-    private static final long OVERLAY_TIMEOUT = 10000; // ms
-    private final Runnable hideOverlayRunnable = () -> {
-        if (gestureOverlay != null) gestureOverlay.setVisibility(View.GONE);
+
+    private final Runnable hideTintRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (tintOverlay != null) {
+                tintOverlay.setVisibility(View.GONE);
+            }
+        }
     };
 
     public PreviewManager(Context context, View previewRoot, FileStatus fileStatus) {
         this.context    = context;
         this.fileStatus = fileStatus;
-        // Try to get a ThumbnailLoader if the context is MainActivity
         if (context instanceof MainActivity) {
             try {
                 java.lang.reflect.Field f = MainActivity.class.getDeclaredField("thumbnailLoader");
                 f.setAccessible(true);
                 this.thumbnailLoader = (ThumbnailLoader) f.get(context);
+            } catch (Exception ignored) {}
+            try {
+                java.lang.reflect.Field f = MainActivity.class.getDeclaredField("gestureSettings");
+                f.setAccessible(true);
+                this.gestureSettings = (GestureSettings) f.get(context);
             } catch (Exception ignored) {}
         }
         bindViews(previewRoot);
@@ -123,6 +141,7 @@ public class PreviewManager {
     // ── Bind ──────────────────────────────────────────────────────────────────
 
     private void bindViews(View root) {
+        previewMediaRoot   = root.findViewById(R.id.previewMediaRoot);
         imagePreview       = root.findViewById(R.id.imagePreview);
         videoPreview       = root.findViewById(R.id.videoPreview);
         unsupportedPreview = root.findViewById(R.id.unsupportedPreview);
@@ -145,38 +164,215 @@ public class PreviewManager {
         tagListSpinner     = root.findViewById(R.id.tagListSpinner);
         sidePanelTagList   = root.findViewById(R.id.sidePanelTagList);
         dpadContainer      = root.findViewById(R.id.dpadContainer);
-        gestureOverlay     = root.findViewById(R.id.gestureOverlay);
-        swipeLeftLabel     = root.findViewById(R.id.swipeLeftLabel);
-        swipeRightLabel    = root.findViewById(R.id.swipeRightLabel);
-        swipeUpLabel       = root.findViewById(R.id.swipeUpLabel);
-        swipeDownLabel     = root.findViewById(R.id.swipeDownLabel);
+
+        // Create runtime overlay & hint text view in previewMediaRoot
+        if (previewMediaRoot != null) {
+            tintOverlay = new View(context);
+            FrameLayout.LayoutParams tintLp = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT);
+            tintOverlay.setLayoutParams(tintLp);
+            tintOverlay.setBackgroundColor(0x33E94560);
+            tintOverlay.setClickable(false);
+            tintOverlay.setFocusable(false);
+            tintOverlay.setVisibility(View.GONE);
+
+            hintTextView = new TextView(context);
+            FrameLayout.LayoutParams hintLp = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER);
+            hintTextView.setLayoutParams(hintLp);
+            hintTextView.setClickable(false);
+            hintTextView.setFocusable(false);
+            hintTextView.setFocusableInTouchMode(false);
+            hintTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+            hintTextView.setTextColor(0xFFE94560);
+            hintTextView.setBackground(null);
+            hintTextView.setVisibility(View.GONE);
+
+            previewMediaRoot.addView(tintOverlay);
+            previewMediaRoot.addView(hintTextView);
+        }
+    }
+
+    // ── Runtime Hint Overlay & Flash ──────────────────────────────────────────
+
+    public void showHintLabel(String label) {
+        if (hintTextView == null) return;
+        if (label != null && !label.isEmpty() && !"Nothing".equalsIgnoreCase(label.trim())) {
+            hintTextView.setText(label);
+            hintTextView.setVisibility(View.VISIBLE);
+        } else {
+            hideHintLabel();
+        }
+    }
+
+    public void hideHintLabel() {
+        if (hintTextView != null) {
+            hintTextView.setVisibility(View.GONE);
+        }
+    }
+
+    public void flashPreviewRoot() {
+        if (tintOverlay == null) return;
+        tintOverlay.setVisibility(View.VISIBLE);
+        mainHandler.removeCallbacks(hideTintRunnable);
+        mainHandler.postDelayed(hideTintRunnable, 400);
+    }
+
+    public void setGestureSettings(GestureSettings gs) {
+        this.gestureSettings = gs;
+    }
+
+    // ── Single-finger Swipe Hint Tracking ─────────────────────────────────────
+
+    private void trackSwipeForHint(MotionEvent event) {
+        if (gestureSettings == null) return;
+        int action = event.getActionMasked();
+        int pointerCount = event.getPointerCount();
+
+        if (pointerCount > 1) {
+            hideHintLabel();
+            return;
+        }
+
+        if (action == MotionEvent.ACTION_DOWN) {
+            downX = event.getRawX();
+            downY = event.getRawY();
+            hasFlashedForCurrentSwipe = false;
+            hideHintLabel();
+        } else if (action == MotionEvent.ACTION_MOVE && pointerCount == 1 && scaleFactor <= MIN_ZOOM + 0.01f) {
+            float dx = event.getRawX() - downX;
+            float dy = event.getRawY() - downY;
+            float thresholdPx = TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_DIP, 20, context.getResources().getDisplayMetrics());
+
+            if (Math.abs(dx) >= thresholdPx || Math.abs(dy) >= thresholdPx) {
+                boolean isHorizontal = Math.abs(dx) > Math.abs(dy);
+                List<GestureSettings.GestureStep> steps;
+                if (isHorizontal) {
+                    steps = (dx < 0) ? gestureSettings.getLeft() : gestureSettings.getRight();
+                } else {
+                    steps = (dy < 0) ? gestureSettings.getUp() : gestureSettings.getDown();
+                }
+
+                boolean isUnassigned = (steps == null || steps.isEmpty() ||
+                        (steps.size() == 1 && steps.get(0).action == GestureSettings.GestureAction.NOTHING));
+
+                if (!isUnassigned) {
+                    String summary = gestureSettings.getSummary(steps);
+                    if (summary != null && !summary.isEmpty() && !"Nothing".equalsIgnoreCase(summary.trim())) {
+                        showHintLabel(summary);
+                    } else {
+                        hideHintLabel();
+                        if (!hasFlashedForCurrentSwipe) {
+                            hasFlashedForCurrentSwipe = true;
+                            flashPreviewRoot();
+                        }
+                    }
+                } else {
+                    hideHintLabel();
+                    if (!hasFlashedForCurrentSwipe) {
+                        hasFlashedForCurrentSwipe = true;
+                        flashPreviewRoot();
+                    }
+                }
+            }
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            hideHintLabel();
+        }
     }
 
     // ── Buttons ───────────────────────────────────────────────────────────────
 
     private void setupButtons() {
-        btnSkip.setOnClickListener(v    -> { if (actionListener != null) actionListener.onSkip(); });
-        btnFlag.setOnClickListener(v    -> { if (actionListener != null) actionListener.onFlag(); });
-        btnDone.setOnClickListener(v    -> { if (actionListener != null) actionListener.onDone(); });
-        btnPrev.setOnClickListener(v    -> { if (actionListener != null) actionListener.onPrev(); });
-        btnNext.setOnClickListener(v    -> { if (actionListener != null) actionListener.onNext(); });
-        dpadUp.setOnClickListener(v     -> { if (actionListener != null) actionListener.onDpadUp(); });
-        dpadDown.setOnClickListener(v   -> { if (actionListener != null) actionListener.onDpadDown(); });
-        dpadLeft.setOnClickListener(v   -> { if (actionListener != null) actionListener.onDpadLeft(); });
-        dpadRight.setOnClickListener(v  -> { if (actionListener != null) actionListener.onDpadRight(); });
-        dpadCenter.setOnClickListener(v -> { if (actionListener != null) actionListener.onDpadCenter(); });
+        btnSkip.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { if (actionListener != null) actionListener.onSkip(); }
+        });
+        btnFlag.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { if (actionListener != null) actionListener.onFlag(); }
+        });
+        btnDone.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { if (actionListener != null) actionListener.onDone(); }
+        });
+        btnPrev.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { if (actionListener != null) actionListener.onPrev(); }
+        });
+        btnNext.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { if (actionListener != null) actionListener.onNext(); }
+        });
 
-        btnTogglePanel.setOnClickListener(v -> togglePanel());
+        // Software D-Pad button touches
+        bindDpadButton(dpadUp, new Runnable() {
+            @Override public void run() { if (actionListener != null) actionListener.onDpadUp(); }
+        }, new DpadStepGetter() {
+            @Override public List<GestureSettings.GestureStep> get() { return gestureSettings != null ? gestureSettings.getDpadUp() : null; }
+        });
 
-        // Long‑press on any swipe label to show the overlay again
-        View.OnLongClickListener showOverlay = v -> {
-            showGestureOverlay();
-            return true;
-        };
-        swipeLeftLabel.setOnLongClickListener(showOverlay);
-        swipeRightLabel.setOnLongClickListener(showOverlay);
-        swipeUpLabel.setOnLongClickListener(showOverlay);
-        swipeDownLabel.setOnLongClickListener(showOverlay);
+        bindDpadButton(dpadDown, new Runnable() {
+            @Override public void run() { if (actionListener != null) actionListener.onDpadDown(); }
+        }, new DpadStepGetter() {
+            @Override public List<GestureSettings.GestureStep> get() { return gestureSettings != null ? gestureSettings.getDpadDown() : null; }
+        });
+
+        bindDpadButton(dpadLeft, new Runnable() {
+            @Override public void run() { if (actionListener != null) actionListener.onDpadLeft(); }
+        }, new DpadStepGetter() {
+            @Override public List<GestureSettings.GestureStep> get() { return gestureSettings != null ? gestureSettings.getDpadLeft() : null; }
+        });
+
+        bindDpadButton(dpadRight, new Runnable() {
+            @Override public void run() { if (actionListener != null) actionListener.onDpadRight(); }
+        }, new DpadStepGetter() {
+            @Override public List<GestureSettings.GestureStep> get() { return gestureSettings != null ? gestureSettings.getDpadRight() : null; }
+        });
+
+        bindDpadButton(dpadCenter, new Runnable() {
+            @Override public void run() { if (actionListener != null) actionListener.onDpadCenter(); }
+        }, new DpadStepGetter() {
+            @Override public List<GestureSettings.GestureStep> get() { return gestureSettings != null ? gestureSettings.getDpadCenter() : null; }
+        });
+
+        btnTogglePanel.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { togglePanel(); }
+        });
+    }
+
+    private interface DpadStepGetter {
+        List<GestureSettings.GestureStep> get();
+    }
+
+    private void bindDpadButton(final Button btn, final Runnable onClick, final DpadStepGetter getter) {
+        btn.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN) {
+                    List<GestureSettings.GestureStep> steps = getter.get();
+                    boolean isUnassigned = (steps == null || steps.isEmpty() ||
+                            (steps.size() == 1 && steps.get(0).action == GestureSettings.GestureAction.NOTHING));
+                    if (!isUnassigned) {
+                        String summary = gestureSettings != null ? gestureSettings.getSummary(steps) : "";
+                        if (summary != null && !summary.isEmpty() && !"Nothing".equalsIgnoreCase(summary.trim())) {
+                            showHintLabel(summary);
+                        } else {
+                            hideHintLabel();
+                            flashPreviewRoot();
+                        }
+                    } else {
+                        hideHintLabel();
+                        flashPreviewRoot();
+                    }
+                } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    hideHintLabel();
+                    if (action == MotionEvent.ACTION_UP) {
+                        onClick.run();
+                    }
+                }
+                return true;
+            }
+        });
     }
 
     /** Show/hide the whole floating D-pad (Settings → Main Window toggle). */
@@ -229,6 +425,17 @@ public class PreviewManager {
 
     public void updateDpadLabels(String up, String down, String left,
                                   String right, String center) {
+        boolean enabled = gestureSettings == null || gestureSettings.isDpadEnabled();
+        android.content.SharedPreferences sp = context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
+        boolean dpadEnabled = sp.getBoolean("dpad_enabled", true);
+        if (!enabled || !dpadEnabled) {
+            dpadUp.setText("▲");
+            dpadDown.setText("▼");
+            dpadLeft.setText("◄");
+            dpadRight.setText("►");
+            dpadCenter.setText("●");
+            return;
+        }
         dpadUp.setText(up.isEmpty()      ? "▲" : "▲\n" + truncate(up));
         dpadDown.setText(down.isEmpty()  ? "▼" : "▼\n" + truncate(down));
         dpadLeft.setText(left.isEmpty()  ? "◄" : "◄\n" + truncate(left));
@@ -238,30 +445,6 @@ public class PreviewManager {
 
     private String truncate(String s) {
         return s.length() > 6 ? s.substring(0, 6) + "…" : s;
-    }
-
-    // ── Gesture overlay ───────────────────────────────────────────────────────
-
-    /**
-     * Call this from MainActivity to update the swipe labels with the current
-     * gesture actions.  The overlay is shown automatically for a few seconds.
-     */
-    public void updateGestureLabels(GestureSettings gestureSettings) {
-        if (gestureSettings == null || swipeLeftLabel == null) return;
-
-        swipeLeftLabel.setText("← " + gestureSettings.getSummary(gestureSettings.getLeft()));
-        swipeRightLabel.setText("→ " + gestureSettings.getSummary(gestureSettings.getRight()));
-        swipeUpLabel.setText("↑ " + gestureSettings.getSummary(gestureSettings.getUp()));
-        swipeDownLabel.setText("↓ " + gestureSettings.getSummary(gestureSettings.getDown()));
-
-        showGestureOverlay();
-    }
-
-    public void showGestureOverlay() {
-        if (gestureOverlay == null) return;
-        gestureOverlay.setVisibility(View.VISIBLE);
-        mainHandler.removeCallbacks(hideOverlayRunnable);
-        mainHandler.postDelayed(hideOverlayRunnable, OVERLAY_TIMEOUT);
     }
 
     // ── Zoom ──────────────────────────────────────────────────────────────────
@@ -279,44 +462,48 @@ public class PreviewManager {
                 }
             });
 
-        imagePreview.setOnTouchListener((v, event) -> {
-            boolean scaleHandled = scaleDetector.onTouchEvent(event);
+        imagePreview.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                // Runtime hint tracking — never consumes touch event
+                trackSwipeForHint(event);
 
-            // Only forward to swipe detector when NOT zooming and NOT zoomed in.
-            // This prevents gestures (flings) from registering/navigating while pinching or viewing zoomed.
-            boolean shouldHandleSwipe = swipeDetector != null
-                    && !scaleDetector.isInProgress()
-                    && scaleFactor <= MIN_ZOOM + 0.01f;
+                boolean scaleHandled = scaleDetector.onTouchEvent(event);
 
-            if (shouldHandleSwipe) {
-                swipeDetector.onTouchEvent(event);
+                boolean shouldHandleSwipe = swipeDetector != null
+                        && !scaleDetector.isInProgress()
+                        && scaleFactor <= MIN_ZOOM + 0.01f;
+
+                if (shouldHandleSwipe) {
+                    swipeDetector.onTouchEvent(event);
+                }
+
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        lastTouchX = event.getX();
+                        lastTouchY = event.getY();
+                        if (scaleFactor > 1.0f) {
+                            imagePreview.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                        }
+                        break;
+                    case MotionEvent.ACTION_MOVE:
+                        if (!scaleDetector.isInProgress() && scaleFactor > 1.0f) {
+                            translateX += event.getX() - lastTouchX;
+                            translateY += event.getY() - lastTouchY;
+                            applyMatrix();
+                        }
+                        lastTouchX = event.getX();
+                        lastTouchY = event.getY();
+                        break;
+                    case MotionEvent.ACTION_UP:
+                        if (scaleFactor <= MIN_ZOOM) {
+                            resetZoom();
+                            imagePreview.setLayerType(View.LAYER_TYPE_NONE, null);
+                        }
+                        break;
+                }
+                return true;
             }
-
-            switch (event.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                    lastTouchX = event.getX();
-                    lastTouchY = event.getY();
-                    if (scaleFactor > 1.0f) {
-                        imagePreview.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-                    }
-                    break;
-                case MotionEvent.ACTION_MOVE:
-                    if (!scaleDetector.isInProgress() && scaleFactor > 1.0f) {
-                        translateX += event.getX() - lastTouchX;
-                        translateY += event.getY() - lastTouchY;
-                        applyMatrix();
-                    }
-                    lastTouchX = event.getX();
-                    lastTouchY = event.getY();
-                    break;
-                case MotionEvent.ACTION_UP:
-                    if (scaleFactor <= MIN_ZOOM) {
-                        resetZoom();
-                        imagePreview.setLayerType(View.LAYER_TYPE_NONE, null);
-                    }
-                    break;
-            }
-            return true;
         });
     }
 
@@ -341,11 +528,6 @@ public class PreviewManager {
     public void setSwipeDetector(GestureDetector d) { this.swipeDetector = d; }
     public void setActionListener(ActionListener l) { this.actionListener = l; }
 
-    /**
-     * Preferred way to hand the shared thumbnail cache to the preview.
-     * The constructor's reflection-based lookup stays only as a fallback for
-     * old call sites.
-     */
     public void setThumbnailLoader(ThumbnailLoader loader) {
         if (loader != null) this.thumbnailLoader = loader;
     }
@@ -383,9 +565,8 @@ public class PreviewManager {
     // ── Image ─────────────────────────────────────────────────────────────────
 
     private void loadImage(final MediaFile file) {
-        // Show thumbnail immediately to avoid black preview while full image loads
         Bitmap thumb = thumbnailLoader != null
-                ? thumbnailLoader.getCachedThumbnail(file)   // fast path
+                ? thumbnailLoader.getCachedThumbnail(file)
                 : null;
         if (thumb != null && !thumb.isRecycled()) {
             imagePreview.setVisibility(View.VISIBLE);
@@ -396,45 +577,45 @@ public class PreviewManager {
         if (released || executor.isShutdown()) return;
         final String path = file.getPath();
         try {
-            executor.submit(() -> {
-                if (released) return;
-                Bitmap bmp = decodeSampled(path, 1920, 1080);
+            executor.submit(new Runnable() {
+                @Override
+                public void run() {
+                    if (released) return;
+                    final Bitmap bmp = decodeSampled(path, 1920, 1080);
 
-                mainHandler.post(() -> {
-                    // Stale task: user has already navigated to another file.
-                    // Recycle instead of displaying the wrong image.
-                    if (released || !path.equals(currentPath)) {
-                        if (bmp != null && !bmp.isRecycled()) bmp.recycle();
-                        return;
-                    }
-                    if (bmp != null) {
-                        replaceOwnBitmap(bmp);
-                        imagePreview.setVisibility(View.VISIBLE);
-                        imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                        imagePreview.setImageBitmap(bmp);
-                        imagePreview.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-                        imagePreview.post(() -> {
-                            if (imagePreview.getWidth() > 0 && imagePreview.getHeight() > 0) {
-                                imagePreview.setScaleType(ImageView.ScaleType.MATRIX);
-                                Matrix m = new Matrix(imagePreview.getImageMatrix());
-                                imagePreview.setImageMatrix(m);
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (released || !path.equals(currentPath)) {
+                                if (bmp != null && !bmp.isRecycled()) bmp.recycle();
+                                return;
                             }
-                        });
-                    } else {
-                        showUnsupported("Could not decode image");
-                    }
-                });
+                            if (bmp != null) {
+                                replaceOwnBitmap(bmp);
+                                imagePreview.setVisibility(View.VISIBLE);
+                                imagePreview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                                imagePreview.setImageBitmap(bmp);
+                                imagePreview.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                                imagePreview.post(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        if (imagePreview.getWidth() > 0 && imagePreview.getHeight() > 0) {
+                                            imagePreview.setScaleType(ImageView.ScaleType.MATRIX);
+                                            Matrix m = new Matrix(imagePreview.getImageMatrix());
+                                            imagePreview.setImageMatrix(m);
+                                        }
+                                    }
+                                });
+                            } else {
+                                showUnsupported("Could not decode image");
+                            }
+                        }
+                    });
+                }
             });
-        } catch (java.util.concurrent.RejectedExecutionException ignored) {
-            // Released between the isShutdown() check and submit — harmlessly skip.
-        }
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {}
     }
 
-    /**
-     * Bounds-then-sample decode with OOM defense: if even the sampled bitmap
-     * does not fit, retry with a doubled sample size once before giving up.
-     * Never throws OutOfMemoryError to the caller.
-     */
     private Bitmap decodeSampled(String path, int reqW, int reqH) {
         BitmapFactory.Options opts = new BitmapFactory.Options();
         try {
@@ -457,7 +638,6 @@ public class PreviewManager {
         }
     }
 
-    /** Take ownership of a freshly decoded preview bitmap; recycle the old one. */
     private void replaceOwnBitmap(Bitmap next) {
         Bitmap old = ownBitmap;
         ownBitmap = next;
@@ -479,25 +659,38 @@ public class PreviewManager {
 
     // ── Video ─────────────────────────────────────────────────────────────────
 
-    private void loadVideo(MediaFile file) {
-        mainHandler.post(() -> {
-            videoPreview.setVisibility(View.VISIBLE);
-            MediaController mc = new MediaController(context);
-            mc.setAnchorView(videoPreview);
-            videoPreview.setMediaController(mc);
-            videoPreview.setVideoURI(
-                android.net.Uri.parse(file.getPath()));
-            videoPreview.setOnPreparedListener(mp -> {
-                mp.setLooping(false);
-                mc.show(0);
-                videoPreview.start();
-            });
-            videoPreview.setOnErrorListener((mp, what, extra) -> {
-                showUnsupported(CodecChecker.getUnsupportedReason(file));
-                return true;
-            });
-            videoPreview.setOnCompletionListener(mp -> mc.show(0));
-            videoPreview.requestFocus();
+    private void loadVideo(final MediaFile file) {
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                videoPreview.setVisibility(View.VISIBLE);
+                final MediaController mc = new MediaController(context);
+                mc.setAnchorView(videoPreview);
+                videoPreview.setMediaController(mc);
+                videoPreview.setVideoURI(android.net.Uri.parse(file.getPath()));
+                videoPreview.setOnPreparedListener(new android.media.MediaPlayer.OnPreparedListener() {
+                    @Override
+                    public void onPrepared(android.media.MediaPlayer mp) {
+                        mp.setLooping(false);
+                        mc.show(0);
+                        videoPreview.start();
+                    }
+                });
+                videoPreview.setOnErrorListener(new android.media.MediaPlayer.OnErrorListener() {
+                    @Override
+                    public boolean onError(android.media.MediaPlayer mp, int what, int extra) {
+                        showUnsupported(CodecChecker.getUnsupportedReason(file));
+                        return true;
+                    }
+                });
+                videoPreview.setOnCompletionListener(new android.media.MediaPlayer.OnCompletionListener() {
+                    @Override
+                    public void onCompletion(android.media.MediaPlayer mp) {
+                        mc.show(0);
+                    }
+                });
+                videoPreview.requestFocus();
+            }
         });
     }
 
@@ -527,10 +720,13 @@ public class PreviewManager {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private void showUnsupported(String reason) {
-        mainHandler.post(() -> {
-            unsupportedPreview.setVisibility(View.VISIBLE);
-            unsupportedText.setText(reason);
+    private void showUnsupported(final String reason) {
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                unsupportedPreview.setVisibility(View.VISIBLE);
+                unsupportedText.setText(reason);
+            }
         });
     }
 
@@ -544,15 +740,10 @@ public class PreviewManager {
         if (videoPreview != null) videoPreview.stopPlayback();
     }
 
-    /**
-     * Release preview resources to prevent OOM/leaks: stops video, drops the
-     * decoded full-size bitmap, cancels pending UI callbacks and shuts the
-     * decode executor down. Any load() after release() becomes a no-op.
-     */
     public void release() {
         released = true;
         stopMedia();
-        mainHandler.removeCallbacks(hideOverlayRunnable);
+        mainHandler.removeCallbacks(hideTintRunnable);
         Bitmap old = ownBitmap;
         ownBitmap = null;
         if (old != null && !old.isRecycled()) old.recycle();

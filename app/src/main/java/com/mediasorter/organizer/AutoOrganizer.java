@@ -51,6 +51,7 @@ public class AutoOrganizer {
                     UndoEntry entry = captureState(f);
                     boolean ok = rule.execute(f, context, tagManager, renamer, fileStatus);
                     if (ok) {
+                        checkStripOnMove(rule, f);
                         affected++;
                         entry.newPath = f.getPath();
                         entry.newTags = new ArrayList<>(f.getTags());
@@ -66,8 +67,21 @@ public class AutoOrganizer {
 
         if (!batch.isEmpty()) {
             undoStack.push(batch);
+            trimUndoStack();
         }
         return affected;
+    }
+
+    private void trimUndoStack() {
+        int maxUndo = 20;
+        try {
+            android.content.SharedPreferences sp = context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
+            maxUndo = sp.getInt("max_undo_history", 20);
+            maxUndo = Math.max(1, Math.min(100, maxUndo));
+        } catch (Exception ignored) {}
+        while (undoStack.size() > maxUndo) {
+            undoStack.remove(0);
+        }
     }
 
     /** Apply rules to a single file (for status-change triggers), only if autoApply is true. */
@@ -78,6 +92,7 @@ public class AutoOrganizer {
             if (rule.matchesFile(file, fileStatus)) {
                 boolean ok = rule.execute(file, context, tagManager, renamer, fileStatus);
                 if (ok) {
+                    checkStripOnMove(rule, file);
                     log.add(rule.name + " applied to " + (file.getName() != null ? file.getName() : file.getPath()));
                 } else {
                     log.add(rule.name + " failed on " + (file.getName() != null ? file.getName() : file.getPath()));
@@ -86,6 +101,18 @@ public class AutoOrganizer {
             }
         }
         return false;
+    }
+
+    private void checkStripOnMove(Rule rule, MediaFile file) {
+        if (rule == null || file == null) return;
+        boolean stripOnMove = false;
+        try {
+            android.content.SharedPreferences sp = context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
+            stripOnMove = sp.getBoolean("strip_on_move", false);
+        } catch (Exception ignored) {}
+        if (stripOnMove && rule.action instanceof MoveAction) {
+            new StripMetadataAction(true).execute(file, context, tagManager, renamer, fileStatus);
+        }
     }
 
     // ── Preview / Dry-Run ───────────────────────────────────────────────
