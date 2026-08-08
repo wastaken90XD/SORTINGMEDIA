@@ -17,6 +17,8 @@ public class GestureSettings {
         DONE,
         FILTER_CYCLE,
         APPLY_TAG,
+        MACRO,
+        REPEAT_LAST_MACRO,
         NOTHING
     }
 
@@ -41,6 +43,64 @@ public class GestureSettings {
 
     public GestureSettings(Context context) {
         this.prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    public static class GestureMacro {
+        public String id;
+        public String name;
+        public List<com.mediasorter.organizer.Action> actions = new ArrayList<>();
+    }
+
+    public List<GestureMacro> loadMacros() {
+        List<GestureMacro> list = new ArrayList<>();
+        String json = prefs.getString("gesture_macros", "[]");
+        try {
+            org.json.JSONArray arr = new org.json.JSONArray(json);
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject obj = arr.getJSONObject(i);
+                GestureMacro m = new GestureMacro();
+                m.id = obj.optString("id", "");
+                m.name = obj.optString("name", "");
+                m.actions = new ArrayList<>();
+                org.json.JSONArray actArr = obj.optJSONArray("actions");
+                if (actArr != null) {
+                    for (int j = 0; j < actArr.length(); j++) {
+                        com.mediasorter.organizer.Action act = com.mediasorter.organizer.RuleSerializer.deserializeAction(actArr.getJSONObject(j));
+                        if (act != null) {
+                            m.actions.add(act);
+                        }
+                    }
+                }
+                list.add(m);
+            }
+        } catch (Exception ignored) {}
+        return list;
+    }
+
+    public void saveMacros(List<GestureMacro> list) {
+        org.json.JSONArray arr = new org.json.JSONArray();
+        for (GestureMacro m : list) {
+            try {
+                org.json.JSONObject obj = new org.json.JSONObject();
+                obj.put("id", m.id);
+                obj.put("name", m.name);
+                org.json.JSONArray actArr = new org.json.JSONArray();
+                for (com.mediasorter.organizer.Action act : m.actions) {
+                    actArr.put(com.mediasorter.organizer.RuleSerializer.serializeAction(act));
+                }
+                obj.put("actions", actArr);
+                arr.put(obj);
+            } catch (Exception ignored) {}
+        }
+        prefs.edit().putString("gesture_macros", arr.toString()).apply();
+    }
+
+    public GestureMacro getMacro(String id) {
+        if (id == null || id.isEmpty()) return null;
+        for (GestureMacro m : loadMacros()) {
+            if (id.equals(m.id)) return m;
+        }
+        return null;
     }
 
     // ── Action list model ─────────────────────────────────────────────────────
@@ -193,6 +253,8 @@ public class GestureSettings {
             case DONE:         return "Done";
             case FILTER_CYCLE: return "Filter Cycle";
             case APPLY_TAG:    return "Apply Tag";
+            case MACRO:        return "Macro";
+            case REPEAT_LAST_MACRO: return "Repeat Last Macro";
             case NOTHING:      return "Nothing";
             default:           return "Nothing";
         }
@@ -202,7 +264,7 @@ public class GestureSettings {
         return new String[]{
             "Next File", "Prev File", "Quick Tags",
             "Skip", "Flag", "Done",
-            "Filter Cycle", "Apply Tag", "Nothing"
+            "Filter Cycle", "Apply Tag", "Repeat Last Macro", "Nothing"
         };
     }
 
@@ -216,6 +278,8 @@ public class GestureSettings {
             case "Done":         return GestureAction.DONE;
             case "Filter Cycle": return GestureAction.FILTER_CYCLE;
             case "Apply Tag":    return GestureAction.APPLY_TAG;
+            case "Repeat Last Macro": return GestureAction.REPEAT_LAST_MACRO;
+            case "Macro":        return GestureAction.MACRO;
             default:             return GestureAction.NOTHING;
         }
     }
@@ -227,7 +291,12 @@ public class GestureSettings {
         StringBuilder sb = new StringBuilder();
         for (GestureStep step : steps) {
             if (sb.length() > 0) sb.append(" + ");
-            if (step.action == GestureAction.APPLY_TAG && !step.tag.isEmpty()) {
+            if (step.action == GestureAction.MACRO) {
+                GestureMacro m = getMacro(step.tag);
+                sb.append(m != null ? m.name : "Macro (" + step.tag + ")");
+            } else if (step.action == GestureAction.REPEAT_LAST_MACRO) {
+                sb.append("Repeat Last Macro");
+            } else if (step.action == GestureAction.APPLY_TAG && !step.tag.isEmpty()) {
                 sb.append(step.tag);
             } else {
                 sb.append(getLabel(step.action));
