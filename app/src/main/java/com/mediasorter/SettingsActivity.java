@@ -2,13 +2,13 @@ package com.mediasorter;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.content.DialogInterface;
-import com.mediasorter.features.RandomGenerator;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.SharedPreferences;
+import com.mediasorter.features.RandomGenerator;
+import org.json.JSONObject;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.InputType;
