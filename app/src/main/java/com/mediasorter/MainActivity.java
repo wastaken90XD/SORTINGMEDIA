@@ -2890,8 +2890,6 @@ private Spinner makeSpinner(String[] options) {
     private void showNewTagDialogPreFilled(final String prefilledName) {
         showNewTagDialog(null, null, prefilledName);
     }
-                .show();
-    }
 
     /** Keeps preview, side panel and progress in sync after (batch) tagging. */
     private void syncUiAfterTagging(List<MediaFile> targets) {
