@@ -332,6 +332,24 @@ public class RuleSerializer {
             StripMetadataAction sma = (StripMetadataAction) action;
             aObj.put("actionType", "STRIPMETA");
             aObj.put("keepOrientation", sma.keepOrientation);
+        } else if (action instanceof MacroCompositeAction) {
+            MacroCompositeAction mca = (MacroCompositeAction) action;
+            aObj.put("actionType", "macro_composite");
+            JSONArray stepsArr = new JSONArray();
+            if (mca.getActions() != null) {
+                for (Action child : mca.getActions()) {
+                    if (child instanceof MacroCompositeAction) {
+                        android.util.Log.w("RuleSerializer", "Skipped nested MacroCompositeAction inside steps");
+                        continue;
+                    }
+                    try {
+                        stepsArr.put(serializeAction(child));
+                    } catch (Exception e) {
+                        android.util.Log.e("RuleSerializer", "Failed to serialize child action", e);
+                    }
+                }
+            }
+            aObj.put("steps", stepsArr);
         }
         return aObj;
     }
@@ -389,6 +407,30 @@ public class RuleSerializer {
         } else if ("STRIPMETA".equals(aType)) {
             boolean keepOrient = aObj.optBoolean("keepOrientation", false);
             return new StripMetadataAction(keepOrient);
+        } else if ("macro_composite".equals(aType)) {
+            JSONArray stepsArr = aObj.optJSONArray("steps");
+            if (stepsArr == null || stepsArr.length() == 0) {
+                android.util.Log.w("RuleSerializer", "steps array is missing or empty for macro_composite action");
+                return null;
+            }
+            List<Action> steps = new ArrayList<>();
+            for (int i = 0; i < stepsArr.length(); i++) {
+                try {
+                    JSONObject childObj = stepsArr.getJSONObject(i);
+                    Action child = deserializeAction(childObj);
+                    if (child != null) {
+                        steps.add(child);
+                    } else {
+                        android.util.Log.e("RuleSerializer", "Failed to deserialize step at index " + i + " (returned null)");
+                    }
+                } catch (Exception e) {
+                    android.util.Log.e("RuleSerializer", "Failed to deserialize step at index " + i, e);
+                }
+            }
+            if (steps.isEmpty()) {
+                return null;
+            }
+            return new MacroCompositeAction(steps);
         }
         return null;
     }
