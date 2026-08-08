@@ -224,5 +224,47 @@ public class AutoOrganizer {
         return restored;
     }
 
+    public int execute(Rule rule, List<MediaFile> files) {
+        if (rule == null || files == null || files.isEmpty()) return -1;
+        List<UndoEntry> batch = new ArrayList<>();
+        int failedStep = -1;
+
+        for (MediaFile f : files) {
+            if (f == null) continue;
+            UndoEntry entry = captureState(f);
+
+            boolean ok = false;
+            if (rule.action instanceof MacroCompositeAction) {
+                MacroCompositeAction composite = (MacroCompositeAction) rule.action;
+                ok = composite.execute(f, context, tagManager, renamer, fileStatus);
+                if (!ok) {
+                    failedStep = composite.getFailedStepIndex();
+                }
+            } else {
+                ok = rule.execute(f, context, tagManager, renamer, fileStatus);
+            }
+
+            if (ok) {
+                entry.newPath = f.getPath();
+                entry.newTags = new ArrayList<>(f.getTags());
+                entry.newStatus = fileStatus.getStatus(f.getPath());
+                batch.add(entry);
+                log.add(rule.name + " applied to " + (f.getName() != null ? f.getName() : f.getPath()));
+            } else {
+                if (failedStep == -1) {
+                    failedStep = 0;
+                }
+                log.add(rule.name + " failed on " + (f.getName() != null ? f.getName() : f.getPath()));
+                break;
+            }
+        }
+
+        if (!batch.isEmpty()) {
+            undoStack.push(batch);
+        }
+
+        return failedStep;
+    }
+
     public List<String> getLog() { return log; }
 }

@@ -726,6 +726,10 @@ public class MainActivity extends Activity
                 mediaAdapter.updateFileTags(file);
                 refreshSidePanel();
                 updateProgress();
+            } else if (step.action == GestureSettings.GestureAction.MACRO) {
+                executeMacro(step.tag);
+            } else if (step.action == GestureSettings.GestureAction.REPEAT_LAST_MACRO) {
+                executeRepeatLastMacro();
             } else {
                 executeAction(step.action);
             }
@@ -744,6 +748,10 @@ public class MainActivity extends Activity
                 mediaAdapter.updateFileTags(file);
                 refreshSidePanel();
                 updateProgress();
+            } else if (step.action == GestureSettings.GestureAction.MACRO) {
+                executeMacro(step.tag);
+            } else if (step.action == GestureSettings.GestureAction.REPEAT_LAST_MACRO) {
+                executeRepeatLastMacro();
             } else {
                 executeAction(step.action);
             }
@@ -759,6 +767,61 @@ public class MainActivity extends Activity
             case DONE:         handleDone();    break;
             case FILTER_CYCLE: cycleFilter();   break;
             case NOTHING:      break;
+        }
+    }
+
+    private String lastRunMacroId = "";
+
+    private void executeMacro(String id) {
+        if (id == null || id.isEmpty()) return;
+        GestureSettings.GestureMacro macro = gestureSettings.getMacro(id);
+        if (macro == null) {
+            Toast.makeText(this, "Macro not found", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        lastRunMacroId = id;
+
+        List<MediaFile> targets = new ArrayList<>();
+        if (mediaAdapter != null && mediaAdapter.isSelectMode() && !mediaAdapter.getSelectedFiles().isEmpty()) {
+            targets.addAll(mediaAdapter.getSelectedFiles());
+        } else {
+            if (currentIndex >= 0 && currentIndex < fullList.size()) {
+                targets.add(fullList.get(currentIndex));
+            }
+        }
+
+        if (targets.isEmpty()) {
+            Toast.makeText(this, "No file selected", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        com.mediasorter.organizer.Rule syntheticRule = new com.mediasorter.organizer.Rule();
+        syntheticRule.name = macro.name;
+        syntheticRule.enabled = true;
+        syntheticRule.conditions = new ArrayList<>();
+        syntheticRule.action = new com.mediasorter.organizer.MacroCompositeAction(macro.actions);
+
+        int failedStep = autoOrganizer.execute(syntheticRule, targets);
+
+        if (failedStep == -1) {
+            Toast.makeText(this, "Macro '" + macro.name + "' applied", Toast.LENGTH_SHORT).show();
+            for (MediaFile f : targets) {
+                mediaAdapter.updateFile(f);
+            }
+            scheduleRefresh();
+        } else {
+            autoOrganizer.undoLastRun();
+            Toast.makeText(this, "Macro '" + macro.name + "' failed at step " + (failedStep + 1), Toast.LENGTH_SHORT).show();
+            scheduleRefresh();
+        }
+    }
+
+    private void executeRepeatLastMacro() {
+        if (lastRunMacroId == null || lastRunMacroId.isEmpty()) {
+            Toast.makeText(this, "No macro run yet.", Toast.LENGTH_SHORT).show();
+        } else {
+            executeMacro(lastRunMacroId);
         }
     }
 

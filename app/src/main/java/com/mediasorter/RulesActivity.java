@@ -340,12 +340,12 @@ public class RulesActivity extends Activity {
 
         // Build initial action params
         final ActionParamHolder actHolder = new ActionParamHolder();
-        buildActionParams(actParamsContainer, actHolder, rule.action, actSpinner.getSelectedItemPosition());
+        buildActionParams(this, actParamsContainer, actHolder, rule.action, actSpinner.getSelectedItemPosition());
 
         actSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                buildActionParams(actParamsContainer, actHolder, rule.action, pos);
+                buildActionParams(RulesActivity.this, actParamsContainer, actHolder, rule.action, pos);
             }
             @Override
             public void onNothingSelected(AdapterView<?> p) {}
@@ -582,34 +582,104 @@ public class RulesActivity extends Activity {
 
     // ── Action params builder ───────────────────────────────────────────
 
-    private static class ActionParamHolder {
-        EditText destEdit;
-        Spinner conflictSpinner;
-        EditText trashEdit;
-        CheckBox useTrashCheck;
-        EditText tagsToAddEdit;
-        EditText tagsToRemoveEdit;
-        Spinner statusSpinner;
-        CheckBox clearStatusCheck;
-        EditText patternEdit;
-        // New action fields
-        Spinner dateModeSpinner;      // SetDateAction
-        EditText dateValueEdit;       // SetDateAction
-        EditText extensionEdit;       // ChangeExtensionAction
-        Spinner affixPositionSpinner; // AffixAction
-        EditText affixTextEdit;       // AffixAction
-        CheckBox keepOrientationCheck;// StripMetadataAction
+    // ── Action params builder ───────────────────────────────────────────
+
+    public interface ActionCallback {
+        void onActionSelected(Action action);
     }
 
-    private void buildActionParams(LinearLayout container, ActionParamHolder holder,
+    public static class ActionParamHolder {
+        public EditText destEdit;
+        public Spinner conflictSpinner;
+        public EditText trashEdit;
+        public CheckBox useTrashCheck;
+        public EditText tagsToAddEdit;
+        public EditText tagsToRemoveEdit;
+        public Spinner statusSpinner;
+        public CheckBox clearStatusCheck;
+        public EditText patternEdit;
+        // New action fields
+        public Spinner dateModeSpinner;      // SetDateAction
+        public EditText dateValueEdit;       // SetDateAction
+        public EditText extensionEdit;       // ChangeExtensionAction
+        public Spinner affixPositionSpinner; // AffixAction
+        public EditText affixTextEdit;       // AffixAction
+        public CheckBox keepOrientationCheck;// StripMetadataAction
+    }
+
+    public static void showActionPickerDialog(final android.content.Context context, Action existingAction, final ActionCallback callback) {
+        LinearLayout layout = new LinearLayout(context);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(32, 16, 32, 16);
+
+        layout.addView(makeLabel(context, "Action type:"));
+        String[] actTypes = {"Move", "Copy", "Delete (trash)", "Delete (permanent)",
+                "Add/Remove Tags", "Set/Clear Status", "Rename (pattern)",
+                "Set/Change Date", "Change Extension", "Add Prefix/Suffix", "Strip Metadata"};
+        final Spinner actSpinner = makeSpinner(context, actTypes);
+        layout.addView(actSpinner);
+
+        final LinearLayout actParamsContainer = new LinearLayout(context);
+        actParamsContainer.setOrientation(LinearLayout.VERTICAL);
+        actParamsContainer.setPadding(0, 8, 0, 8);
+        layout.addView(actParamsContainer);
+
+        // Pre-select current action type
+        if (existingAction instanceof MoveAction) actSpinner.setSelection(0);
+        else if (existingAction instanceof CopyAction) actSpinner.setSelection(1);
+        else if (existingAction instanceof DeleteAction) {
+            actSpinner.setSelection(((DeleteAction) existingAction).useTrash ? 2 : 3);
+        }
+        else if (existingAction instanceof TagAction) actSpinner.setSelection(4);
+        else if (existingAction instanceof StatusAction) actSpinner.setSelection(5);
+        else if (existingAction instanceof RenameAction) actSpinner.setSelection(6);
+        else if (existingAction instanceof SetDateAction) actSpinner.setSelection(7);
+        else if (existingAction instanceof ChangeExtensionAction) actSpinner.setSelection(8);
+        else if (existingAction instanceof AffixAction) actSpinner.setSelection(9);
+        else if (existingAction instanceof StripMetadataAction) actSpinner.setSelection(10);
+
+        final ActionParamHolder actHolder = new ActionParamHolder();
+        buildActionParams(context, actParamsContainer, actHolder, existingAction, actSpinner.getSelectedItemPosition());
+
+        actSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                buildActionParams(context, actParamsContainer, actHolder, null, pos);
+            }
+            @Override
+            public void onNothingSelected(AdapterView<?> p) {}
+        });
+
+        ScrollView sv = new ScrollView(context);
+        sv.addView(layout);
+
+        new AlertDialog.Builder(context)
+            .setTitle(existingAction == null ? "Add Action" : "Edit Action")
+            .setView(sv)
+            .setPositiveButton("Save", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface d, int w) {
+                    Action action = buildAction(actSpinner.getSelectedItemPosition(), actHolder);
+                    if (action != null) {
+                        callback.onActionSelected(action);
+                    } else {
+                        Toast.makeText(context, "Invalid action configuration", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private static void buildActionParams(android.content.Context context, LinearLayout container, ActionParamHolder holder,
                                    Action existingAction, int actionType) {
         container.removeAllViews();
 
         switch (actionType) {
             case 0: // Move
             case 1: // Copy
-                container.addView(makeLabel("Destination folder:"));
-                holder.destEdit = new EditText(this);
+                container.addView(makeLabel(context, "Destination folder:"));
+                holder.destEdit = new EditText(context);
                 holder.destEdit.setTextColor(0xFFFFFFFF);
                 holder.destEdit.setHint("/sdcard/destination");
                 if (actionType == 0 && existingAction instanceof MoveAction) {
@@ -619,9 +689,9 @@ public class RulesActivity extends Activity {
                 }
                 container.addView(holder.destEdit);
 
-                container.addView(makeLabel("Conflict resolution:"));
+                container.addView(makeLabel(context, "Conflict resolution:"));
                 String[] conflicts = {"Skip if exists", "Overwrite", "Auto-rename"};
-                holder.conflictSpinner = makeSpinner(conflicts);
+                holder.conflictSpinner = makeSpinner(context, conflicts);
                 // Pre-select
                 Action.Conflict c = Action.Conflict.SKIP;
                 if (actionType == 0 && existingAction instanceof MoveAction) c = ((MoveAction) existingAction).conflict;
@@ -631,8 +701,8 @@ public class RulesActivity extends Activity {
                 break;
 
             case 2: // Delete (trash)
-                container.addView(makeLabel("Trash folder:"));
-                holder.trashEdit = new EditText(this);
+                container.addView(makeLabel(context, "Trash folder:"));
+                holder.trashEdit = new EditText(context);
                 holder.trashEdit.setTextColor(0xFFFFFFFF);
                 holder.trashEdit.setHint("/sdcard/.trash");
                 if (existingAction instanceof DeleteAction) {
@@ -643,15 +713,15 @@ public class RulesActivity extends Activity {
 
             case 3: // Delete (permanent)
                 // No extra params needed
-                TextView warn = new TextView(this);
+                TextView warn = new TextView(context);
                 warn.setText("WARNING: Files will be permanently deleted!");
                 warn.setTextColor(0xFFFF4444);
                 container.addView(warn);
                 break;
 
             case 4: // Tags
-                container.addView(makeLabel("Tags to add (comma-separated):"));
-                holder.tagsToAddEdit = new EditText(this);
+                container.addView(makeLabel(context, "Tags to add (comma-separated):"));
+                holder.tagsToAddEdit = new EditText(context);
                 holder.tagsToAddEdit.setTextColor(0xFFFFFFFF);
                 holder.tagsToAddEdit.setHint("vacation, family");
                 if (existingAction instanceof TagAction) {
@@ -665,8 +735,8 @@ public class RulesActivity extends Activity {
                 }
                 container.addView(holder.tagsToAddEdit);
 
-                container.addView(makeLabel("Tags to remove (comma-separated):"));
-                holder.tagsToRemoveEdit = new EditText(this);
+                container.addView(makeLabel(context, "Tags to remove (comma-separated):"));
+                holder.tagsToRemoveEdit = new EditText(context);
                 holder.tagsToRemoveEdit.setTextColor(0xFFFFFFFF);
                 holder.tagsToRemoveEdit.setHint("old_tag");
                 if (existingAction instanceof TagAction) {
@@ -682,9 +752,9 @@ public class RulesActivity extends Activity {
                 break;
 
             case 5: // Status
-                container.addView(makeLabel("Status:"));
+                container.addView(makeLabel(context, "Status:"));
                 String[] statusOpts = {"SKIPPED", "FLAGGED", "DONE"};
-                holder.statusSpinner = makeSpinner(statusOpts);
+                holder.statusSpinner = makeSpinner(context, statusOpts);
                 if (existingAction instanceof StatusAction) {
                     StatusAction sa = (StatusAction) existingAction;
                     if (!sa.clear) {
@@ -698,7 +768,7 @@ public class RulesActivity extends Activity {
                 }
                 container.addView(holder.statusSpinner);
 
-                holder.clearStatusCheck = new CheckBox(this);
+                holder.clearStatusCheck = new CheckBox(context);
                 holder.clearStatusCheck.setText("Clear status instead");
                 holder.clearStatusCheck.setTextColor(0xFFCCCCCC);
                 if (existingAction instanceof StatusAction) {
@@ -708,8 +778,8 @@ public class RulesActivity extends Activity {
                 break;
 
             case 6: // Rename
-                container.addView(makeLabel("Rename pattern:"));
-                holder.patternEdit = new EditText(this);
+                container.addView(makeLabel(context, "Rename pattern:"));
+                holder.patternEdit = new EditText(context);
                 holder.patternEdit.setTextColor(0xFFFFFFFF);
                 holder.patternEdit.setHint("{ORIGINAL}_{TAGS}{EXT}");
                 if (existingAction instanceof RenameAction) {
@@ -717,7 +787,7 @@ public class RulesActivity extends Activity {
                 }
                 container.addView(holder.patternEdit);
 
-                TextView hint = new TextView(this);
+                TextView hint = new TextView(context);
                 hint.setText("Placeholders: {ORIGINAL}, {TAGS}, {EXT}, {DATE}, {COUNTER}, {PREFIX}, {SUFFIX}");
                 hint.setTextColor(0xFF888888);
                 hint.setTextSize(10f);
@@ -725,17 +795,17 @@ public class RulesActivity extends Activity {
                 break;
 
             case 7: // Set/Change Date
-                container.addView(makeLabel("Mode:"));
+                container.addView(makeLabel(context, "Mode:"));
                 String[] dateModes = {"Offset (add/subtract days)", "Absolute (specific date)"};
-                holder.dateModeSpinner = makeSpinner(dateModes);
+                holder.dateModeSpinner = makeSpinner(context, dateModes);
                 if (existingAction instanceof SetDateAction) {
                     holder.dateModeSpinner.setSelection(
                             "ABSOLUTE".equals(((SetDateAction) existingAction).mode) ? 1 : 0);
                 }
                 container.addView(holder.dateModeSpinner);
 
-                container.addView(makeLabel("Value:"));
-                holder.dateValueEdit = new EditText(this);
+                container.addView(makeLabel(context, "Value:"));
+                holder.dateValueEdit = new EditText(context);
                 holder.dateValueEdit.setTextColor(0xFFFFFFFF);
                 holder.dateValueEdit.setHint("days (+7, -3) or timestamp");
                 if (existingAction instanceof SetDateAction) {
@@ -743,7 +813,7 @@ public class RulesActivity extends Activity {
                 }
                 container.addView(holder.dateValueEdit);
 
-                TextView dateHint = new TextView(this);
+                TextView dateHint = new TextView(context);
                 dateHint.setText("Offset: +7 means 7 days forward, -3 means 3 days back.\nAbsolute: Unix timestamp in milliseconds.");
                 dateHint.setTextColor(0xFF888888);
                 dateHint.setTextSize(10f);
@@ -751,8 +821,8 @@ public class RulesActivity extends Activity {
                 break;
 
             case 8: // Change Extension
-                container.addView(makeLabel("New extension (without dot):"));
-                holder.extensionEdit = new EditText(this);
+                container.addView(makeLabel(context, "New extension (without dot):"));
+                holder.extensionEdit = new EditText(context);
                 holder.extensionEdit.setTextColor(0xFFFFFFFF);
                 holder.extensionEdit.setHint("png, jpg, webp");
                 if (existingAction instanceof ChangeExtensionAction) {
@@ -762,17 +832,17 @@ public class RulesActivity extends Activity {
                 break;
 
             case 9: // Add Prefix/Suffix
-                container.addView(makeLabel("Position:"));
+                container.addView(makeLabel(context, "Position:"));
                 String[] affixPositions = {"Prefix (before name)", "Suffix (after name, before ext)"};
-                holder.affixPositionSpinner = makeSpinner(affixPositions);
+                holder.affixPositionSpinner = makeSpinner(context, affixPositions);
                 if (existingAction instanceof AffixAction) {
                     holder.affixPositionSpinner.setSelection(
                             "SUFFIX".equals(((AffixAction) existingAction).position) ? 1 : 0);
                 }
                 container.addView(holder.affixPositionSpinner);
 
-                container.addView(makeLabel("Text to insert:"));
-                holder.affixTextEdit = new EditText(this);
+                container.addView(makeLabel(context, "Text to insert:"));
+                holder.affixTextEdit = new EditText(context);
                 holder.affixTextEdit.setTextColor(0xFFFFFFFF);
                 holder.affixTextEdit.setHint("IMG_, _final");
                 if (existingAction instanceof AffixAction) {
@@ -782,13 +852,13 @@ public class RulesActivity extends Activity {
                 break;
 
             case 10: // Strip Metadata
-                TextView stripWarn = new TextView(this);
+                TextView stripWarn = new TextView(context);
                 stripWarn.setText("Removes all EXIF, XMP, and embedded metadata from JPEG/PNG files.");
                 stripWarn.setTextColor(0xFFFF8800);
                 stripWarn.setTextSize(12f);
                 container.addView(stripWarn);
 
-                holder.keepOrientationCheck = new CheckBox(this);
+                holder.keepOrientationCheck = new CheckBox(context);
                 holder.keepOrientationCheck.setText("Keep orientation tag (recommended)");
                 holder.keepOrientationCheck.setTextColor(0xFFCCCCCC);
                 holder.keepOrientationCheck.setChecked(true);
@@ -800,7 +870,7 @@ public class RulesActivity extends Activity {
         }
     }
 
-    private Action buildAction(int actionType, ActionParamHolder holder) {
+    private static Action buildAction(int actionType, ActionParamHolder holder) {
         switch (actionType) {
             case 0: // Move
                 String dest0 = holder.destEdit != null ? holder.destEdit.getText().toString().trim() : "";
@@ -977,7 +1047,11 @@ public class RulesActivity extends Activity {
     // ── UI helpers ──────────────────────────────────────────────────────
 
     private TextView makeLabel(String text) {
-        TextView tv = new TextView(this);
+        return makeLabel(this, text);
+    }
+
+    public static TextView makeLabel(android.content.Context context, String text) {
+        TextView tv = new TextView(context);
         tv.setText(text);
         tv.setTextColor(0xFFCCCCCC);
         tv.setTextSize(12f);
@@ -994,8 +1068,12 @@ public class RulesActivity extends Activity {
     }
 
     private Spinner makeSpinner(String[] options) {
-        Spinner sp = new Spinner(this);
-        ArrayAdapter<String> ad = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, options);
+        return makeSpinner(this, options);
+    }
+
+    public static Spinner makeSpinner(android.content.Context context, String[] options) {
+        Spinner sp = new Spinner(context);
+        ArrayAdapter<String> ad = new ArrayAdapter<>(context, android.R.layout.simple_spinner_item, options);
         ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         sp.setAdapter(ad);
         return sp;
