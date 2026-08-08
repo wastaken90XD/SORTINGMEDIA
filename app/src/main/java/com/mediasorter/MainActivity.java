@@ -3097,3 +3097,4 @@ private Spinner makeSpinner(String[] options) {
             return convertView;
         }
     }
+}

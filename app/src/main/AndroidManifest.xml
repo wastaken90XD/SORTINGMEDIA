@@ -29,7 +29,10 @@
             android:exported="false"
             android:screenOrientation="landscape" />
         
-        <activity android:name=".RulesActivity" />
+        <activity
+            android:name=".RulesActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
 
     </application>
 
