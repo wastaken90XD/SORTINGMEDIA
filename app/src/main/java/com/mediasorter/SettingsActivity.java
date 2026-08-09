@@ -668,8 +668,8 @@ public class SettingsActivity extends Activity {
                 new Thread(new Runnable() {
                     @Override public void run() {
                         final List<DuplicateFinder.DuplicateGroup> dupes =
-                                DuplicateFinder.findDuplicates(files, new DuplicateFinder.ProgressListener() {
-                                    @Override public void onProgress(int scanned, int total, String name) {}
+                                DuplicateFinder.findDuplicates(files, new DuplicateFinder.ProgressCallback() {
+                                    @Override public void onProgress(int scanned, int total, String fileName) {}
                                 });
                         runOnUiThread(new Runnable() {
                             @Override public void run() {
@@ -1870,7 +1870,7 @@ public class SettingsActivity extends Activity {
                     lp.bottomMargin = 4;
                     stepRow.setLayoutParams(lp);
 
-                    TextView stepLbl = makeLabel(SettingsActivity.this, (stepIdx + 1) + ". " + act.describe());
+                    TextView stepLbl = makeLabel((stepIdx + 1) + ". " + act.describe());
                     stepLbl.setLayoutParams(new LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
                     stepRow.addView(stepLbl);
