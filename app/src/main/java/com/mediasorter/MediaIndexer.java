@@ -6,6 +6,7 @@ import com.mediasorter.models.MediaFile;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -542,6 +543,12 @@ public class MediaIndexer {
     private MediaFile buildLight(File f) {
         MediaFile mf = new MediaFile(f.getAbsolutePath(), f.length());
         mf.setDateAdded(f.lastModified());
+        if (appContext != null) {
+            String key = "manual_order:" + f.getAbsolutePath();
+            int order = appContext.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE)
+                    .getInt(key, -1);
+            mf.setManualOrder(order);
+        }
         try {
             List<String> existingTags = XmpReader.readTags(f.getAbsolutePath());
             for (String tag : existingTags) mf.addTag(tag);
@@ -627,6 +634,35 @@ public class MediaIndexer {
 
     private boolean isInIndex(String path) {
         return findInIndex(path) != null;
+    }
+
+    /**
+     * Stores the manual order on the existing in-memory index. Only paths whose
+     * integer position changed are written to SharedPreferences; the same
+     * settings preference file is already covered by SettingsExporter.
+     */
+    public void updateManualOrder(List<MediaFile> ordered) {
+        if (ordered == null || ordered.isEmpty()) return;
+        android.content.SharedPreferences prefs = appContext == null ? null
+                : appContext.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
+        android.content.SharedPreferences.Editor editor = prefs == null ? null : prefs.edit();
+        Map<String, Integer> positions = new LinkedHashMap<>();
+        for (int i = 0; i < ordered.size(); i++) {
+            MediaFile file = ordered.get(i);
+            if (file != null && file.getPath() != null) positions.put(file.getPath(), i);
+        }
+        synchronized (index) {
+            for (MediaFile file : index) {
+                Integer position = positions.get(file.getPath());
+                if (position != null && file.getManualOrder() != position) {
+                    file.setManualOrder(position);
+                    if (editor != null) {
+                        editor.putInt("manual_order:" + file.getPath(), position);
+                    }
+                }
+            }
+        }
+        if (editor != null) editor.apply();
     }
 
     // ── Query helpers ─────────────────────────────────────────────────────────

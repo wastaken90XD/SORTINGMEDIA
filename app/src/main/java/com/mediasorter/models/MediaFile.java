@@ -19,6 +19,7 @@ public class MediaFile implements Serializable {
     private byte[] partialHash;
     private int width;
     private int height;
+    private int manualOrder = -1;
 
     public MediaFile(String path, long size) {
         this.path    = path;
@@ -61,6 +62,7 @@ public class MediaFile implements Serializable {
     public byte[]       getPartialHash() { return partialHash; }
     public int          getWidth()     { return width; }
     public int          getHeight()    { return height; }
+    public int          getManualOrder() { return manualOrder; }
 
     // Setters
     public void setDateAdded(long d)      { dateAdded    = d; }
@@ -73,6 +75,7 @@ public class MediaFile implements Serializable {
     public void setPartialHash(byte[] h)  { partialHash  = h; }
     public void setWidth(int w)           { width        = w; }
     public void setHeight(int h)          { height       = h; }
+    public void setManualOrder(int order) { manualOrder  = order; }
 
     public void addTag(String tag) {
         String plain = TagText.plain(tag);
@@ -89,6 +92,7 @@ public class MediaFile implements Serializable {
 
     public void setPath(String path) {
         this.path = path;
+        if (path != null) this.name = path.substring(path.lastIndexOf('/') + 1);
     }
 
     public String getFormattedSize() {

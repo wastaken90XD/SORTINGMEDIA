@@ -139,6 +139,17 @@ public final class RandomGenerator {
         return p1 + "-" + p2 + "-" + p3;
     }
 
+    /** Fisher-Yates shuffle for callers that need the app's shared random source. */
+    public static <T> void shuffle(List<T> values) {
+        if (values == null) return;
+        for (int i = values.size() - 1; i > 0; i--) {
+            int j = RAND.nextInt(i + 1);
+            T value = values.get(i);
+            values.set(i, values.get(j));
+            values.set(j, value);
+        }
+    }
+
     /**
      * Uniform random index in [0, size). Returns -1 when size <= 0.
      */

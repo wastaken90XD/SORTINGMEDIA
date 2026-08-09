@@ -43,6 +43,9 @@ public class SearchManager {
         // Filename
         if (f.getName().toLowerCase().contains(term)) return true;
 
+        // Full path
+        if (f.getPath() != null && f.getPath().toLowerCase().contains(term)) return true;
+
         // Tags
         for (String tag : f.getTags()) {
             if (tag.toLowerCase().contains(term)) return true;
