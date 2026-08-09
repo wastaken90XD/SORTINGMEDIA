@@ -1229,7 +1229,7 @@ public class SettingsActivity extends Activity {
             0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         row.addView(lbl);
 
-        Spinner spinner = new Spinner(this);
+        final Spinner spinner = new Spinner(this);
         ArrayAdapter<String> ad = new ArrayAdapter<>(this,
             android.R.layout.simple_spinner_item, options);
         ad.setDropDownViewResource(
@@ -1238,12 +1238,21 @@ public class SettingsActivity extends Activity {
         if (initialPos >= 0 && initialPos < options.length) {
             spinner.setSelection(initialPos);
         }
+        // Spinner fires onItemSelected once during its first layout pass, even
+        // though the selection didn't change. Without a guard, that initial
+        // callback runs the real listener — which for the theme spinner calls
+        // recreate() and traps the activity in a recreate loop on open.
+        final boolean[] isInitializing = {true};
         spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (isInitializing[0]) return;
                 listener.onSelected(options[position], position);
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        spinner.post(new Runnable() {
+            @Override public void run() { isInitializing[0] = false; }
         });
         row.addView(spinner);
         return row;
