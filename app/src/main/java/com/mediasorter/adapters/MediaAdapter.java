@@ -11,6 +11,7 @@ import android.util.TypedValue;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 import com.mediasorter.R;
+import com.mediasorter.TagText;
 import com.mediasorter.ThumbnailLoader;
 import com.mediasorter.models.MediaFile;
 import java.util.ArrayList;
@@ -343,7 +344,11 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
 
     /** Extracted so partial-update can call just this. */
     private void bindTags(ViewHolder holder, MediaFile file) {
-        List<String> tags = file.getTags();
+        List<String> tags = new ArrayList<>();
+        for (String tag : file.getTags()) {
+            String plain = TagText.plain(tag);
+            if (!plain.isEmpty()) tags.add(plain);
+        }
         boolean showTagCount = holder.itemView.getContext()
                 .getSharedPreferences("settings_prefs", android.content.Context.MODE_PRIVATE)
                 .getBoolean("show_tag_count", true);

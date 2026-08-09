@@ -942,9 +942,15 @@ public class SettingsActivity extends Activity {
         root.addView(makeTitle("Appearance"));
 
         String[] themeOptions = {"AppTheme"};
-        root.addView(makeSpinnerRow("App theme:", themeOptions, 0, new OnSpinnerSelectedListener() {
-            @Override public void onSelected(String value, int pos) { recreate(); }
-        }));
+        final boolean[] themeSpinnerReady = {false};
+        View themeSpinnerRow = makeSpinnerRow("App theme:", themeOptions, 0,
+                new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int pos) {
+                        if (themeSpinnerReady[0]) recreate();
+                    }
+                });
+        root.addView(themeSpinnerRow);
+        themeSpinnerReady[0] = true;
 
         root.addView(makeCheckBoxRow("Show selection order badges", settingsPrefs.getBoolean("show_seq_labels", true), new OnCheckedChangeListener() {
             @Override public void onChecked(boolean checked) { saveBoolean("show_seq_labels", checked); }

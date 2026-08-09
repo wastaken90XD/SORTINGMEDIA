@@ -8,6 +8,7 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 import com.mediasorter.R;
+import com.mediasorter.TagText;
 import com.mediasorter.models.MediaFile;
 import com.mediasorter.models.Tag;
 import java.util.ArrayList;
@@ -43,8 +44,9 @@ public class TagAdapter extends RecyclerView.Adapter<TagAdapter.ViewHolder> {
     }
 
     public void removeTag(String name) {
+        String plain = TagText.plain(name);
         for (int i = 0; i < tags.size(); i++) {
-            if (tags.get(i).getName().equals(name)) {
+            if (tags.get(i).getName().equals(plain)) {
                 tags.remove(i);
                 notifyItemRemoved(i);
                 return;
@@ -68,16 +70,17 @@ public class TagAdapter extends RecyclerView.Adapter<TagAdapter.ViewHolder> {
     @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         Tag tag = tags.get(position);
+        String tagName = TagText.plain(tag.getName());
 
-        holder.tagName.setText(tag.getName());
+        holder.tagName.setText(tagName);
         holder.tagCount.setText(String.valueOf(tag.getUsageCount()));
 
-        boolean applied = current != null && current.hasTag(tag.getName());
+        boolean applied = current != null && current.hasTag(tagName);
         holder.tagCheck.setOnCheckedChangeListener(null);
         holder.tagCheck.setChecked(applied);
 
         holder.tagCheck.setOnCheckedChangeListener((btn, checked) -> {
-            if (listener != null) listener.onTagToggle(tag.getName(), checked);
+            if (listener != null) listener.onTagToggle(tagName, checked);
         });
 
         holder.itemView.setOnClickListener(v -> {

@@ -49,8 +49,8 @@ public class ColorAnalyzer {
         public ProgressListener progressListener;
 
         // ── Golden ticket (signature colour) options ─────────────────────
-        /** Prefix for the one-colour-per-file tag, e.g. "★ Deep Lagoon". */
-        public String  signaturePrefix           = "★ ";
+        /** Optional plain-text prefix for the one-colour-per-file tag. */
+        public String  signaturePrefix           = "";
         /** Minimum pixel coverage (0..1) a colour needs to be a candidate. */
         public float   signatureMinCoverage      = 0.03f;
         /** Skip files that already carry a signature tag (idempotent runs —
@@ -150,6 +150,7 @@ public class ColorAnalyzer {
 
         final boolean wantSignature =
                 opts.mode == Mode.SIGNATURE || opts.mode == Mode.GOLDEN_TICKET;
+        final String signaturePrefix = TagText.plain(opts.signaturePrefix);
 
         List<Result> results = new ArrayList<>();
         int total = files.size();
@@ -172,7 +173,7 @@ public class ColorAnalyzer {
             // Idempotence: honour an existing signature tag and skip the whole
             // decode+analysis for that file.
             if (wantSignature && opts.respectExistingSignature) {
-                String existing = findExistingSignature(file.getTags(), opts.signaturePrefix);
+                String existing = findExistingSignature(file.getTags(), signaturePrefix);
                 if (existing != null) {
                     r.signatureColor = existing;
                     r.success = true;
@@ -240,13 +241,13 @@ public class ColorAnalyzer {
                 // GOLDEN_TICKET) — the classic colour properties stay out of it.
                 if (r.signatureColor != null) {
                     if (tagManager != null) {
-                        tagManager.applyTag(f, opts.signaturePrefix + r.signatureColor);
+                        tagManager.applyTag(f, signaturePrefix + r.signatureColor);
                     }
                     if (opts.mode == Mode.GOLDEN_TICKET) {
                         renameWithPrefix(f, r,
-                                opts.signaturePrefix.trim().isEmpty()
+                                signaturePrefix.isEmpty()
                                         ? r.signatureColor.replace(" ", "-")
-                                        : opts.signaturePrefix.trim()
+                                        : signaturePrefix.trim()
                                                 + r.signatureColor.replace(" ", "-"));
                     }
                 }
@@ -473,11 +474,33 @@ public class ColorAnalyzer {
     private static String findExistingSignature(List<String> tags, String prefix) {
         if (tags == null || prefix == null) return null;
         for (String t : tags) {
-            if (t != null && t.startsWith(prefix)) {
-                return t.substring(prefix.length());
+            String plain = TagText.plain(t);
+            if (plain.isEmpty()) continue;
+            if (!prefix.isEmpty() && plain.startsWith(prefix)) {
+                String color = plain.substring(prefix.length()).trim();
+                if (!color.isEmpty()) return color;
+            } else if (prefix.isEmpty() && isKnownSignatureName(plain)) {
+                // The default signature has no decoration prefix.  Restrict
+                // the match to generated names so an ordinary tag is not
+                // mistaken for an existing signature.
+                return plain;
             }
         }
         return null;
+    }
+
+    private static boolean isKnownSignatureName(String name) {
+        for (String gray : SIGNATURE_GRAY) {
+            if (gray.equals(name)) return true;
+        }
+        for (String family : SIGNATURE_HUE) {
+            if (family.equals(name)
+                    || ("Deep " + family).equals(name)
+                    || ("Pale " + family).equals(name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ── Decode ────────────────────────────────────────────────────────────────

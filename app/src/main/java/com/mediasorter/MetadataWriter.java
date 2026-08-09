@@ -53,10 +53,14 @@ public class MetadataWriter {
     private static byte[] buildXmp(List<String> tags) {
         StringBuilder xmp = new StringBuilder();
         xmp.append(XMP_HEADER);
-        for (String tag : tags) {
-            xmp.append("<rdf:li>")
-               .append(escapeXml(tag))
-               .append("</rdf:li>\n");
+        if (tags != null) {
+            for (String tag : tags) {
+                String plain = TagText.plain(tag);
+                if (plain.isEmpty()) continue;
+                xmp.append("<rdf:li>")
+                   .append(escapeXml(plain))
+                   .append("</rdf:li>\n");
+            }
         }
         xmp.append(XMP_FOOTER);
         return xmp.toString().getBytes(StandardCharsets.UTF_8);

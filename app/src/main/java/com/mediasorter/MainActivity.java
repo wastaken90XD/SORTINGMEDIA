@@ -1518,8 +1518,8 @@ private Spinner makeSpinner(String[] options) {
                 "Group similar",
                 "Tag + Rename",
                 "All three",
-                "★ Signature tag (golden ticket)",
-                "★ Golden ticket (tag + rename)"
+                "Signature tag (golden ticket)",
+                "Golden ticket (tag + rename)"
         };
         android.widget.Spinner modeSpin = makeSpinner(modes);
         layout.addView(modeSpin);
@@ -1528,8 +1528,8 @@ private Spinner makeSpinner(String[] options) {
         goldenHint.setText(
                 "Golden ticket: every image gets the ONE colour that is rarest\n"
                 + "across the analysed set but meaningful inside the image —\n"
-                + "its own signature (e.g. \"★ Deep Lagoon\"). Re-runs skip\n"
-                + "files that already carry a ★ tag, so they're fast.");
+                + "its own signature (e.g. \"Deep Lagoon\"). Re-runs skip\n"
+                + "files that already carry a signature tag, so they're fast.");
         goldenHint.setTextColor(0xFF888888);
         goldenHint.setTextSize(11f);
         goldenHint.setPadding(0, 8, 0, 0);
