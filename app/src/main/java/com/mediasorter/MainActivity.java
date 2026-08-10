@@ -4183,13 +4183,81 @@ private Spinner makeSpinner(String[] options) {
         updateGalleryMemoryWindow();
     }
 
+    private String uniqueManualGroupPrefix(final List<MediaFile> affected) {
+        java.util.Map<String, java.util.Set<String>> namesByDirectory =
+                new java.util.HashMap<String, java.util.Set<String>>();
+        java.util.Set<String> usedPrefixes = new java.util.HashSet<String>();
+
+        for (MediaFile file : affected) {
+            java.io.File source = new java.io.File(file.getPath());
+            java.io.File directory = source.getParentFile();
+            if (directory == null) continue;
+            String directoryPath = directory.getAbsolutePath();
+            java.util.Set<String> names = namesByDirectory.get(directoryPath);
+            if (names == null) {
+                names = new java.util.HashSet<String>();
+                String[] existing = directory.list();
+                if (existing != null) {
+                    for (String name : existing) {
+                        names.add(name);
+                        usedPrefixes.add(name);
+                        int sequenceMarker = name.indexOf("_seq_");
+                        if (sequenceMarker > 0) {
+                            usedPrefixes.add(name.substring(0, sequenceMarker));
+                        }
+                    }
+                }
+                namesByDirectory.put(directoryPath, names);
+            }
+        }
+
+        // These source names move to temporary names first, so they are not
+        // conflicts for this operation's generated destinations.
+        for (MediaFile file : affected) {
+            java.io.File source = new java.io.File(file.getPath());
+            java.io.File directory = source.getParentFile();
+            if (directory != null) {
+                java.util.Set<String> names = namesByDirectory.get(directory.getAbsolutePath());
+                if (names != null) names.remove(source.getName());
+            }
+        }
+
+        for (int attempt = 0; attempt < 1000; attempt++) {
+            String prefix = com.mediasorter.features.RandomGenerator
+                    .randomGroupPrefix(usedPrefixes);
+            boolean conflict = false;
+            java.util.Set<String> reserved = new java.util.HashSet<String>();
+            for (int i = 0; i < affected.size(); i++) {
+                MediaFile file = affected.get(i);
+                java.io.File source = new java.io.File(file.getPath());
+                java.io.File directory = source.getParentFile();
+                if (directory == null) continue;
+                String name = source.getName();
+                int dot = name.lastIndexOf('.');
+                String extension = dot >= 0 ? name.substring(dot) : "";
+                String destination = prefix + "_seq_"
+                        + com.mediasorter.features.RandomGenerator.sequenceLabel(i)
+                        + extension;
+                java.util.Set<String> names = namesByDirectory.get(directory.getAbsolutePath());
+                if ((names != null && names.contains(destination)) || !reserved.add(
+                        directory.getAbsolutePath() + "\n" + destination)) {
+                    conflict = true;
+                    break;
+                }
+            }
+            if (!conflict) return prefix;
+            usedPrefixes.add(prefix);
+        }
+        return "manual-" + System.currentTimeMillis();
+    }
+
     private void renameGalleryManualRange(final List<MediaFile> affected) {
         if (affected == null || affected.isEmpty()) return;
         Toast.makeText(this, "Updating manual order…", Toast.LENGTH_SHORT).show();
         new Thread(new Runnable() {
             @Override public void run() {
                 int success = 0;
-                String prefix = "manual";
+                String prefix = uniqueManualGroupPrefix(affected);
                 java.util.List<java.io.File> sources = new ArrayList<>();
                 java.util.List<java.io.File> temporary = new ArrayList<>();
                 java.util.List<MediaFile> renamedFiles = new ArrayList<>();
@@ -4215,7 +4283,7 @@ private Spinner makeSpinner(String[] options) {
                     String ext = dot >= 0 ? originalName.substring(dot) : "";
                     java.io.File destination = new java.io.File(original.getParentFile(),
                             prefix + "_seq_" + com.mediasorter.features.RandomGenerator.sequenceLabel(
-                                    affected.indexOf(file)) + ext);
+                                    renamedFiles.indexOf(file)) + ext);
                     if (temp.renameTo(destination)) {
                         String oldPath = file.getPath();
                         file.setPath(destination.getAbsolutePath());
@@ -4231,12 +4299,14 @@ private Spinner makeSpinner(String[] options) {
                     }
                 }
                 final int renamed = success;
+                final String completedPrefix = prefix;
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
                         for (MediaFile file : affected) indexer.rescan(new java.io.File(file.getPath()).getParent());
                         scheduleRefresh();
                         Toast.makeText(MainActivity.this,
-                                "Manual order updated: " + renamed + " files",
+                                "Manual order updated: " + renamed + " files ("
+                                        + completedPrefix + ")",
                                 Toast.LENGTH_SHORT).show();
                     }
                 });
