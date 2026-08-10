@@ -21,8 +21,10 @@ import com.mediasorter.R;
 import com.mediasorter.TagText;
 import com.mediasorter.models.MediaFile;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** RecyclerView cell presentation for MainActivity's gallery mode. */
@@ -63,10 +65,16 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     private final SharedPreferences prefs;
     private final Listener listener;
     private final Set<String> selected = new LinkedHashSet<>();
+    private final Map<String, Integer> groupBorderColors = new HashMap<>();
     private final int accentColor;
     private List<MediaFile> files = new ArrayList<>();
     private boolean selectMode;
     private boolean lowMemory;
+    private boolean fastScrolling;
+    private boolean showFilenameBadge = true;
+    private boolean showTagBadge = true;
+    private boolean showFlagBadge = true;
+    private boolean showSequenceBadge = true;
     private int spacingDp = 4;
     private int columns = 3;
 
@@ -86,11 +94,47 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         } else {
             accentColor = 0xFFE94560;
         }
+        refreshBadgeSettings();
     }
 
     public void setLowMemory(boolean low) {
         lowMemory = low;
+        refreshBadgeSettings();
         notifyDataSetChanged();
+    }
+
+    public void refreshBadgeSettings() {
+        showFilenameBadge = prefs.getBoolean("gallery_show_filename", true);
+        showTagBadge = !lowMemory && prefs.getBoolean("gallery_show_tag_count", true);
+        showFlagBadge = !lowMemory && prefs.getBoolean("gallery_show_flag", true);
+        showSequenceBadge = !lowMemory && prefs.getBoolean("gallery_show_seq", true);
+        notifyDataSetChanged();
+    }
+
+    public void setFastScrolling(boolean fast, int first, int last) {
+        fastScrolling = fast;
+        if (getItemCount() == 0) return;
+        int start = Math.max(0, first);
+        int end = last < 0 ? getItemCount() - 1 : Math.min(getItemCount() - 1, last);
+        if (end >= start) notifyItemRangeChanged(start, end - start + 1, "gallery_scroll");
+    }
+
+    public boolean isFastScrolling() { return fastScrolling; }
+
+    public void reloadVisibleThumbnails(RecyclerView recyclerView) {
+        if (recyclerView == null || fastScrolling) return;
+        for (int i = 0; i < recyclerView.getChildCount(); i++) {
+            View child = recyclerView.getChildAt(i);
+            RecyclerView.ViewHolder raw = recyclerView.getChildViewHolder(child);
+            if (!(raw instanceof ViewHolder)) continue;
+            ViewHolder holder = (ViewHolder) raw;
+            int width = Math.max(1, holder.thumbnail.getWidth());
+            int height = Math.max(1, holder.thumbnail.getHeight());
+            int position = holder.getAdapterPosition();
+            if (position != RecyclerView.NO_POSITION && position < files.size()) {
+                loader.loadVisible(files.get(position), holder.thumbnail, width, height);
+            }
+        }
     }
 
     public void setColumns(int value) {
@@ -298,6 +342,23 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     }
 
     @Override
+    public void onBindViewHolder(@NonNull ViewHolder holder, int position,
+                                 @NonNull List<Object> payloads) {
+        if (!payloads.isEmpty()) {
+            for (Object payload : payloads) {
+                if ("gallery_scroll".equals(payload)) {
+                    MediaFile file = files.get(position);
+                    holder.thumbnail.setImageDrawable(null);
+                    holder.thumbnail.setAlpha(1.0f);
+                    holder.thumbnail.setBackgroundColor(placeholderColor(file));
+                    return;
+                }
+            }
+        }
+        onBindViewHolder(holder, position);
+    }
+
+    @Override
     public void onBindViewHolder(@NonNull final ViewHolder holder, int position) {
         final MediaFile file = files.get(position);
         holder.itemView.setTag(file.getPath());
@@ -306,7 +367,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         holder.thumbnail.setAlpha(1.0f);
         holder.thumbnail.setBackgroundColor(placeholderColor(file));
         holder.filename.setText(file.getName());
-        holder.filename.setVisibility(showFilename() ? View.VISIBLE : View.GONE);
+        holder.filename.setVisibility(showFilenameBadge ? View.VISIBLE : View.GONE);
 
         int width = holder.itemView.getWidth();
         if (width <= 0) width = dp(120);
@@ -350,16 +411,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     }
 
     private void bindBadges(ViewHolder holder, MediaFile file) {
-        boolean showTag = prefs.getBoolean("gallery_show_tag_count", true);
-        boolean showFlag = prefs.getBoolean("gallery_show_flag", true);
-        boolean showSeq = prefs.getBoolean("gallery_show_seq", true);
-        if (lowMemory) {
-            showTag = false;
-            showFlag = false;
-            showSeq = false;
-        }
-
-        if (showTag && !file.getTags().isEmpty()) {
+        if (showTagBadge && !file.getTags().isEmpty()) {
             holder.tagBadge.setText(String.valueOf(file.getTags().size()));
             holder.tagBadge.setVisibility(View.VISIBLE);
         } else {
@@ -367,7 +419,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         }
 
         FileStatus.Status status = fileStatus.getStatus(file.getPath());
-        if (showFlag && status != FileStatus.Status.NONE) {
+        if (showFlagBadge && status != FileStatus.Status.NONE) {
             holder.statusBadge.setText(status.name());
             holder.statusBadge.setVisibility(View.VISIBLE);
         } else {
@@ -375,7 +427,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         }
 
         String sequence = findSequenceLabel(file);
-        if (showSeq && !sequence.isEmpty()) {
+        if (showSequenceBadge && !sequence.isEmpty()) {
             holder.sequenceBadge.setText(sequence);
             holder.sequenceBadge.setVisibility(View.VISIBLE);
         } else {
@@ -421,10 +473,18 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(fill);
         if (group != null) {
-            float[] hsv = new float[]{Math.abs(group.hashCode()) % 360, 0.65f, 0.9f};
-            drawable.setStroke(dp(lowMemory ? 2 : 3), Color.HSVToColor(hsv));
+            drawable.setStroke(dp(lowMemory ? 2 : 3), groupBorderColor(group));
         }
         holder.cell.setBackground(drawable);
+    }
+
+    private int groupBorderColor(String group) {
+        Integer cached = groupBorderColors.get(group);
+        if (cached != null) return cached;
+        float[] hsv = new float[]{Math.abs(group.hashCode()) % 360, 0.65f, 0.9f};
+        int color = Color.HSVToColor(hsv);
+        groupBorderColors.put(group, color);
+        return color;
     }
 
     public void setDragging(ViewHolder holder, boolean dragging) {
@@ -466,10 +526,6 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         return Color.rgb(red, green, blue);
     }
 
-    private boolean showFilename() {
-        return prefs.getBoolean("gallery_show_filename", true);
-    }
-
     private long availableHeap() {
         Runtime runtime = Runtime.getRuntime();
         return runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory());
@@ -483,7 +539,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
             public void run() {
                 int position = holder.getAdapterPosition();
                 if (position == RecyclerView.NO_POSITION || position >= files.size()) return;
-                if (!holder.itemView.isShown()) return;
+                if (fastScrolling || !holder.itemView.isShown()) return;
                 MediaFile file = files.get(position);
                 int actualWidth = holder.itemView.getWidth();
                 if (actualWidth > 0) {

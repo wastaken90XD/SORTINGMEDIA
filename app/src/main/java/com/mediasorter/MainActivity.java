@@ -109,7 +109,11 @@ public class MainActivity extends Activity
     private HorizontalScrollView galleryFilterScroll;
     private LinearLayout galleryFilterRow;
     private Button galleryToggleButton;
-    private Button gallerySettingsButton;
+    private Button toolbarSearchToggle;
+    private Button toolbarOverflowButton;
+    private boolean galleryFastScrolling;
+    private boolean galleryScrollSettled = true;
+    private long galleryLastScrollTime;
     private ItemTouchHelper galleryItemTouchHelper;
     private ScaleGestureDetector galleryScaleDetector;
     private float galleryLastScale = 1.0f;
@@ -771,7 +775,10 @@ public class MainActivity extends Activity
     private void scheduleRefresh() {
         if (refreshPending) return;
         refreshPending = true;
-        mainHandler.postDelayed(this::executeRefresh, 150);
+        int delay = indexer != null && indexer.getIndex().size() > 500 ? 300 : 150;
+        mainHandler.postDelayed(new Runnable() {
+            @Override public void run() { executeRefresh(); }
+        }, delay);
     }
 
     private void executeRefresh() {
@@ -3429,7 +3436,7 @@ private Spinner makeSpinner(String[] options) {
                         // The adapter already leaves the cell's deterministic
                         // placeholder visible after a failed decode.
                     }
-                });
+                }, galleryLowMemory);
         galleryThumbnailLoader.setLowMemoryDevice(galleryLowMemory);
 
         galleryAdapter = new GalleryAdapter(this, galleryThumbnailLoader,
@@ -3487,7 +3494,20 @@ private Spinner makeSpinner(String[] options) {
                 @Override
                 public void onScrolled(@androidx.annotation.NonNull RecyclerView recyclerView,
                                        int dx, int dy) {
+                    updateGalleryScrollVelocity(dx, dy);
                     updateGalleryMemoryWindow();
+                }
+
+                @Override
+                public void onScrollStateChanged(@androidx.annotation.NonNull RecyclerView recyclerView,
+                                                 int newState) {
+                    if (newState == RecyclerView.SCROLL_STATE_IDLE) {
+                        galleryScrollSettled = true;
+                        if (galleryFastScrolling) setGalleryFastScrolling(false);
+                        galleryAdapter.reloadVisibleThumbnails(recyclerView);
+                    } else {
+                        galleryScrollSettled = false;
+                    }
                 }
             });
 
@@ -3619,29 +3639,171 @@ private Spinner makeSpinner(String[] options) {
     private void addGalleryToolbarControls() {
         View toolbarView = findViewById(R.id.toolbar);
         if (!(toolbarView instanceof LinearLayout)) return;
-        LinearLayout toolbar = (LinearLayout) toolbarView;
+        final LinearLayout toolbar = (LinearLayout) toolbarView;
+
+        // The XML toolbar remains the source of the existing controls and
+        // listeners. Hide those views rather than recreating their behavior;
+        // the overflow menu invokes the original buttons with performClick().
+        for (int i = 0; i < toolbar.getChildCount(); i++) {
+            toolbar.getChildAt(i).setVisibility(View.GONE);
+        }
+        toolbar.setGravity(Gravity.CENTER_VERTICAL);
+
+        toolbarSearchToggle = new Button(this);
+        toolbarSearchToggle.setText("Search");
+        toolbarSearchToggle.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                if (searchBar == null) return;
+                boolean show = searchBar.getVisibility() != View.VISIBLE;
+                searchBar.setVisibility(show ? View.VISIBLE : View.GONE);
+                if (show) searchBar.requestFocus();
+            }
+        });
+        toolbar.addView(toolbarSearchToggle, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.MATCH_PARENT));
 
         galleryToggleButton = new Button(this);
         galleryToggleButton.setText("Gallery");
-        galleryToggleButton.setTextSize(11f);
         galleryToggleButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
                 setGalleryMode(!galleryModeActive, true);
             }
         });
         toolbar.addView(galleryToggleButton, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, galleryDp(36)));
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.MATCH_PARENT));
 
-        gallerySettingsButton = new Button(this);
-        gallerySettingsButton.setText("Gallery settings");
-        gallerySettingsButton.setTextSize(10f);
-        gallerySettingsButton.setOnClickListener(new View.OnClickListener() {
+        toolbarOverflowButton = new Button(this);
+        toolbarOverflowButton.setText("⋮");
+        toolbarOverflowButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
-                showGallerySettings();
+                showToolbarOverflow(view);
             }
         });
-        toolbar.addView(gallerySettingsButton, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, galleryDp(36)));
+        toolbar.addView(toolbarOverflowButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.MATCH_PARENT));
+    }
+
+    private void showToolbarOverflow(View anchor) {
+        PopupMenu popup = new PopupMenu(this, anchor);
+        android.view.Menu menu = popup.getMenu();
+        addOverflowHeader(menu, "View");
+        android.view.MenuItem sort = menu.add("Sort");
+        android.view.MenuItem filter = menu.add("Filter");
+        android.view.MenuItem gallerySettings = menu.add("Gallery settings");
+        android.view.MenuItem group = menu.add("Group");
+        android.view.MenuItem tags = menu.add("Tags");
+
+        addOverflowHeader(menu, "Actions");
+        android.view.MenuItem scan = menu.add("Scan");
+        android.view.MenuItem rescan = menu.add("Rescan");
+        android.view.MenuItem selectAll = menu.add("Select all");
+        android.view.MenuItem deselectAll = menu.add("Deselect all");
+        android.view.MenuItem surprise = menu.add("Surprise me");
+        android.view.MenuItem batchActions = menu.add("Batch actions");
+        android.view.MenuItem rules = menu.add("Run rules");
+        android.view.MenuItem delete = menu.add("Delete");
+
+        addOverflowHeader(menu, "Tools");
+        android.view.MenuItem duplicates = menu.add("Duplicate finder");
+        android.view.MenuItem colors = menu.add("Color analyzer");
+        android.view.MenuItem dashboard = menu.add("Dashboard");
+
+        addOverflowHeader(menu, "App");
+        android.view.MenuItem settings = menu.add("Settings");
+        android.view.MenuItem export = menu.add("Export");
+        android.view.MenuItem about = menu.add("About");
+
+        int selected = activeSelectionCount();
+        selectAll.setEnabled(!fullList.isEmpty());
+        deselectAll.setEnabled(selected > 0);
+        batchActions.setEnabled(selected > 0);
+        colors.setEnabled(selected > 0);
+        delete.setEnabled(selected > 0 || (currentIndex >= 0 && currentIndex < fullList.size()));
+        duplicates.setEnabled(!fullList.isEmpty());
+        rescan.setEnabled(!folderManager.isEmpty());
+        tags.setEnabled(tagManager == null || tagManager.isTagsEnabled());
+
+        popup.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
+            @Override public boolean onMenuItemClick(android.view.MenuItem item) {
+                String title = item.getTitle().toString();
+                if ("Sort".equals(title)) showSortMenu(anchor);
+                else if ("Filter".equals(title)) showFilterMenu(anchor);
+                else if ("Gallery settings".equals(title)) showGallerySettings();
+                else if ("Group".equals(title)) performToolbarButton(R.id.btnGroupBy);
+                else if ("Tags".equals(title)) performToolbarButton(R.id.btnToggleTagPanel);
+                else if ("Scan".equals(title)) performToolbarButton(R.id.btnScan);
+                else if ("Rescan".equals(title)) performToolbarButton(R.id.btnRescan);
+                else if ("Select all".equals(title)) selectAllActiveFiles();
+                else if ("Deselect all".equals(title)) deselectAllActiveFiles();
+                else if ("Surprise me".equals(title)) performToolbarButton(R.id.btnSurprise);
+                else if ("Batch actions".equals(title)) {
+                    if (galleryModeActive) showGallerySelectionMenu();
+                    else performToolbarButton(R.id.btnScan);
+                }
+                else if ("Run rules".equals(title)) performToolbarButton(R.id.btnOrganizer);
+                else if ("Delete".equals(title)) performToolbarButton(R.id.btnDelete);
+                else if ("Duplicate finder".equals(title)) showDuplicateFinderDialog();
+                else if ("Color analyzer".equals(title)) showColorAnalysisDialog();
+                else if ("Dashboard".equals(title)) performToolbarButton(R.id.btnDashboard);
+                else if ("Settings".equals(title)) performToolbarButton(R.id.btnSettings);
+                else if ("Export".equals(title)) exportSettingsFromOverflow();
+                else if ("About".equals(title)) showAboutFromOverflow();
+                else return false;
+                return true;
+            }
+        });
+        popup.show();
+    }
+
+    private void addOverflowHeader(android.view.Menu menu, String title) {
+        android.view.MenuItem header = menu.add(title);
+        header.setEnabled(false);
+    }
+
+    private void performToolbarButton(int id) {
+        View button = findViewById(id);
+        if (button != null) button.performClick();
+    }
+
+    private int activeSelectionCount() {
+        if (galleryModeActive && galleryAdapter != null) return galleryAdapter.getSelectedCount();
+        return mediaAdapter == null ? 0 : mediaAdapter.getSelectedCount();
+    }
+
+    private void selectAllActiveFiles() {
+        if (galleryModeActive && galleryAdapter != null) galleryAdapter.selectAll();
+        else if (mediaAdapter != null) mediaAdapter.selectAll();
+    }
+
+    private void deselectAllActiveFiles() {
+        if (galleryModeActive && galleryAdapter != null) galleryAdapter.deselectAll();
+        else if (mediaAdapter != null) mediaAdapter.deselectAll();
+    }
+
+    private void exportSettingsFromOverflow() {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final String path = SettingsExporter.exportSettings(MainActivity.this);
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        Toast.makeText(MainActivity.this,
+                                path == null ? "Export failed" : "Exported successfully",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void showAboutFromOverflow() {
+        new AlertDialog.Builder(this)
+                .setTitle("About MediaSorter")
+                .setMessage("MediaSorter")
+                .setPositiveButton("OK", null)
+                .show();
     }
 
     private void addGalleryFilterRow() {
@@ -3673,6 +3835,9 @@ private Spinner makeSpinner(String[] options) {
         TextView empty = findViewById(R.id.emptyStateView);
 
         if (active) {
+            galleryScrollSettled = true;
+            galleryFastScrolling = false;
+            if (galleryThumbnailLoader != null) galleryThumbnailLoader.setScrollSuspended(false);
             if (fileBrowser != null) fileBrowser.setVisibility(View.GONE);
             if (galleryRoot != null) galleryRoot.setVisibility(View.VISIBLE);
             if (galleryFilterScroll != null) galleryFilterScroll.setVisibility(View.VISIBLE);
@@ -3734,6 +3899,36 @@ private Spinner makeSpinner(String[] options) {
         galleryCountLabel.setText(fullList.size() + " files");
     }
 
+    private void updateGalleryScrollVelocity(int dx, int dy) {
+        long now = System.currentTimeMillis();
+        long elapsed = galleryLastScrollTime == 0 ? 0 : now - galleryLastScrollTime;
+        int offset = Math.abs(dx) + Math.abs(dy);
+        float density = getResources().getDisplayMetrics().density;
+        float velocity = elapsed <= 0 ? 0.0f
+                : (offset / density) / (elapsed / 1000.0f);
+        galleryLastScrollTime = now;
+        if (velocity > 2000.0f && !galleryFastScrolling) {
+            setGalleryFastScrolling(true);
+        } else if (galleryFastScrolling && velocity < 500.0f) {
+            setGalleryFastScrolling(false);
+        }
+    }
+
+    private void setGalleryFastScrolling(boolean fast) {
+        if (galleryFastScrolling == fast && galleryThumbnailLoader != null
+                && galleryThumbnailLoader.isScrollSuspended() == fast) return;
+        galleryFastScrolling = fast;
+        if (galleryThumbnailLoader != null) {
+            galleryThumbnailLoader.setScrollSuspended(fast);
+        }
+        if (galleryAdapter != null && galleryLayoutManager != null) {
+            int first = galleryLayoutManager.findFirstVisibleItemPosition();
+            int last = galleryLayoutManager.findLastVisibleItemPosition();
+            galleryAdapter.setFastScrolling(fast, first, last);
+        }
+        if (!fast) updateGalleryMemoryWindow();
+    }
+
     private void updateGalleryMemoryWindow() {
         if (!galleryModeActive || galleryBrowser == null || galleryLayoutManager == null
                 || galleryThumbnailLoader == null || galleryAdapter == null) return;
@@ -3743,8 +3938,11 @@ private Spinner makeSpinner(String[] options) {
         int columns = Math.max(1, galleryAdapter.getColumns());
         int firstRow = first / columns;
         int lastRow = last / columns;
-        int start = Math.max(0, firstRow * columns - columns);
-        int end = Math.min(galleryAdapter.getItemCount(), (lastRow + 2) * columns);
+        int start = firstRow * columns;
+        int visibleEnd = Math.min(galleryAdapter.getItemCount(), (lastRow + 1) * columns);
+        int end = galleryLowMemory || galleryFastScrolling
+                ? visibleEnd
+                : Math.min(galleryAdapter.getItemCount(), visibleEnd + columns);
         List<String> allowed = new ArrayList<>();
         List<String> visible = new ArrayList<>();
         for (int i = start; i < end; i++) {
@@ -3757,10 +3955,11 @@ private Spinner makeSpinner(String[] options) {
 
         int width = galleryBrowser.getWidth() / columns;
         int height = Math.max(galleryDp(56), Math.round(width * 0.72f));
-        for (int i = start; i < end; i++) {
-            if (i >= first && i <= last) continue;
-            MediaFile file = galleryAdapter.getFile(i);
-            if (file != null) galleryThumbnailLoader.precache(file, width, height);
+        if (!galleryLowMemory && !galleryFastScrolling) {
+            for (int i = visibleEnd; i < end; i++) {
+                MediaFile file = galleryAdapter.getFile(i);
+                if (file != null) galleryThumbnailLoader.precache(file, width, height);
+            }
         }
     }
 
@@ -3907,6 +4106,7 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void beginGalleryDrag(GalleryAdapter.ViewHolder holder) {
+        if (!galleryScrollSettled || galleryFastScrolling) return;
         if (galleryItemTouchHelper == null || holder == null) return;
         galleryDragging = true;
         galleryDragFrom = holder.getAdapterPosition();
@@ -4146,6 +4346,7 @@ private Spinner makeSpinner(String[] options) {
                         if (galleryAdapter != null) {
                             galleryAdapter.setColumns(columnValue);
                             galleryAdapter.setSpacingDp(spacingValue);
+                            galleryAdapter.refreshBadgeSettings();
                         }
                         if (galleryThumbnailLoader != null) {
                             galleryThumbnailLoader.setQuality(galleryQuality());

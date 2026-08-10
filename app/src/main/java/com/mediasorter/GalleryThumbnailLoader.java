@@ -34,7 +34,7 @@ import java.util.concurrent.Future;
 public class GalleryThumbnailLoader {
 
     private static final String TAG = "GalleryThumbnail";
-    private static final long MIN_HEAP_BYTES = 20L * 1024L * 1024L;
+    private static final long MIN_HEAP_BYTES = 40L * 1024L * 1024L;
     private static final long NO_ANIMATION_HEAP_BYTES = 30L * 1024L * 1024L;
 
     public static final int QUALITY_LOW = 0;
@@ -47,7 +47,8 @@ public class GalleryThumbnailLoader {
     }
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final ExecutorService executor = Executors.newFixedThreadPool(2);
+    private final ExecutorService executor;
+    private volatile boolean scrollSuspended;
     private final Map<String, Future<?>> inFlight = new ConcurrentHashMap<>();
     private final Map<String, Bitmap> retained = new HashMap<>();
     private final Set<String> allowedPaths = new HashSet<>();
@@ -62,10 +63,16 @@ public class GalleryThumbnailLoader {
     private volatile boolean memoryWarningLogged;
 
     public GalleryThumbnailLoader(Callback callback) {
+        this(callback, false);
+    }
+
+    public GalleryThumbnailLoader(Callback callback, boolean lowMemory) {
         this.callback = callback;
+        this.executor = Executors.newFixedThreadPool(lowMemory ? 1 : 2);
     }
 
     public void setLowMemoryDevice(boolean low) {
+        lowMemoryDevice = low;
         lowMemoryDevice = low;
         if (low) quality = QUALITY_LOW;
     }
@@ -90,6 +97,22 @@ public class GalleryThumbnailLoader {
     }
 
     public void setAnimate(boolean enabled) { animate = enabled; }
+
+    public boolean isScrollSuspended() { return scrollSuspended; }
+
+    /** Suspend work during a fast fling and cancel work already queued. */
+    public void setScrollSuspended(boolean suspended) {
+        scrollSuspended = suspended;
+        if (suspended) cancelPendingDecodes();
+    }
+
+    public void cancelPendingDecodes() {
+        for (Future<?> task : inFlight.values()) {
+            if (!task.isDone()) task.cancel(false);
+        }
+        inFlight.clear();
+        clearPrecache();
+    }
 
     /**
      * Replaces the set of paths the gallery is allowed to retain.  The caller
@@ -139,6 +162,7 @@ public class GalleryThumbnailLoader {
         if (file == null || target == null) return;
         final String path = file.getPath();
         if (path == null || path.isEmpty()) return;
+        if (scrollSuspended) return;
         if (!isActuallyVisible(target)) return;
         if (availableHeap() < MIN_HEAP_BYTES) {
             handleLowHeap();
@@ -173,6 +197,7 @@ public class GalleryThumbnailLoader {
     public void precache(final MediaFile file, final int requestedWidth,
                          final int requestedHeight) {
         if (file == null || file.getPath() == null) return;
+        if (scrollSuspended) return;
         final String path = file.getPath();
         synchronized (cacheLock) {
             if (!allowedPaths.contains(path) || visiblePaths.contains(path)
@@ -395,7 +420,7 @@ public class GalleryThumbnailLoader {
         animate = false;
         if (!memoryWarningLogged) {
             memoryWarningLogged = true;
-            Log.w(TAG, "Available heap below 20MB; gallery decodes paused and quality reduced");
+            Log.w(TAG, "Available heap below 40MB; gallery decodes paused and quality reduced");
         }
     }
 

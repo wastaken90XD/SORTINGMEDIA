@@ -50,6 +50,7 @@ public class SettingsActivity extends Activity {
     private CheckBox precacheCheck, videoAutoplayCheck, videoLoopCheck;
     private View precacheRadiusRow, videoLoopRow;
     private boolean refreshingResumeViews;
+    private boolean isInitializing = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,6 +65,12 @@ public class SettingsActivity extends Activity {
         settingsPrefs   = getSharedPreferences("settings_prefs", MODE_PRIVATE);
 
         buildSettings();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && isInitializing) isInitializing = false;
     }
 
     @Override
@@ -969,6 +976,7 @@ public class SettingsActivity extends Activity {
         View themeSpinnerRow = makeSpinnerRow("App theme:", themeOptions, 0,
                 new OnSpinnerSelectedListener() {
                     @Override public void onSelected(String value, int pos) {
+                        if (isInitializing) return;
                         if (themeSpinnerReady[0]) recreate();
                     }
                 });
@@ -1081,6 +1089,7 @@ public class SettingsActivity extends Activity {
         cb.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                if (isInitializing) return;
                 listener.onChecked(isChecked);
             }
         });
@@ -1175,6 +1184,7 @@ public class SettingsActivity extends Activity {
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override
             public void afterTextChanged(Editable s) {
+                if (isInitializing) return;
                 String txt = s.toString().trim();
                 if (txt.isEmpty()) return;
                 try {
@@ -1190,6 +1200,7 @@ public class SettingsActivity extends Activity {
         input.setOnFocusChangeListener(new View.OnFocusChangeListener() {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
+                if (isInitializing) return;
                 if (!hasFocus) {
                     String txt = input.getText().toString().trim();
                     try {
@@ -1235,6 +1246,7 @@ public class SettingsActivity extends Activity {
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override
             public void afterTextChanged(Editable s) {
+                if (isInitializing) return;
                 listener.onChange(s.toString().trim());
             }
         });
@@ -1270,6 +1282,7 @@ public class SettingsActivity extends Activity {
         spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (isInitializing) return;
                 listener.onSelected(options[position], position);
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
@@ -1413,6 +1426,7 @@ public class SettingsActivity extends Activity {
                 @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
                 @Override public void afterTextChanged(Editable s) {}
                 @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                    if (isInitializing) return;
                     String q = s.toString().toLowerCase().trim();
                     List<String> filtered = new ArrayList<>();
                     filtered.add("(no tag)");
@@ -1448,6 +1462,7 @@ public class SettingsActivity extends Activity {
             actionSpin.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
                 public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                    if (isInitializing) return;
                     GestureSettings.GestureAction action =
                         gestureSettings.fromLabel(actionLabels[pos]);
                     boolean show = action == GestureSettings.GestureAction.APPLY_TAG;
@@ -1464,6 +1479,7 @@ public class SettingsActivity extends Activity {
             tagSpin.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
                 public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                    if (isInitializing) return;
                     String tag = pos > 0 ? p.getItemAtPosition(pos).toString() : "";
                     steps.get(idx).tag = tag;
                     callback.set(steps);
@@ -1565,6 +1581,7 @@ public class SettingsActivity extends Activity {
             @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
             @Override public void afterTextChanged(Editable s) {}
             @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                if (isInitializing) return;
                 String q = s.toString().toLowerCase();
                 List<String> filtered = new ArrayList<>();
                 for (Tag t : allTags) {
@@ -1655,6 +1672,7 @@ public class SettingsActivity extends Activity {
     private SeekBar.OnSeekBarChangeListener simple(final ProgressCallback cb) {
         return new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar sb, int p, boolean u) {
+                if (isInitializing) return;
                 cb.onProgress(p);
             }
             @Override public void onStartTrackingTouch(SeekBar sb) {}
@@ -1823,6 +1841,7 @@ public class SettingsActivity extends Activity {
                 @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
                 @Override public void onTextChanged(CharSequence s, int st, int b, int c) {}
                 @Override public void afterTextChanged(Editable s) {
+                    if (isInitializing) return;
                     m.name = s.toString().trim();
                     List<GestureSettings.GestureMacro> currentList = gestureSettings.loadMacros();
                     for (GestureSettings.GestureMacro currentM : currentList) {
