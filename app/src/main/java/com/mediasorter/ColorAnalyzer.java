@@ -395,13 +395,10 @@ public class ColorAnalyzer {
         if (bmp == null) throw new RuntimeException("decode failed");
 
         Bitmap scaled = Bitmap.createScaledBitmap(bmp, SAMPLE, SAMPLE, false);
-        // createScaledBitmap returns the SAME object when no scaling is needed
-        // (image already SAMPLE-sized) — recycling it would kill our pixels.
-        if (scaled != bmp) bmp.recycle();
-
+        // createScaledBitmap may return the same object when no scaling is needed.
+        // Bitmap lifetime is left to the garbage collector.
         int[] pixels = new int[SAMPLE * SAMPLE];
         scaled.getPixels(pixels, 0, SAMPLE, 0, 0, SAMPLE, SAMPLE);
-        scaled.recycle();
 
         List<float[]> labs = new ArrayList<>(pixels.length);
         for (int p : pixels) {
@@ -544,13 +541,10 @@ public class ColorAnalyzer {
         if (bmp == null) throw new RuntimeException("decode failed");
 
         Bitmap scaled = Bitmap.createScaledBitmap(bmp, SAMPLE, SAMPLE, false);
-        // createScaledBitmap returns the SAME object when no scaling is needed
-        // (image already SAMPLE-sized) — recycling it would kill our pixels.
-        if (scaled != bmp) bmp.recycle();
-
+        // createScaledBitmap may return the same object when no scaling is needed.
+        // Bitmap lifetime is left to the garbage collector.
         int[] pixels = new int[SAMPLE * SAMPLE];
         scaled.getPixels(pixels, 0, SAMPLE, 0, 0, SAMPLE, SAMPLE);
-        scaled.recycle();
 
         List<float[]> labs = new ArrayList<>(pixels.length);
         for (int p : pixels) {

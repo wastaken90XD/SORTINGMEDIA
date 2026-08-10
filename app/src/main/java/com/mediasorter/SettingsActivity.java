@@ -54,6 +54,7 @@ public class SettingsActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        isInitializing = true;
         super.onCreate(savedInstanceState);
         cacheManager    = new CacheManager(this);
         folderManager   = new FolderManager(this);
@@ -1024,6 +1025,7 @@ public class SettingsActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
         setContentView(scroll);
+        isInitializing = false;
     }
 
     // ── Helper methods for Expanded Settings ──────────────────────────────────

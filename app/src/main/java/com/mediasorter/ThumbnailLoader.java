@@ -350,13 +350,13 @@ public void precache(List<MediaFile> files) {
             if (frame == null) return null;
             int w = frame.getWidth();
             int h = frame.getHeight();
-            if (w <= 0 || h <= 0) { frame.recycle(); return null; }
+            if (w <= 0 || h <= 0) { frame = null; return null; }
             if (w <= size && h <= size) return frame;
             float ratio = Math.min((float) size / w, (float) size / h);
             int nw = Math.max(1, Math.round(w * ratio));
             int nh = Math.max(1, Math.round(h * ratio));
             Bitmap scaled = Bitmap.createScaledBitmap(frame, nw, nh, true);
-            frame.recycle();
+            frame = null;
             return scaled;
         } catch (OutOfMemoryError e) {
             return null;

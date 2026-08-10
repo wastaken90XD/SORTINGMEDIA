@@ -558,16 +558,17 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
 
     @Override
     public void onViewDetachedFromWindow(@NonNull ViewHolder holder) {
-        super.onViewDetachedFromWindow(holder);
+        holder.thumbnail.setImageDrawable(null);
         Object tag = holder.thumbnail.getTag();
         if (tag != null) loader.release(tag.toString());
+        super.onViewDetachedFromWindow(holder);
     }
 
     @Override
     public void onViewRecycled(@NonNull ViewHolder holder) {
+        holder.thumbnail.setImageDrawable(null);
         Object tag = holder.thumbnail.getTag();
         if (tag != null) loader.release(tag.toString());
-        holder.thumbnail.setImageDrawable(null);
         super.onViewRecycled(holder);
     }
 

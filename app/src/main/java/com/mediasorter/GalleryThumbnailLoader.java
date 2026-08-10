@@ -1,5 +1,6 @@
 package com.mediasorter;
 
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.media.MediaMetadataRetriever;
@@ -57,22 +58,28 @@ public class GalleryThumbnailLoader {
     private final Object cacheLock = new Object();
 
     private final Callback callback;
-    private volatile int quality = QUALITY_LOW;
+    private final SharedPreferences prefs;
+    private volatile int quality = QUALITY_HIGH;
     private volatile boolean lowMemoryDevice;
     private volatile boolean animate = true;
     private volatile boolean memoryWarningLogged;
 
     public GalleryThumbnailLoader(Callback callback) {
-        this(callback, false);
+        this(callback, false, null);
     }
 
     public GalleryThumbnailLoader(Callback callback, boolean lowMemory) {
+        this(callback, lowMemory, null);
+    }
+
+    public GalleryThumbnailLoader(Callback callback, boolean lowMemory,
+                                  SharedPreferences preferences) {
         this.callback = callback;
+        this.prefs = preferences;
         this.executor = Executors.newFixedThreadPool(lowMemory ? 1 : 2);
     }
 
     public void setLowMemoryDevice(boolean low) {
-        lowMemoryDevice = low;
         lowMemoryDevice = low;
         if (low) quality = QUALITY_LOW;
     }
@@ -88,12 +95,26 @@ public class GalleryThumbnailLoader {
         clearPrecache();
     }
 
-    public int getQuality() { return quality; }
+    public int getQuality() { return effectiveQuality(); }
 
     public void reduceQualityForSession() {
         int current = quality;
         quality = Math.max(QUALITY_LOW, current - 1);
         clearPrecache();
+    }
+
+    private int effectiveQuality() {
+        if (lowMemoryDevice) return QUALITY_LOW;
+        int configured = configuredQuality();
+        return Math.min(configured, quality);
+    }
+
+    private int configuredQuality() {
+        if (prefs == null) return Math.max(QUALITY_LOW, Math.min(QUALITY_HIGH, quality));
+        String value = prefs.getString("gallery_thumb_quality", "Low");
+        if ("High".equalsIgnoreCase(value)) return QUALITY_HIGH;
+        if ("Medium".equalsIgnoreCase(value)) return QUALITY_MEDIUM;
+        return QUALITY_LOW;
     }
 
     public void setAnimate(boolean enabled) { animate = enabled; }
@@ -134,7 +155,6 @@ public class GalleryThumbnailLoader {
             while (it.hasNext()) {
                 Map.Entry<String, Bitmap> entry = it.next();
                 if (!allowedPaths.contains(entry.getKey())) {
-                    recycle(entry.getValue());
                     it.remove();
                 }
             }
@@ -173,9 +193,16 @@ public class GalleryThumbnailLoader {
             allowedPaths.add(path);
             visiblePaths.add(path);
             if (failedPaths.contains(path)) return;
-            Bitmap cached = retained.get(path);
+            final Bitmap cached = retained.get(path);
             if (cached != null && !cached.isRecycled()) {
-                setBitmap(target, path, cached);
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        if (path.equals(target.getTag())
+                                && target.isAttachedToWindow()) {
+                            setBitmap(target, path, cached);
+                        }
+                    }
+                });
                 return;
             }
         }
@@ -219,8 +246,6 @@ public class GalleryThumbnailLoader {
                     synchronized (cacheLock) {
                         if (allowedPaths.contains(path) && !visiblePaths.contains(path)) {
                             putRetained(path, bitmap);
-                        } else {
-                            recycle(bitmap);
                         }
                     }
                 }
@@ -237,8 +262,6 @@ public class GalleryThumbnailLoader {
             synchronized (cacheLock) {
                 if (allowedPaths.contains(path)) {
                     putRetained(path, bitmap);
-                } else {
-                    recycle(bitmap);
                 }
             }
         } else {
@@ -265,6 +288,7 @@ public class GalleryThumbnailLoader {
 
     private void setBitmap(ImageView target, String path, Bitmap bitmap) {
         if (bitmap == null || bitmap.isRecycled()) return;
+        if (!target.isAttachedToWindow()) return;
         target.setImageBitmap(bitmap);
         target.setBackgroundColor(0x00000000);
         target.setTag(path);
@@ -306,9 +330,8 @@ public class GalleryThumbnailLoader {
                 return null;
             }
             try {
-                bitmap = decode(file, width, height, quality);
+                bitmap = decode(file, width, height, effectiveQuality());
                 if (availableHeap() < MIN_HEAP_BYTES) {
-                    if (bitmap != null) recycle(bitmap);
                     handleLowHeap();
                     return null;
                 }
@@ -365,7 +388,6 @@ public class GalleryThumbnailLoader {
         Bitmap scaled = Bitmap.createScaledBitmap(decoded,
                 Math.max(1, Math.round(decoded.getWidth() * ratio)),
                 Math.max(1, Math.round(decoded.getHeight() * ratio)), true);
-        if (scaled != decoded) recycle(decoded);
         return scaled;
     }
 
@@ -386,7 +408,6 @@ public class GalleryThumbnailLoader {
             Bitmap scaled = Bitmap.createScaledBitmap(frame,
                     Math.max(1, Math.round(frame.getWidth() * ratio)),
                     Math.max(1, Math.round(frame.getHeight() * ratio)), true);
-            if (scaled != frame) recycle(frame);
             frame = null;
             return scaled;
         } catch (OutOfMemoryError oom) {
@@ -394,7 +415,6 @@ public class GalleryThumbnailLoader {
         } catch (Exception ignored) {
             return null;
         } finally {
-            if (frame != null) recycle(frame);
             try { retriever.release(); } catch (Exception ignored) {}
         }
     }
@@ -438,7 +458,6 @@ public class GalleryThumbnailLoader {
             while (it.hasNext()) {
                 Map.Entry<String, Bitmap> entry = it.next();
                 if (!visiblePaths.contains(entry.getKey())) {
-                    recycle(entry.getValue());
                     it.remove();
                 }
             }
@@ -454,7 +473,6 @@ public class GalleryThumbnailLoader {
             allowedPaths.remove(path);
             visiblePaths.remove(path);
             Bitmap bitmap = retained.remove(path);
-            if (bitmap != null) recycle(bitmap);
         }
     }
 
@@ -463,14 +481,7 @@ public class GalleryThumbnailLoader {
     }
 
     private void putRetained(String path, Bitmap bitmap) {
-        Bitmap old = retained.put(path, bitmap);
-        if (old != null && old != bitmap) recycle(old);
-    }
-
-    private void recycle(Bitmap bitmap) {
-        if (bitmap != null && !bitmap.isRecycled()) {
-            try { bitmap.recycle(); } catch (Exception ignored) {}
-        }
+        retained.put(path, bitmap);
     }
 
     public void shutdown() {
@@ -480,7 +491,6 @@ public class GalleryThumbnailLoader {
         inFlight.clear();
         executor.shutdownNow();
         synchronized (cacheLock) {
-            for (Bitmap bitmap : retained.values()) recycle(bitmap);
             retained.clear();
             allowedPaths.clear();
             visiblePaths.clear();

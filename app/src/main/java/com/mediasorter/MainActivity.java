@@ -3436,7 +3436,7 @@ private Spinner makeSpinner(String[] options) {
                         // The adapter already leaves the cell's deterministic
                         // placeholder visible after a failed decode.
                     }
-                }, galleryLowMemory);
+                }, galleryLowMemory, galleryPrefs());
         galleryThumbnailLoader.setLowMemoryDevice(galleryLowMemory);
 
         galleryAdapter = new GalleryAdapter(this, galleryThumbnailLoader,
