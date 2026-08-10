@@ -65,12 +65,15 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     private final SharedPreferences prefs;
     private final Listener listener;
     private final Set<String> selected = new LinkedHashSet<>();
+    private final Set<String> dragThumbnailPaths = new HashSet<>();
     private final Map<String, Integer> groupBorderColors = new HashMap<>();
     private final int accentColor;
     private List<MediaFile> files = new ArrayList<>();
     private boolean selectMode;
     private boolean lowMemory;
     private boolean fastScrolling;
+    private boolean dragThumbnailActive;
+    private String draggedThumbnailPath;
     private boolean showFilenameBadge = true;
     private boolean showTagBadge = true;
     private boolean showFlagBadge = true;
@@ -128,9 +131,73 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
             int height = Math.max(1, holder.thumbnail.getHeight());
             int position = holder.getAdapterPosition();
             if (position != RecyclerView.NO_POSITION && position < files.size()) {
-                loader.loadVisible(files.get(position), holder.thumbnail, width, height);
+                MediaFile file = files.get(position);
+                if (dragThumbnailActive && (dragThumbnailPaths.contains(file.getPath())
+                        || file.getPath().equals(draggedThumbnailPath))) {
+                    loader.loadForDrag(file, holder.thumbnail, width, height);
+                } else {
+                    loader.loadVisible(file, holder.thumbnail, width, height);
+                }
             }
         }
+    }
+
+    public void updateDragThumbnailWindow(RecyclerView recyclerView,
+                                           List<String> paths,
+                                           String draggedPath) {
+        dragThumbnailActive = true;
+        draggedThumbnailPath = draggedPath;
+        dragThumbnailPaths.clear();
+        if (paths != null) dragThumbnailPaths.addAll(paths);
+        loader.setDragPaths(paths);
+        if (recyclerView == null) return;
+        Set<String> attachedPaths = new HashSet<>();
+
+        for (int i = 0; i < recyclerView.getChildCount(); i++) {
+            View child = recyclerView.getChildAt(i);
+            RecyclerView.ViewHolder raw = recyclerView.getChildViewHolder(child);
+            if (!(raw instanceof ViewHolder)) continue;
+            ViewHolder holder = (ViewHolder) raw;
+            Object tag = holder.thumbnail.getTag();
+            String path = tag == null ? null : tag.toString();
+            if (path != null) attachedPaths.add(path);
+            boolean keep = path != null && (dragThumbnailPaths.contains(path)
+                    || path.equals(draggedPath));
+            MediaFile file = findFile(path);
+            if (!keep) {
+                holder.thumbnail.setImageDrawable(null);
+                if (file != null) holder.thumbnail.setBackgroundColor(placeholderColor(file));
+                continue;
+            }
+            if (file != null) {
+                loader.loadForDrag(file, holder.thumbnail,
+                        Math.max(1, holder.thumbnail.getWidth()),
+                        Math.max(1, holder.thumbnail.getHeight()));
+            }
+        }
+
+        int cellWidth = Math.max(1, recyclerView.getWidth() / Math.max(1, columns));
+        int cellHeight = Math.max(dp(56), Math.round(cellWidth * 0.72f));
+        for (String path : dragThumbnailPaths) {
+            if (attachedPaths.contains(path)) continue;
+            MediaFile file = findFile(path);
+            if (file != null) loader.preloadForDrag(file, cellWidth, cellHeight);
+        }
+    }
+
+    public void clearDragThumbnailWindow() {
+        dragThumbnailActive = false;
+        draggedThumbnailPath = null;
+        dragThumbnailPaths.clear();
+        loader.clearDragPaths();
+    }
+
+    private MediaFile findFile(String path) {
+        if (path == null) return null;
+        for (MediaFile file : files) {
+            if (path.equals(file.getPath())) return file;
+        }
+        return null;
     }
 
     public void setColumns(int value) {
@@ -359,7 +426,9 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         final MediaFile file = files.get(position);
         holder.itemView.setTag(file.getPath());
         holder.thumbnail.setTag(file.getPath());
-        holder.thumbnail.setImageDrawable(null);
+        boolean keepDragBitmap = dragThumbnailActive
+                && file.getPath().equals(draggedThumbnailPath);
+        if (!keepDragBitmap) holder.thumbnail.setImageDrawable(null);
         holder.thumbnail.setAlpha(1.0f);
         holder.thumbnail.setBackgroundColor(placeholderColor(file));
         holder.filename.setText(file.getName());
@@ -535,8 +604,10 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
             public void run() {
                 int position = holder.getAdapterPosition();
                 if (position == RecyclerView.NO_POSITION || position >= files.size()) return;
-                if (fastScrolling || !holder.itemView.isShown()) return;
                 MediaFile file = files.get(position);
+                boolean keepDragBitmap = dragThumbnailActive
+                        && file.getPath().equals(draggedThumbnailPath);
+                if ((!keepDragBitmap && fastScrolling) || !holder.itemView.isShown()) return;
                 int actualWidth = holder.itemView.getWidth();
                 if (actualWidth > 0) {
                     ViewGroup.LayoutParams imageLp = holder.thumbnail.getLayoutParams();
@@ -547,24 +618,38 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
                 int height = actualWidth > 0
                         ? Math.max(dp(56), Math.round(actualWidth * 0.72f))
                         : Math.max(1, holder.thumbnail.getHeight());
-                loader.loadVisible(file, holder.thumbnail, width, height);
+                if (keepDragBitmap) {
+                    loader.loadForDrag(file, holder.thumbnail, width, height);
+                } else {
+                    loader.loadVisible(file, holder.thumbnail, width, height);
+                }
             }
         });
     }
 
     @Override
     public void onViewDetachedFromWindow(@NonNull ViewHolder holder) {
-        holder.thumbnail.setImageDrawable(null);
         Object tag = holder.thumbnail.getTag();
-        if (tag != null) loader.release(tag.toString());
+        String path = tag == null ? null : tag.toString();
+        boolean keepDragged = dragThumbnailActive && path != null
+                && path.equals(draggedThumbnailPath);
+        if (!keepDragged) {
+            holder.thumbnail.setImageDrawable(null);
+            if (path != null) loader.release(path);
+        }
         super.onViewDetachedFromWindow(holder);
     }
 
     @Override
     public void onViewRecycled(@NonNull ViewHolder holder) {
-        holder.thumbnail.setImageDrawable(null);
         Object tag = holder.thumbnail.getTag();
-        if (tag != null) loader.release(tag.toString());
+        String path = tag == null ? null : tag.toString();
+        boolean keepDragged = dragThumbnailActive && path != null
+                && path.equals(draggedThumbnailPath);
+        if (!keepDragged) {
+            holder.thumbnail.setImageDrawable(null);
+            if (path != null) loader.release(path);
+        }
         super.onViewRecycled(holder);
     }
 

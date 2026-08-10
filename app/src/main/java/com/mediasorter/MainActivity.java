@@ -98,6 +98,7 @@ public class MainActivity extends Activity
     private boolean galleryDragging;
     private int galleryDragFrom = -1;
     private int galleryDragTo = -1;
+    private String galleryDraggedPath;
     private List<String> galleryDragOriginalOrder = new ArrayList<>();
     private List<MediaFile> galleryDragOriginalFiles = new ArrayList<>();
     private FrameLayout galleryRoot;
@@ -3593,6 +3594,7 @@ private Spinner makeSpinner(String[] options) {
                     if (insertion == from) return false;
                     galleryDragTo = insertion;
                     galleryAdapter.moveItem(from, insertion);
+                    updateGalleryDragThumbnailWindow();
                     return true;
                 }
 
@@ -3899,6 +3901,20 @@ private Spinner makeSpinner(String[] options) {
         galleryCountLabel.setText(fullList.size() + " files");
     }
 
+    private void updateGalleryDragThumbnailWindow() {
+        if (!galleryDragging || galleryBrowser == null || galleryAdapter == null) return;
+        List<MediaFile> files = galleryAdapter.getFiles();
+        if (files.isEmpty()) return;
+        int center = Math.max(0, Math.min(files.size() - 1, galleryDragTo));
+        int start = Math.max(0, center - 3);
+        int end = Math.min(files.size() - 1, center + 3);
+        List<String> paths = new ArrayList<>();
+        for (int i = start; i <= end; i++) {
+            paths.add(files.get(i).getPath());
+        }
+        galleryAdapter.updateDragThumbnailWindow(galleryBrowser, paths, galleryDraggedPath);
+    }
+
     private void updateGalleryScrollVelocity(int dx, int dy) {
         long now = System.currentTimeMillis();
         long elapsed = galleryLastScrollTime == 0 ? 0 : now - galleryLastScrollTime;
@@ -3937,8 +3953,9 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void updateGalleryMemoryWindow() {
-        if (!galleryModeActive || galleryBrowser == null || galleryLayoutManager == null
-                || galleryThumbnailLoader == null || galleryAdapter == null) return;
+        if (!galleryModeActive || galleryDragging || galleryBrowser == null
+                || galleryLayoutManager == null || galleryThumbnailLoader == null
+                || galleryAdapter == null) return;
         int first = galleryLayoutManager.findFirstVisibleItemPosition();
         int last = galleryLayoutManager.findLastVisibleItemPosition();
         if (first == RecyclerView.NO_POSITION || last == RecyclerView.NO_POSITION) return;
@@ -4118,12 +4135,15 @@ private Spinner makeSpinner(String[] options) {
         galleryDragging = true;
         galleryDragFrom = holder.getAdapterPosition();
         galleryDragTo = galleryDragFrom;
+        MediaFile draggedFile = galleryAdapter.getFile(galleryDragFrom);
+        galleryDraggedPath = draggedFile == null ? null : draggedFile.getPath();
         galleryDragOriginalOrder.clear();
         galleryDragOriginalFiles = galleryAdapter.getFiles();
         for (MediaFile file : galleryDragOriginalFiles) {
             galleryDragOriginalOrder.add(file.getPath());
         }
         galleryItemTouchHelper.startDrag(holder);
+        updateGalleryDragThumbnailWindow();
     }
 
     private void finishGalleryDrag(GalleryAdapter.ViewHolder holder) {
@@ -4150,6 +4170,11 @@ private Spinner makeSpinner(String[] options) {
             }
             renameGalleryManualRange(affected);
         }
+        if (galleryAdapter != null) {
+            galleryAdapter.clearDragThumbnailWindow();
+            galleryAdapter.reloadVisibleThumbnails(galleryBrowser);
+        }
+        galleryDraggedPath = null;
         galleryDragging = false;
         galleryDragFrom = -1;
         galleryDragTo = -1;

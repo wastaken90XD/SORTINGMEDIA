@@ -54,6 +54,7 @@ public class GalleryThumbnailLoader {
     private final Map<String, Bitmap> retained = new HashMap<>();
     private final Set<String> allowedPaths = new HashSet<>();
     private final Set<String> visiblePaths = new HashSet<>();
+    private final Set<String> dragPaths = new HashSet<>();
     private final Set<String> failedPaths = new HashSet<>();
     private final Object cacheLock = new Object();
 
@@ -146,6 +147,7 @@ public class GalleryThumbnailLoader {
         if (visible != null) nextVisible.addAll(visible);
 
         synchronized (cacheLock) {
+            nextAllowed.addAll(dragPaths);
             allowedPaths.clear();
             allowedPaths.addAll(nextAllowed);
             visiblePaths.clear();
@@ -168,8 +170,42 @@ public class GalleryThumbnailLoader {
         }
     }
 
-    public boolean hasFailed(String path) {
-        synchronized (cacheLock) { return failedPaths.contains(path); }
+    public void setDragPaths(List<String> paths) {
+        Set<String> next = new HashSet<>();
+        Set<String> removed = new HashSet<>();
+        if (paths != null) next.addAll(paths);
+        synchronized (cacheLock) {
+            for (String old : dragPaths) {
+                if (!next.contains(old)) {
+                    retained.remove(old);
+                    removed.add(old);
+                    if (!visiblePaths.contains(old)) allowedPaths.remove(old);
+                }
+            }
+            dragPaths.clear();
+            dragPaths.addAll(next);
+            allowedPaths.addAll(next);
+        }
+        for (String path : removed) {
+            Future<?> task = inFlight.remove(path);
+            if (task != null) task.cancel(false);
+        }
+    }
+
+    public void clearDragPaths() {
+        Set<String> cleared = new HashSet<>();
+        synchronized (cacheLock) {
+            for (String path : dragPaths) {
+                retained.remove(path);
+                cleared.add(path);
+                if (!visiblePaths.contains(path)) allowedPaths.remove(path);
+            }
+            dragPaths.clear();
+        }
+        for (String path : cleared) {
+            Future<?> task = inFlight.remove(path);
+            if (task != null) task.cancel(false);
+        }
     }
 
     /**
@@ -179,11 +215,24 @@ public class GalleryThumbnailLoader {
      */
     public void loadVisible(final MediaFile file, final ImageView target,
                             final int requestedWidth, final int requestedHeight) {
+        loadInternal(file, target, requestedWidth, requestedHeight, false);
+    }
+
+    /** Loads a drag-window cell even while normal scroll decoding is suspended. */
+    public void loadForDrag(final MediaFile file, final ImageView target,
+                            final int requestedWidth, final int requestedHeight) {
+        loadInternal(file, target, requestedWidth, requestedHeight, true);
+    }
+
+    private void loadInternal(final MediaFile file, final ImageView target,
+                              final int requestedWidth, final int requestedHeight,
+                              final boolean dragLoad) {
         if (file == null || target == null) return;
         final String path = file.getPath();
         if (path == null || path.isEmpty()) return;
-        if (scrollSuspended) return;
-        if (!isActuallyVisible(target)) return;
+        if (!dragLoad && scrollSuspended) return;
+        if (!target.isAttachedToWindow()) return;
+        if (!dragLoad && !isActuallyVisible(target)) return;
         if (availableHeap() < MIN_HEAP_BYTES) {
             handleLowHeap();
             return;
@@ -191,14 +240,13 @@ public class GalleryThumbnailLoader {
 
         synchronized (cacheLock) {
             allowedPaths.add(path);
-            visiblePaths.add(path);
+            if (!dragLoad) visiblePaths.add(path);
             if (failedPaths.contains(path)) return;
             final Bitmap cached = retained.get(path);
             if (cached != null && !cached.isRecycled()) {
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
-                        if (path.equals(target.getTag())
-                                && target.isAttachedToWindow()) {
+                        if (path.equals(target.getTag()) && target.isAttachedToWindow()) {
                             setBitmap(target, path, cached);
                         }
                     }
@@ -215,6 +263,32 @@ public class GalleryThumbnailLoader {
             public void run() {
                 Bitmap bitmap = decodeWithRetry(file, width, height);
                 finishVisible(path, target, bitmap);
+            }
+        });
+        inFlight.put(path, task);
+    }
+
+    /** Decode a drag-window bitmap immediately, even without an attached cell. */
+    public void preloadForDrag(final MediaFile file, final int requestedWidth,
+                               final int requestedHeight) {
+        if (file == null || file.getPath() == null) return;
+        final String path = file.getPath();
+        if (inFlight.containsKey(path)) return;
+        synchronized (cacheLock) {
+            if (!dragPaths.contains(path) || failedPaths.contains(path)
+                    || retained.containsKey(path)) return;
+        }
+        final int width = Math.max(1, requestedWidth);
+        final int height = Math.max(1, requestedHeight);
+        Future<?> task = executor.submit(new Runnable() {
+            @Override public void run() {
+                Bitmap bitmap = decodeWithRetry(file, width, height);
+                if (bitmap != null) {
+                    synchronized (cacheLock) {
+                        if (dragPaths.contains(path)) putRetained(path, bitmap);
+                    }
+                }
+                inFlight.remove(path);
             }
         });
         inFlight.put(path, task);
