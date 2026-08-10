@@ -325,7 +325,7 @@ public class MainActivity extends Activity
         groupManager    = new GroupManager();
         cacheManager    = new CacheManager(this);
         thumbnailLoader = new ThumbnailLoader(this);
-        sortManager     = new SortManager();
+        sortManager     = new SortManager(this);
         fileStatus      = new FileStatus(this);
         sortManager.setFileStatus(fileStatus);
         filterManager   = new FilterManager(fileStatus);
@@ -553,7 +553,9 @@ public class MainActivity extends Activity
 
         btnSort = findViewById(R.id.btnSort);
         btnSort.setText(sortManager.getLabel());
-        btnSort.setOnClickListener(v -> showSortMenu(v));
+        btnSort.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { showSortMenu(view); }
+        });
 
         btnFilter = findViewById(R.id.btnFilter);
         btnFilter.setText(filterManager.getLabel());
@@ -1696,35 +1698,342 @@ private Spinner makeSpinner(String[] options) {
     // ── Sort / Filter / Group ─────────────────────────────────────────────────
 
     private void showSortMenu(View anchor) {
-        if (galleryModeActive) {
-            showGallerySortMenu(anchor);
+        showSortBuilder();
+    }
+
+    private void showSortBuilder() {
+        final List<SortManager.SortCriterion> working = new ArrayList<>();
+        for (SortManager.SortCriterion criterion : sortManager.getSortSequence()) {
+            working.add(criterion.copy());
+        }
+        final List<String> workingTagRules = sortManager.getTagRules();
+
+        final LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(20, 8, 20, 4);
+        final LinearLayout rows = new LinearLayout(this);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        content.addView(rows);
+
+        final ScrollView scroll = new ScrollView(this);
+        scroll.addView(content);
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Sort order")
+                .setView(scroll)
+                .setPositiveButton("Apply", null)
+                .setNegativeButton("Cancel", null)
+                .create();
+
+        final Runnable[] render = new Runnable[1];
+        render[0] = new Runnable() {
+            @Override public void run() {
+                renderSortBuilderRows(rows, working, render[0]);
+            }
+        };
+        render[0].run();
+
+        Button add = new Button(this);
+        add.setText("Add Criterion");
+        add.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                showSortCriterionPicker(working, workingTagRules, render[0]);
+            }
+        });
+        content.addView(add);
+
+        Button clear = new Button(this);
+        clear.setText("Clear All");
+        clear.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                working.clear();
+                render[0].run();
+            }
+        });
+        content.addView(clear);
+
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override public void onShow(DialogInterface d) {
+                Button apply = dialog.getButton(DialogInterface.BUTTON_POSITIVE);
+                apply.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View view) {
+                        sortManager.saveSortSequence(working);
+                        sortManager.saveTagRules(workingTagRules);
+                        btnSort.setText(sortManager.getLabel());
+                        scheduleRefresh();
+                        dialog.dismiss();
+                    }
+                });
+            }
+        });
+        dialog.show();
+    }
+
+    private void renderSortBuilderRows(final LinearLayout rows,
+                                       final List<SortManager.SortCriterion> working,
+                                       final Runnable render) {
+        rows.removeAllViews();
+        if (working.isEmpty()) {
+            TextView empty = makeLabel("No criteria. Apply uses Name A-Z.");
+            rows.addView(empty);
             return;
         }
-        PopupMenu menu = new PopupMenu(this, anchor);
-        menu.getMenu().add("Name A-Z");
-        menu.getMenu().add("Name Z-A");
-        menu.getMenu().add("Size ↑");
-        menu.getMenu().add("Size ↓");
-        menu.getMenu().add("Date ↑");
-        menu.getMenu().add("Date ↓");
-        menu.getMenu().add("Type");
-        menu.getMenu().add("Shuffle");
-        menu.setOnMenuItemClickListener(item -> {
-            switch (item.getTitle().toString()) {
-                case "Name A-Z": sortManager.setSortBy(SortManager.SortBy.NAME_ASC);  break;
-                case "Name Z-A": sortManager.setSortBy(SortManager.SortBy.NAME_DESC); break;
-                case "Size ↑":   sortManager.setSortBy(SortManager.SortBy.SIZE_ASC);  break;
-                case "Size ↓":   sortManager.setSortBy(SortManager.SortBy.SIZE_DESC); break;
-                case "Date ↑":   sortManager.setSortBy(SortManager.SortBy.DATE_ASC);  break;
-                case "Date ↓":   sortManager.setSortBy(SortManager.SortBy.DATE_DESC); break;
-                case "Type":     sortManager.setSortBy(SortManager.SortBy.TYPE);      break;
-                case "Shuffle":  sortManager.setSortBy(SortManager.SortBy.SHUFFLE);   break;
+        for (int i = 0; i < working.size(); i++) {
+            addSortBuilderRow(rows, working, i, render);
+        }
+    }
+
+    private void addSortBuilderRow(LinearLayout rows,
+                                   final List<SortManager.SortCriterion> working,
+                                   final int index,
+                                   final Runnable render) {
+        final SortManager.SortCriterion criterion = working.get(index);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, 3, 0, 3);
+
+        TextView name = makeLabel((index + 1) + ". "
+                + SortManager.criterionLabel(criterion.id));
+        name.setLayoutParams(new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(name);
+
+        Button direction = makeSortBuilderButton(
+                SortManager.directionLabel(criterion.id, criterion.direction));
+        direction.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                criterion.direction = SortManager.toggleDirection(
+                        criterion.id, criterion.direction);
+                render.run();
             }
-            btnSort.setText(sortManager.getLabel());
-            scheduleRefresh();
-            return true;
         });
-        menu.show();
+        row.addView(direction);
+
+        Button up = makeSortBuilderButton("Up");
+        up.setEnabled(index > 0);
+        up.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                if (index <= 0) return;
+                SortManager.SortCriterion previous = working.get(index - 1);
+                working.set(index - 1, criterion);
+                working.set(index, previous);
+                render.run();
+            }
+        });
+        row.addView(up);
+
+        Button down = makeSortBuilderButton("Down");
+        down.setEnabled(index < working.size() - 1);
+        down.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                if (index >= working.size() - 1) return;
+                SortManager.SortCriterion next = working.get(index + 1);
+                working.set(index + 1, criterion);
+                working.set(index, next);
+                render.run();
+            }
+        });
+        row.addView(down);
+
+        Button remove = makeSortBuilderButton("Remove");
+        remove.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                working.remove(index);
+                render.run();
+            }
+        });
+        row.addView(remove);
+        rows.addView(row);
+    }
+
+    private Button makeSortBuilderButton(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setTextSize(10f);
+        button.setAllCaps(false);
+        return button;
+    }
+
+    private void showSortCriterionPicker(final List<SortManager.SortCriterion> working,
+                                         final List<String> tagRules,
+                                         final Runnable render) {
+        final String[] labels = {
+                "Name", "Date", "Size", "File type", "Tag count",
+                "First tag value", "Tag rule match", "Flagged status",
+                "Skip status", "Done status", "Manual order", "Random shuffle"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("Add criterion")
+                .setItems(labels, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        String id = sortCriterionId(which);
+                        if (SortManager.RANDOM.equals(id)
+                                && containsSortCriterion(working, SortManager.RANDOM)) {
+                            return;
+                        }
+                        final SortManager.SortCriterion added = new SortManager.SortCriterion(
+                                id, SortManager.defaultDirection(id));
+                        working.add(added);
+                        if (SortManager.TAG_RULE_MATCH.equals(id)) {
+                            showSortTagRulePicker(tagRules, render);
+                        } else {
+                            render.run();
+                        }
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private String sortCriterionId(int index) {
+        switch (index) {
+            case 1:  return SortManager.DATE;
+            case 2:  return SortManager.SIZE;
+            case 3:  return SortManager.TYPE;
+            case 4:  return SortManager.TAG_COUNT;
+            case 5:  return SortManager.FIRST_TAG;
+            case 6:  return SortManager.TAG_RULE_MATCH;
+            case 7:  return SortManager.FLAGGED;
+            case 8:  return SortManager.SKIPPED;
+            case 9:  return SortManager.DONE;
+            case 10: return SortManager.MANUAL_ORDER;
+            case 11: return SortManager.RANDOM;
+            default: return SortManager.NAME;
+        }
+    }
+
+    private boolean containsSortCriterion(List<SortManager.SortCriterion> list, String id) {
+        for (SortManager.SortCriterion criterion : list) {
+            if (criterion != null && id.equals(criterion.id)) return true;
+        }
+        return false;
+    }
+
+    private void showSortTagRulePicker(final List<String> parentRules,
+                                       final Runnable renderBuilder) {
+        final List<String> rules = new ArrayList<>(parentRules);
+        final LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(20, 8, 20, 4);
+        final LinearLayout rows = new LinearLayout(this);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        content.addView(rows);
+
+        Button addTag = new Button(this);
+        addTag.setText("Add tag from picker");
+        content.addView(addTag);
+        Button clear = new Button(this);
+        clear.setText("Clear tag rule");
+        content.addView(clear);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Tag rule order")
+                .setView(content)
+                .setPositiveButton("Save", null)
+                .setNegativeButton("Cancel", null)
+                .create();
+        final Runnable[] render = new Runnable[1];
+        render[0] = new Runnable() {
+            @Override public void run() {
+                renderSortTagRuleRows(rows, rules, render[0]);
+            }
+        };
+        render[0].run();
+
+        addTag.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                showSortTagChoice(rules, render[0]);
+            }
+        });
+        clear.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                rules.clear();
+                render[0].run();
+            }
+        });
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override public void onShow(DialogInterface d) {
+                dialog.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener(
+                        new View.OnClickListener() {
+                            @Override public void onClick(View view) {
+                                parentRules.clear();
+                                parentRules.addAll(rules);
+                                renderBuilder.run();
+                                dialog.dismiss();
+                            }
+                        });
+            }
+        });
+        dialog.show();
+    }
+
+    private void renderSortTagRuleRows(LinearLayout rows, final List<String> rules,
+                                       final Runnable render) {
+        rows.removeAllViews();
+        if (rules.isEmpty()) {
+            rows.addView(makeLabel("No tag rules. Unmatched files rank last."));
+            return;
+        }
+        for (int i = 0; i < rules.size(); i++) {
+            final int index = i;
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            TextView label = makeLabel((i + 1) + ". " + rules.get(i));
+            label.setLayoutParams(new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            row.addView(label);
+            Button up = makeSortBuilderButton("Up");
+            up.setEnabled(i > 0);
+            up.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View view) {
+                    if (index == 0) return;
+                    String previous = rules.get(index - 1);
+                    rules.set(index - 1, rules.get(index));
+                    rules.set(index, previous);
+                    render.run();
+                }
+            });
+            row.addView(up);
+            Button down = makeSortBuilderButton("Down");
+            down.setEnabled(i < rules.size() - 1);
+            down.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View view) {
+                    if (index >= rules.size() - 1) return;
+                    String next = rules.get(index + 1);
+                    rules.set(index + 1, rules.get(index));
+                    rules.set(index, next);
+                    render.run();
+                }
+            });
+            row.addView(down);
+            Button remove = makeSortBuilderButton("Remove");
+            remove.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View view) {
+                    rules.remove(index);
+                    render.run();
+                }
+            });
+            row.addView(remove);
+            rows.addView(row);
+        }
+    }
+
+    private void showSortTagChoice(final List<String> rules, final Runnable render) {
+        List<Tag> tags = tagManager.getAllTags();
+        final String[] names = new String[tags.size()];
+        for (int i = 0; i < tags.size(); i++) names[i] = tags.get(i).getName();
+        new AlertDialog.Builder(this)
+                .setTitle("Add tag to rule")
+                .setItems(names, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        if (which >= 0 && which < names.length && !rules.contains(names[which])) {
+                            rules.add(names[which]);
+                            render.run();
+                        }
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void showFilterMenu(View anchor) {
@@ -3358,10 +3667,6 @@ private Spinner makeSpinner(String[] options) {
 
     private void setGalleryMode(boolean active, boolean userInitiated) {
         if (active && !userInitiated) loadGallerySortPreference();
-        if (active && userInitiated && sortManager != null) {
-            galleryPrefs().edit().putString("gallery_sort",
-                    sortManager.getCurrent().name()).apply();
-        }
         galleryModeActive = active;
         galleryPrefs().edit().putBoolean("gallery_mode_active", active).apply();
         TextView empty = findViewById(R.id.emptyStateView);
@@ -3410,12 +3715,7 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void loadGallerySortPreference() {
-        String saved = galleryPrefs().getString("gallery_sort", "NAME_ASC");
-        try {
-            sortManager.setSortBy(SortManager.SortBy.valueOf(saved));
-        } catch (Exception ignored) {
-            sortManager.setSortBy(SortManager.SortBy.NAME_ASC);
-        }
+        sortManager.reloadSequence();
         if (btnSort != null) btnSort.setText(sortManager.getLabel());
     }
 
@@ -3632,8 +3932,7 @@ private Spinner makeSpinner(String[] options) {
             galleryManualUndo.push(new ArrayList<>(galleryDragOriginalFiles));
             List<MediaFile> reordered = galleryAdapter.getFiles();
             indexer.updateManualOrder(reordered);
-            sortManager.setSortBy(SortManager.SortBy.MANUAL_ORDER);
-            galleryPrefs().edit().putString("gallery_sort", SortManager.SortBy.MANUAL_ORDER.name()).apply();
+            sortManager.setSingleCriterion(SortManager.MANUAL_ORDER, "ASC");
             btnSort.setText(sortManager.getLabel());
             final List<MediaFile> affected = new ArrayList<>();
             int low = Math.min(galleryDragFrom, galleryDragTo);
@@ -3906,7 +4205,7 @@ private Spinner makeSpinner(String[] options) {
             result = mediaAdapter != null
                     ? mediaAdapter.getSelectedFiles() : new ArrayList<MediaFile>();
         }
-        if (sortManager != null && sortManager.getCurrent() == SortManager.SortBy.MANUAL_ORDER) {
+        if (sortManager != null && sortManager.isManualOrderActive()) {
             sortManager.sort(result);
         }
         return result;
@@ -4150,40 +4449,6 @@ private Spinner makeSpinner(String[] options) {
             } catch (Exception ignored) {}
         }
         return count;
-    }
-
-    private void showGallerySortMenu(View anchor) {
-        PopupMenu menu = new PopupMenu(this, anchor);
-        final String[] labels = {
-                "Manual order", "Name A-Z", "Name Z-A", "Date newest", "Date oldest",
-                "Size largest", "Size smallest", "File type", "Tag count most",
-                "Tag count least", "Flagged first", "Untagged first", "Random shuffle"
-        };
-        for (String label : labels) menu.getMenu().add(label);
-        menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
-            @Override public boolean onMenuItemClick(android.view.MenuItem item) {
-                String label = item.getTitle().toString();
-                SortManager.SortBy sort = SortManager.SortBy.NAME_ASC;
-                if ("Manual order".equals(label)) sort = SortManager.SortBy.MANUAL_ORDER;
-                else if ("Name Z-A".equals(label)) sort = SortManager.SortBy.NAME_DESC;
-                else if ("Date newest".equals(label)) sort = SortManager.SortBy.DATE_DESC;
-                else if ("Date oldest".equals(label)) sort = SortManager.SortBy.DATE_ASC;
-                else if ("Size largest".equals(label)) sort = SortManager.SortBy.SIZE_DESC;
-                else if ("Size smallest".equals(label)) sort = SortManager.SortBy.SIZE_ASC;
-                else if ("File type".equals(label)) sort = SortManager.SortBy.TYPE;
-                else if ("Tag count most".equals(label)) sort = SortManager.SortBy.TAG_COUNT_DESC;
-                else if ("Tag count least".equals(label)) sort = SortManager.SortBy.TAG_COUNT_ASC;
-                else if ("Flagged first".equals(label)) sort = SortManager.SortBy.FLAGGED_FIRST;
-                else if ("Untagged first".equals(label)) sort = SortManager.SortBy.UNTAGGED_FIRST;
-                else if ("Random shuffle".equals(label)) sort = SortManager.SortBy.SHUFFLE;
-                sortManager.setSortBy(sort);
-                galleryPrefs().edit().putString("gallery_sort", sort.name()).apply();
-                btnSort.setText(sortManager.getLabel());
-                scheduleRefresh();
-                return true;
-            }
-        });
-        menu.show();
     }
 
     private void undoLastGalleryManualOrder() {

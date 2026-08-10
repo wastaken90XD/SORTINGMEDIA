@@ -49,6 +49,7 @@ public class SettingsActivity extends Activity {
     // View references for onResume re-read
     private CheckBox precacheCheck, videoAutoplayCheck, videoLoopCheck;
     private View precacheRadiusRow, videoLoopRow;
+    private boolean refreshingResumeViews;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -68,20 +69,36 @@ public class SettingsActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        // Re-read settings state
+        // Re-read settings state without replaying listeners or requesting a
+        // layout when the current views already match the saved values.
         if (settingsPrefs == null) {
             settingsPrefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
         }
-        if (precacheCheck != null && precacheRadiusRow != null) {
-            boolean precacheOn = settingsPrefs.getBoolean("precache_enabled", true);
-            precacheCheck.setChecked(precacheOn);
-            precacheRadiusRow.setVisibility(precacheOn ? View.VISIBLE : View.GONE);
+        refreshingResumeViews = true;
+        try {
+            if (precacheCheck != null && precacheRadiusRow != null) {
+                boolean precacheOn = settingsPrefs.getBoolean("precache_enabled", true);
+                if (precacheCheck.isChecked() != precacheOn) {
+                    precacheCheck.setChecked(precacheOn);
+                }
+                setVisibilityIfChanged(precacheRadiusRow,
+                        precacheOn ? View.VISIBLE : View.GONE);
+            }
+            if (videoAutoplayCheck != null && videoLoopRow != null) {
+                boolean autoplayOn = settingsPrefs.getBoolean("video_autoplay", false);
+                if (videoAutoplayCheck.isChecked() != autoplayOn) {
+                    videoAutoplayCheck.setChecked(autoplayOn);
+                }
+                setVisibilityIfChanged(videoLoopRow,
+                        autoplayOn ? View.VISIBLE : View.GONE);
+            }
+        } finally {
+            refreshingResumeViews = false;
         }
-        if (videoAutoplayCheck != null && videoLoopRow != null) {
-            boolean autoplayOn = settingsPrefs.getBoolean("video_autoplay", false);
-            videoAutoplayCheck.setChecked(autoplayOn);
-            videoLoopRow.setVisibility(autoplayOn ? View.VISIBLE : View.GONE);
-        }
+    }
+
+    private void setVisibilityIfChanged(View view, int visibility) {
+        if (view.getVisibility() != visibility) view.setVisibility(visibility);
     }
 
     private void buildSettings() {
@@ -840,8 +857,11 @@ public class SettingsActivity extends Activity {
 
         precacheCheck = (CheckBox) makeCheckBoxRow("Enable precache", precacheOn, new OnCheckedChangeListener() {
             @Override public void onChecked(boolean checked) {
-                saveBoolean("precache_enabled", checked);
-                if (precacheRadiusRow != null) precacheRadiusRow.setVisibility(checked ? View.VISIBLE : View.GONE);
+                if (!refreshingResumeViews) saveBoolean("precache_enabled", checked);
+                if (precacheRadiusRow != null) {
+                    setVisibilityIfChanged(precacheRadiusRow,
+                            checked ? View.VISIBLE : View.GONE);
+                }
             }
         }).findViewById(R.id.settingCheckbox);
 
@@ -858,8 +878,11 @@ public class SettingsActivity extends Activity {
 
         videoAutoplayCheck = (CheckBox) makeCheckBoxRow("Video autoplay", autoplayOn, new OnCheckedChangeListener() {
             @Override public void onChecked(boolean checked) {
-                saveBoolean("video_autoplay", checked);
-                if (videoLoopRow != null) videoLoopRow.setVisibility(checked ? View.VISIBLE : View.GONE);
+                if (!refreshingResumeViews) saveBoolean("video_autoplay", checked);
+                if (videoLoopRow != null) {
+                    setVisibilityIfChanged(videoLoopRow,
+                            checked ? View.VISIBLE : View.GONE);
+                }
             }
         }).findViewById(R.id.settingCheckbox);
 
