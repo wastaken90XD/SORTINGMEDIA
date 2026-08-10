@@ -1011,16 +1011,19 @@ public class SettingsActivity extends Activity {
     // ── Helper methods for Expanded Settings ──────────────────────────────────
 
     private void saveBoolean(String key, boolean val) {
+        if (isInitializing) return;
         boolean ok = settingsPrefs.edit().putBoolean(key, val).commit();
         if (!ok) Toast.makeText(this, "Failed to save " + key, Toast.LENGTH_SHORT).show();
     }
 
     private void saveInt(String key, int val) {
+        if (isInitializing) return;
         boolean ok = settingsPrefs.edit().putInt(key, val).commit();
         if (!ok) Toast.makeText(this, "Failed to save " + key, Toast.LENGTH_SHORT).show();
     }
 
     private void saveString(String key, String val) {
+        if (isInitializing) return;
         boolean ok = settingsPrefs.edit().putString(key, val).commit();
         if (!ok) Toast.makeText(this, "Failed to save " + key, Toast.LENGTH_SHORT).show();
     }
@@ -1279,10 +1282,15 @@ public class SettingsActivity extends Activity {
         if (initialPos >= 0 && initialPos < options.length) {
             spinner.setSelection(initialPos);
         }
+        final boolean[] spinnerInitialized = {false};
         spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 if (isInitializing) return;
+                if (!spinnerInitialized[0]) {
+                    spinnerInitialized[0] = true;
+                    return;
+                }
                 listener.onSelected(options[position], position);
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
@@ -1459,10 +1467,15 @@ public class SettingsActivity extends Activity {
             });
             row.addView(btnRemove);
 
+            final boolean[] actionSpinnerInitialized = {false};
             actionSpin.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
                 public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
                     if (isInitializing) return;
+                    if (!actionSpinnerInitialized[0]) {
+                        actionSpinnerInitialized[0] = true;
+                        return;
+                    }
                     GestureSettings.GestureAction action =
                         gestureSettings.fromLabel(actionLabels[pos]);
                     boolean show = action == GestureSettings.GestureAction.APPLY_TAG;
@@ -1476,10 +1489,15 @@ public class SettingsActivity extends Activity {
                 @Override public void onNothingSelected(AdapterView<?> p) {}
             });
 
+            final boolean[] tagSpinnerInitialized = {false};
             tagSpin.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
                 public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
                     if (isInitializing) return;
+                    if (!tagSpinnerInitialized[0]) {
+                        tagSpinnerInitialized[0] = true;
+                        return;
+                    }
                     String tag = pos > 0 ? p.getItemAtPosition(pos).toString() : "";
                     steps.get(idx).tag = tag;
                     callback.set(steps);
