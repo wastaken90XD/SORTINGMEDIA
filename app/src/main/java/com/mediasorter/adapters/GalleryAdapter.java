@@ -133,6 +133,9 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
             int position = holder.getAdapterPosition();
             if (position != RecyclerView.NO_POSITION && position < files.size()) {
                 MediaFile file = files.get(position);
+                boolean alreadyLoaded = holder.thumbnail.getDrawable() != null
+                        && file.getPath().equals(holder.thumbnail.getTag());
+                if (alreadyLoaded) continue;
                 if (dragThumbnailActive && (dragThumbnailPaths.contains(file.getPath())
                         || file.getPath().equals(draggedThumbnailPath))) {
                     loader.loadForDrag(file, holder.thumbnail, width, height);
@@ -170,7 +173,9 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
                 if (file != null) holder.thumbnail.setBackgroundColor(placeholderColor(file));
                 continue;
             }
-            if (file != null) {
+            if (file != null
+                    && !(holder.thumbnail.getDrawable() != null
+                    && file.getPath().equals(holder.thumbnail.getTag()))) {
                 loader.loadForDrag(file, holder.thumbnail,
                         Math.max(1, holder.thumbnail.getWidth()),
                         Math.max(1, holder.thumbnail.getHeight()));
@@ -425,11 +430,14 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     @Override
     public void onBindViewHolder(@NonNull final ViewHolder holder, int position) {
         final MediaFile file = files.get(position);
+        Object previousTag = holder.thumbnail.getTag();
+        boolean alreadyLoaded = holder.thumbnail.getDrawable() != null
+                && file.getPath().equals(previousTag);
         holder.itemView.setTag(file.getPath());
         holder.thumbnail.setTag(file.getPath());
         boolean keepDragBitmap = dragThumbnailActive
                 && file.getPath().equals(draggedThumbnailPath);
-        if (!keepDragBitmap) holder.thumbnail.setImageDrawable(null);
+        if (!keepDragBitmap && !alreadyLoaded) holder.thumbnail.setImageDrawable(null);
         holder.thumbnail.setAlpha(1.0f);
         holder.thumbnail.setBackgroundColor(placeholderColor(file));
         holder.filename.setText(file.getName());
@@ -619,6 +627,8 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
                 int height = actualWidth > 0
                         ? Math.max(dp(56), Math.round(actualWidth * 0.72f))
                         : Math.max(1, holder.thumbnail.getHeight());
+                if (holder.thumbnail.getDrawable() != null
+                        && file.getPath().equals(holder.thumbnail.getTag())) return;
                 if (keepDragBitmap) {
                     loader.loadForDrag(file, holder.thumbnail, width, height);
                 } else {

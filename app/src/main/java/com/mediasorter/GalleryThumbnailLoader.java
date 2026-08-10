@@ -430,7 +430,7 @@ public class GalleryThumbnailLoader {
         int targetWidth = Math.max(1, width * multiplier / 2);
         int targetHeight = Math.max(1, height * multiplier / 2);
         if (file.getType() == MediaFile.Type.IMAGE) {
-            return decodeImage(file.getPath(), targetWidth, targetHeight);
+            return decodeImage(file.getPath(), targetWidth, targetHeight, width, height);
         }
         if (file.getType() == MediaFile.Type.VIDEO) {
             return decodeVideo(file.getPath(), targetWidth, targetHeight);
@@ -438,15 +438,18 @@ public class GalleryThumbnailLoader {
         return null;
     }
 
-    private Bitmap decodeImage(String path, int targetWidth, int targetHeight) {
+    private Bitmap decodeImage(String path, int targetWidth, int targetHeight,
+                               int cellWidth, int cellHeight) {
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(path, bounds);
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
 
-        int sample = 1;
-        sample = Math.max(sample, ceilRatio(bounds.outWidth, targetWidth));
-        sample = Math.max(sample, ceilRatio(bounds.outHeight, targetHeight));
+        int sample = calculateInSampleSize(bounds.outWidth, bounds.outHeight,
+                targetWidth, targetHeight);
+        Log.d(TAG, "decode image cell=" + cellWidth + "x" + cellHeight
+                + " source=" + bounds.outWidth + "x" + bounds.outHeight
+                + " sample=" + sample);
 
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sample;
@@ -493,8 +496,14 @@ public class GalleryThumbnailLoader {
         }
     }
 
-    private int ceilRatio(int value, int target) {
-        return Math.max(1, (value + target - 1) / target);
+    private int calculateInSampleSize(int sourceWidth, int sourceHeight,
+                                      int requestedWidth, int requestedHeight) {
+        int sample = 1;
+        while (sourceWidth / sample > requestedWidth
+                || sourceHeight / sample > requestedHeight) {
+            sample *= 2;
+        }
+        return Math.max(1, sample);
     }
 
     private boolean isActuallyVisible(View view) {
