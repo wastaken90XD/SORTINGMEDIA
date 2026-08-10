@@ -59,6 +59,7 @@ public class SettingsActivity extends Activity {
         folderManager   = new FolderManager(this);
         thumbnailLoader = new ThumbnailLoader(this);
         gestureSettings = new GestureSettings(this);
+        initializeTagListDefaultsIfMissing();
         tagListManager  = new TagListManager(this);
         tagManager      = new TagManager(this);
         indexer         = new MediaIndexer();
@@ -71,6 +72,23 @@ public class SettingsActivity extends Activity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus && isInitializing) isInitializing = false;
+    }
+
+    /**
+     * TagListManager historically persisted its first default list from its
+     * constructor. Keep that first-launch default explicit and one-time, while
+     * every subsequent SettingsActivity initialization remains read-only.
+     */
+    private void initializeTagListDefaultsIfMissing() {
+        SharedPreferences tagPrefs = getSharedPreferences("tag_list_prefs", MODE_PRIVATE);
+        if (tagPrefs.contains("list_count")) return;
+        tagPrefs.edit()
+                .putInt("list_count", 1)
+                .putInt("active_list", 0)
+                .putString("tag_lists_name_0", "Default")
+                .putBoolean("tag_lists_default_0", true)
+                .putString("tag_lists_tags_0", "")
+                .apply();
     }
 
     @Override
