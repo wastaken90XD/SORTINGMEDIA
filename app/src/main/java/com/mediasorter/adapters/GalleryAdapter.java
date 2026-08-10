@@ -113,10 +113,6 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
 
     public void setFastScrolling(boolean fast, int first, int last) {
         fastScrolling = fast;
-        if (getItemCount() == 0) return;
-        int start = Math.max(0, first);
-        int end = last < 0 ? getItemCount() - 1 : Math.min(getItemCount() - 1, last);
-        if (end >= start) notifyItemRangeChanged(start, end - start + 1, "gallery_scroll");
     }
 
     public boolean isFastScrolling() { return fastScrolling; }

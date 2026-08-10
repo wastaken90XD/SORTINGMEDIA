@@ -3921,10 +3921,17 @@ private Spinner makeSpinner(String[] options) {
         if (galleryThumbnailLoader != null) {
             galleryThumbnailLoader.setScrollSuspended(fast);
         }
-        if (galleryAdapter != null && galleryLayoutManager != null) {
-            int first = galleryLayoutManager.findFirstVisibleItemPosition();
-            int last = galleryLayoutManager.findLastVisibleItemPosition();
-            galleryAdapter.setFastScrolling(fast, first, last);
+        if (galleryAdapter != null && galleryLayoutManager != null
+                && galleryBrowser != null) {
+            final boolean targetFast = fast;
+            galleryBrowser.post(new Runnable() {
+                @Override public void run() {
+                    if (galleryAdapter == null || galleryLayoutManager == null) return;
+                    int first = galleryLayoutManager.findFirstVisibleItemPosition();
+                    int last = galleryLayoutManager.findLastVisibleItemPosition();
+                    galleryAdapter.setFastScrolling(targetFast, first, last);
+                }
+            });
         }
         if (!fast) updateGalleryMemoryWindow();
     }
