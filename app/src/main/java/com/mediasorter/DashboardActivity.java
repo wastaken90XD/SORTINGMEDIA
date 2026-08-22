@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.view.View;
 import android.widget.TextView;
 import com.mediasorter.models.MediaFile;
 import com.mediasorter.models.Tag;
