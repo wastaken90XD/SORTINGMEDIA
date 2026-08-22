@@ -6,6 +6,7 @@ import com.mediasorter.models.MediaFile;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -152,22 +153,24 @@ public class MediaIndexer {
 
         scanning.set(true);
         final String folderToScan = next;
-        scanExecutor.submit(() -> {
-            try {
-                doFullScan(folderToScan);
-            } catch (Throwable t) {
-                t.printStackTrace();
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
                 try {
-                    // Ensure we still notify completion to unblock UI
-                    if (listener != null) {
-                        listener.onScanComplete(new ArrayList<>(getIndex()));
-                    }
-                } catch (Exception ignored) {}
-            } finally {
-                scanning.set(false);
-                // Schedule next in queue on same executor thread to avoid stack overflow
-                // post a new check
-                scheduleNext();
+                    doFullScan(folderToScan);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                    try {
+                        // Ensure we still notify completion to unblock UI
+                        if (listener != null) {
+                            listener.onScanComplete(new ArrayList<>(getIndex()));
+                        }
+                    } catch (Exception ignored) {}
+                } finally {
+                    scanning.set(false);
+                    // Schedule next in queue on same executor thread to avoid stack overflow
+                    // post a new check
+                    scheduleNext();
+                }
             }
         });
     }
@@ -275,16 +278,18 @@ public class MediaIndexer {
 
     public void rescan(String folderPath) {
         if (folderPath == null) return;
-        scanExecutor.submit(() -> {
-            // If a full scan is queued, we still run rescan; set scanning flag for UI
-            boolean prev = scanning.getAndSet(true);
-            try {
-                doRescan(folderPath);
-            } catch (Throwable t) {
-                t.printStackTrace();
-            } finally {
-                scanning.set(false);
-                scheduleNext();
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
+                // If a full scan is queued, we still run rescan; set scanning flag for UI
+                boolean prev = scanning.getAndSet(true);
+                try {
+                    doRescan(folderPath);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                } finally {
+                    scanning.set(false);
+                    scheduleNext();
+                }
             }
         });
     }
@@ -371,15 +376,17 @@ public class MediaIndexer {
 
     public void rescanClean(String folderPath) {
         if (folderPath == null) return;
-        scanExecutor.submit(() -> {
-            scanning.getAndSet(true);
-            try {
-                doRescanClean(folderPath);
-            } catch (Throwable t) {
-                t.printStackTrace();
-            } finally {
-                scanning.set(false);
-                scheduleNext();
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
+                scanning.getAndSet(true);
+                try {
+                    doRescanClean(folderPath);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                } finally {
+                    scanning.set(false);
+                    scheduleNext();
+                }
             }
         });
     }
@@ -449,23 +456,25 @@ public class MediaIndexer {
     public void fullReset(List<String> folders) {
         // Stop queue
         synchronized (folderQueue) { folderQueue.clear(); }
-        scanExecutor.submit(() -> {
-            scanning.set(true);
-            try {
-                synchronized (index) { index.clear(); }
-                manifest.clear();
-                if (hashPrefs != null) {
-                    try { hashPrefs.edit().clear().apply(); } catch (Exception ignored) {}
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
+                scanning.set(true);
+                try {
+                    synchronized (index) { index.clear(); }
+                    manifest.clear();
+                    if (hashPrefs != null) {
+                        try { hashPrefs.edit().clear().apply(); } catch (Exception ignored) {}
+                    }
+                } finally {
+                    scanning.set(false);
                 }
-            } finally {
-                scanning.set(false);
-            }
-            // Re-queue folders after clearing
-            if (folders != null) {
-                synchronized (folderQueue) {
-                    folderQueue.addAll(folders);
+                // Re-queue folders after clearing
+                if (folders != null) {
+                    synchronized (folderQueue) {
+                        folderQueue.addAll(folders);
+                    }
+                    scheduleNext();
                 }
-                scheduleNext();
             }
         });
     }
@@ -476,35 +485,37 @@ public class MediaIndexer {
      */
     public void repairFolder(String folderPath) {
         if (folderPath == null) return;
-        scanExecutor.submit(() -> {
-            scanning.set(true);
-            try {
-                String norm = folderPath.endsWith("/") ? folderPath : folderPath + "/";
-                // Remove manifest entries for this folder
-                List<String> keysToRemove = new ArrayList<>();
-                for (String key : manifest.keySet()) {
-                    if (key.startsWith(norm)) keysToRemove.add(key);
-                }
-                for (String k : keysToRemove) {
-                    manifest.remove(k);
-                    removePersistedHash(k);
-                }
-                // Remove index entries for this folder (will be re-added)
-                List<String> idxToRemove = new ArrayList<>();
-                synchronized (index) {
-                    for (MediaFile mf : index) {
-                        if (mf.getPath().startsWith(norm)) idxToRemove.add(mf.getPath());
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
+                scanning.set(true);
+                try {
+                    String norm = folderPath.endsWith("/") ? folderPath : folderPath + "/";
+                    // Remove manifest entries for this folder
+                    List<String> keysToRemove = new ArrayList<>();
+                    for (String key : manifest.keySet()) {
+                        if (key.startsWith(norm)) keysToRemove.add(key);
                     }
-                }
-                for (String p : idxToRemove) removeFromIndex(p);
+                    for (String k : keysToRemove) {
+                        manifest.remove(k);
+                        removePersistedHash(k);
+                    }
+                    // Remove index entries for this folder (will be re-added)
+                    List<String> idxToRemove = new ArrayList<>();
+                    synchronized (index) {
+                        for (MediaFile mf : index) {
+                            if (mf.getPath().startsWith(norm)) idxToRemove.add(mf.getPath());
+                        }
+                    }
+                    for (String p : idxToRemove) removeFromIndex(p);
 
-                // Now do a clean scan
-                doFullScan(folderPath);
-            } catch (Throwable t) {
-                t.printStackTrace();
-            } finally {
-                scanning.set(false);
-                scheduleNext();
+                    // Now do a clean scan
+                    doFullScan(folderPath);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                } finally {
+                    scanning.set(false);
+                    scheduleNext();
+                }
             }
         });
     }
@@ -542,6 +553,12 @@ public class MediaIndexer {
     private MediaFile buildLight(File f) {
         MediaFile mf = new MediaFile(f.getAbsolutePath(), f.length());
         mf.setDateAdded(f.lastModified());
+        if (appContext != null) {
+            String key = "manual_order:" + f.getAbsolutePath();
+            int order = appContext.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE)
+                    .getInt(key, -1);
+            mf.setManualOrder(order);
+        }
         try {
             List<String> existingTags = XmpReader.readTags(f.getAbsolutePath());
             for (String tag : existingTags) mf.addTag(tag);
@@ -627,6 +644,35 @@ public class MediaIndexer {
 
     private boolean isInIndex(String path) {
         return findInIndex(path) != null;
+    }
+
+    /**
+     * Stores the manual order on the existing in-memory index. Only paths whose
+     * integer position changed are written to SharedPreferences; the same
+     * settings preference file is already covered by SettingsExporter.
+     */
+    public void updateManualOrder(List<MediaFile> ordered) {
+        if (ordered == null || ordered.isEmpty()) return;
+        android.content.SharedPreferences prefs = appContext == null ? null
+                : appContext.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
+        android.content.SharedPreferences.Editor editor = prefs == null ? null : prefs.edit();
+        Map<String, Integer> positions = new LinkedHashMap<>();
+        for (int i = 0; i < ordered.size(); i++) {
+            MediaFile file = ordered.get(i);
+            if (file != null && file.getPath() != null) positions.put(file.getPath(), i);
+        }
+        synchronized (index) {
+            for (MediaFile file : index) {
+                Integer position = positions.get(file.getPath());
+                if (position != null && file.getManualOrder() != position) {
+                    file.setManualOrder(position);
+                    if (editor != null) {
+                        editor.putInt("manual_order:" + file.getPath(), position);
+                    }
+                }
+            }
+        }
+        if (editor != null) editor.apply();
     }
 
     // ── Query helpers ─────────────────────────────────────────────────────────

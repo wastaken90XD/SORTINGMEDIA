@@ -117,38 +117,42 @@ public class ThumbnailLoader {
 
         cancel(path);
 
-        Future<?> task = executor.submit(() -> {
-            Bitmap bmp     = null;
-            int    quality = getQuality();
+        Future<?> task = executor.submit(new Runnable() {
+            @Override public void run() {
+                Bitmap bmp     = null;
+                int    quality = getQuality();
 
-            // Disk cache
-            File thumbFile = diskCache.getThumbnailFile(path);
-            if (thumbFile.exists()) {
-                bmp = BitmapFactory.decodeFile(thumbFile.getAbsolutePath());
-            }
-
-            // Generate
-            if (bmp == null) {
-                bmp = generate(file, quality);
-                if (bmp != null) saveToDisk(bmp, thumbFile);
-            }
-
-            if (bmp != null) putInMemCache(path, bmp);
-
-            final Bitmap finalBmp = bmp;
-            mainHandler.post(() -> {
-                if (path.equals(target.getTag())) {
-                    if (finalBmp != null && !finalBmp.isRecycled()) {
-                        target.setImageBitmap(finalBmp);
-                        target.setBackgroundColor(0x00000000);
-                    } else {
-                        target.setImageResource(
-                            android.R.drawable.ic_menu_report_image);
-                    }
+                // Disk cache
+                File thumbFile = diskCache.getThumbnailFile(path);
+                if (thumbFile.exists()) {
+                    bmp = BitmapFactory.decodeFile(thumbFile.getAbsolutePath());
                 }
-            });
 
-            inFlight.remove(path);
+                // Generate
+                if (bmp == null) {
+                    bmp = generate(file, quality);
+                    if (bmp != null) saveToDisk(bmp, thumbFile);
+                }
+
+                if (bmp != null) putInMemCache(path, bmp);
+
+                final Bitmap finalBmp = bmp;
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        if (path.equals(target.getTag())) {
+                            if (finalBmp != null && !finalBmp.isRecycled()) {
+                                target.setImageBitmap(finalBmp);
+                                target.setBackgroundColor(0x00000000);
+                            } else {
+                                target.setImageResource(
+                                    android.R.drawable.ic_menu_report_image);
+                            }
+                        }
+                    }
+                });
+
+                inFlight.remove(path);
+            }
         });
 
         inFlight.put(path, task);
@@ -169,26 +173,28 @@ public void precache(List<MediaFile> files) {
         // Already being loaded? skip
         if (inFlight.containsKey(path)) continue;
 
-        Future<?> task = executor.submit(() -> {
-            Bitmap bmp = null;
-            int quality = getQuality();
+        Future<?> task = executor.submit(new Runnable() {
+            @Override public void run() {
+                Bitmap bmp = null;
+                int quality = getQuality();
 
-            // Try disk cache first
-            File thumbFile = diskCache.getThumbnailFile(path);
-            if (thumbFile.exists()) {
-                bmp = BitmapFactory.decodeFile(thumbFile.getAbsolutePath());
+                // Try disk cache first
+                File thumbFile = diskCache.getThumbnailFile(path);
+                if (thumbFile.exists()) {
+                    bmp = BitmapFactory.decodeFile(thumbFile.getAbsolutePath());
+                }
+
+                // Generate if needed
+                if (bmp == null) {
+                    bmp = generate(file, quality);
+                    if (bmp != null) saveToDisk(bmp, thumbFile);
+                }
+
+                // Store in memory cache (does not recycle, safe)
+                if (bmp != null) putInMemCache(path, bmp);
+
+                inFlight.remove(path);
             }
-
-            // Generate if needed
-            if (bmp == null) {
-                bmp = generate(file, quality);
-                if (bmp != null) saveToDisk(bmp, thumbFile);
-            }
-
-            // Store in memory cache (does not recycle, safe)
-            if (bmp != null) putInMemCache(path, bmp);
-
-            inFlight.remove(path);
         });
 
         inFlight.put(path, task);
@@ -350,13 +356,13 @@ public void precache(List<MediaFile> files) {
             if (frame == null) return null;
             int w = frame.getWidth();
             int h = frame.getHeight();
-            if (w <= 0 || h <= 0) { frame.recycle(); return null; }
+            if (w <= 0 || h <= 0) { frame = null; return null; }
             if (w <= size && h <= size) return frame;
             float ratio = Math.min((float) size / w, (float) size / h);
             int nw = Math.max(1, Math.round(w * ratio));
             int nh = Math.max(1, Math.round(h * ratio));
             Bitmap scaled = Bitmap.createScaledBitmap(frame, nw, nh, true);
-            frame.recycle();
+            frame = null;
             return scaled;
         } catch (OutOfMemoryError e) {
             return null;

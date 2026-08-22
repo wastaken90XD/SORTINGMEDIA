@@ -594,7 +594,6 @@ public class PreviewManager {
                         @Override
                         public void run() {
                             if (released || !path.equals(currentPath)) {
-                                if (bmp != null && !bmp.isRecycled()) bmp.recycle();
                                 return;
                             }
                             if (bmp != null) {
@@ -646,11 +645,7 @@ public class PreviewManager {
     }
 
     private void replaceOwnBitmap(Bitmap next) {
-        Bitmap old = ownBitmap;
         ownBitmap = next;
-        if (old != null && !old.isRecycled() && old != next) {
-            old.recycle();
-        }
     }
 
     private int calcSampleSize(BitmapFactory.Options opts, int reqW, int reqH) {
@@ -751,9 +746,7 @@ public class PreviewManager {
         released = true;
         stopMedia();
         mainHandler.removeCallbacks(hideTintRunnable);
-        Bitmap old = ownBitmap;
         ownBitmap = null;
-        if (old != null && !old.isRecycled()) old.recycle();
         executor.shutdown();
     }
 }

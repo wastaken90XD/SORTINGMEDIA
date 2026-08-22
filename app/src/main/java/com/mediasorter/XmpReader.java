@@ -115,7 +115,7 @@ public class XmpReader {
 
         Matcher m = TAG_PATTERN.matcher(subject);
         while (m.find()) {
-            String tag = m.group(1).trim();
+            String tag = TagText.plain(m.group(1));
             if (!tag.isEmpty()) tags.add(tag);
         }
 

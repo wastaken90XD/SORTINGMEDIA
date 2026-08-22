@@ -49,14 +49,18 @@ public class SettingsActivity extends Activity {
     // View references for onResume re-read
     private CheckBox precacheCheck, videoAutoplayCheck, videoLoopCheck;
     private View precacheRadiusRow, videoLoopRow;
+    private boolean refreshingResumeViews;
+    private boolean isInitializing = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        isInitializing = true;
         super.onCreate(savedInstanceState);
         cacheManager    = new CacheManager(this);
         folderManager   = new FolderManager(this);
         thumbnailLoader = new ThumbnailLoader(this);
         gestureSettings = new GestureSettings(this);
+        initializeTagListDefaultsIfMissing();
         tagListManager  = new TagListManager(this);
         tagManager      = new TagManager(this);
         indexer         = new MediaIndexer();
@@ -66,22 +70,61 @@ public class SettingsActivity extends Activity {
     }
 
     @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && isInitializing) isInitializing = false;
+    }
+
+    /**
+     * TagListManager historically persisted its first default list from its
+     * constructor. Keep that first-launch default explicit and one-time, while
+     * every subsequent SettingsActivity initialization remains read-only.
+     */
+    private void initializeTagListDefaultsIfMissing() {
+        SharedPreferences tagPrefs = getSharedPreferences("tag_list_prefs", MODE_PRIVATE);
+        if (tagPrefs.contains("list_count")) return;
+        tagPrefs.edit()
+                .putInt("list_count", 1)
+                .putInt("active_list", 0)
+                .putString("tag_lists_name_0", "Default")
+                .putBoolean("tag_lists_default_0", true)
+                .putString("tag_lists_tags_0", "")
+                .apply();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
-        // Re-read settings state
+        // Re-read settings state without replaying listeners or requesting a
+        // layout when the current views already match the saved values.
         if (settingsPrefs == null) {
             settingsPrefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
         }
-        if (precacheCheck != null && precacheRadiusRow != null) {
-            boolean precacheOn = settingsPrefs.getBoolean("precache_enabled", true);
-            precacheCheck.setChecked(precacheOn);
-            precacheRadiusRow.setVisibility(precacheOn ? View.VISIBLE : View.GONE);
+        refreshingResumeViews = true;
+        try {
+            if (precacheCheck != null && precacheRadiusRow != null) {
+                boolean precacheOn = settingsPrefs.getBoolean("precache_enabled", true);
+                if (precacheCheck.isChecked() != precacheOn) {
+                    precacheCheck.setChecked(precacheOn);
+                }
+                setVisibilityIfChanged(precacheRadiusRow,
+                        precacheOn ? View.VISIBLE : View.GONE);
+            }
+            if (videoAutoplayCheck != null && videoLoopRow != null) {
+                boolean autoplayOn = settingsPrefs.getBoolean("video_autoplay", false);
+                if (videoAutoplayCheck.isChecked() != autoplayOn) {
+                    videoAutoplayCheck.setChecked(autoplayOn);
+                }
+                setVisibilityIfChanged(videoLoopRow,
+                        autoplayOn ? View.VISIBLE : View.GONE);
+            }
+        } finally {
+            refreshingResumeViews = false;
         }
-        if (videoAutoplayCheck != null && videoLoopRow != null) {
-            boolean autoplayOn = settingsPrefs.getBoolean("video_autoplay", false);
-            videoAutoplayCheck.setChecked(autoplayOn);
-            videoLoopRow.setVisibility(autoplayOn ? View.VISIBLE : View.GONE);
-        }
+    }
+
+    private void setVisibilityIfChanged(View view, int visibility) {
+        if (view.getVisibility() != visibility) view.setVisibility(visibility);
     }
 
     private void buildSettings() {
@@ -840,8 +883,11 @@ public class SettingsActivity extends Activity {
 
         precacheCheck = (CheckBox) makeCheckBoxRow("Enable precache", precacheOn, new OnCheckedChangeListener() {
             @Override public void onChecked(boolean checked) {
-                saveBoolean("precache_enabled", checked);
-                if (precacheRadiusRow != null) precacheRadiusRow.setVisibility(checked ? View.VISIBLE : View.GONE);
+                if (!refreshingResumeViews) saveBoolean("precache_enabled", checked);
+                if (precacheRadiusRow != null) {
+                    setVisibilityIfChanged(precacheRadiusRow,
+                            checked ? View.VISIBLE : View.GONE);
+                }
             }
         }).findViewById(R.id.settingCheckbox);
 
@@ -858,8 +904,11 @@ public class SettingsActivity extends Activity {
 
         videoAutoplayCheck = (CheckBox) makeCheckBoxRow("Video autoplay", autoplayOn, new OnCheckedChangeListener() {
             @Override public void onChecked(boolean checked) {
-                saveBoolean("video_autoplay", checked);
-                if (videoLoopRow != null) videoLoopRow.setVisibility(checked ? View.VISIBLE : View.GONE);
+                if (!refreshingResumeViews) saveBoolean("video_autoplay", checked);
+                if (videoLoopRow != null) {
+                    setVisibilityIfChanged(videoLoopRow,
+                            checked ? View.VISIBLE : View.GONE);
+                }
             }
         }).findViewById(R.id.settingCheckbox);
 
@@ -942,9 +991,16 @@ public class SettingsActivity extends Activity {
         root.addView(makeTitle("Appearance"));
 
         String[] themeOptions = {"AppTheme"};
-        root.addView(makeSpinnerRow("App theme:", themeOptions, 0, new OnSpinnerSelectedListener() {
-            @Override public void onSelected(String value, int pos) { recreate(); }
-        }));
+        final boolean[] themeSpinnerReady = {false};
+        View themeSpinnerRow = makeSpinnerRow("App theme:", themeOptions, 0,
+                new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int pos) {
+                        if (isInitializing) return;
+                        if (themeSpinnerReady[0]) recreate();
+                    }
+                });
+        root.addView(themeSpinnerRow);
+        themeSpinnerReady[0] = true;
 
         root.addView(makeCheckBoxRow("Show selection order badges", settingsPrefs.getBoolean("show_seq_labels", true), new OnCheckedChangeListener() {
             @Override public void onChecked(boolean checked) { saveBoolean("show_seq_labels", checked); }
@@ -969,21 +1025,25 @@ public class SettingsActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
         setContentView(scroll);
+        isInitializing = false;
     }
 
     // ── Helper methods for Expanded Settings ──────────────────────────────────
 
     private void saveBoolean(String key, boolean val) {
+        if (isInitializing) return;
         boolean ok = settingsPrefs.edit().putBoolean(key, val).commit();
         if (!ok) Toast.makeText(this, "Failed to save " + key, Toast.LENGTH_SHORT).show();
     }
 
     private void saveInt(String key, int val) {
+        if (isInitializing) return;
         boolean ok = settingsPrefs.edit().putInt(key, val).commit();
         if (!ok) Toast.makeText(this, "Failed to save " + key, Toast.LENGTH_SHORT).show();
     }
 
     private void saveString(String key, String val) {
+        if (isInitializing) return;
         boolean ok = settingsPrefs.edit().putString(key, val).commit();
         if (!ok) Toast.makeText(this, "Failed to save " + key, Toast.LENGTH_SHORT).show();
     }
@@ -1052,6 +1112,7 @@ public class SettingsActivity extends Activity {
         cb.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                if (isInitializing) return;
                 listener.onChecked(isChecked);
             }
         });
@@ -1146,6 +1207,7 @@ public class SettingsActivity extends Activity {
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override
             public void afterTextChanged(Editable s) {
+                if (isInitializing) return;
                 String txt = s.toString().trim();
                 if (txt.isEmpty()) return;
                 try {
@@ -1161,6 +1223,7 @@ public class SettingsActivity extends Activity {
         input.setOnFocusChangeListener(new View.OnFocusChangeListener() {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
+                if (isInitializing) return;
                 if (!hasFocus) {
                     String txt = input.getText().toString().trim();
                     try {
@@ -1206,6 +1269,7 @@ public class SettingsActivity extends Activity {
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override
             public void afterTextChanged(Editable s) {
+                if (isInitializing) return;
                 listener.onChange(s.toString().trim());
             }
         });
@@ -1238,9 +1302,15 @@ public class SettingsActivity extends Activity {
         if (initialPos >= 0 && initialPos < options.length) {
             spinner.setSelection(initialPos);
         }
+        final boolean[] spinnerInitialized = {false};
         spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (isInitializing) return;
+                if (!spinnerInitialized[0]) {
+                    spinnerInitialized[0] = true;
+                    return;
+                }
                 listener.onSelected(options[position], position);
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
@@ -1384,6 +1454,7 @@ public class SettingsActivity extends Activity {
                 @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
                 @Override public void afterTextChanged(Editable s) {}
                 @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                    if (isInitializing) return;
                     String q = s.toString().toLowerCase().trim();
                     List<String> filtered = new ArrayList<>();
                     filtered.add("(no tag)");
@@ -1416,9 +1487,15 @@ public class SettingsActivity extends Activity {
             });
             row.addView(btnRemove);
 
+            final boolean[] actionSpinnerInitialized = {false};
             actionSpin.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
                 public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                    if (isInitializing) return;
+                    if (!actionSpinnerInitialized[0]) {
+                        actionSpinnerInitialized[0] = true;
+                        return;
+                    }
                     GestureSettings.GestureAction action =
                         gestureSettings.fromLabel(actionLabels[pos]);
                     boolean show = action == GestureSettings.GestureAction.APPLY_TAG;
@@ -1432,9 +1509,15 @@ public class SettingsActivity extends Activity {
                 @Override public void onNothingSelected(AdapterView<?> p) {}
             });
 
+            final boolean[] tagSpinnerInitialized = {false};
             tagSpin.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
                 public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                    if (isInitializing) return;
+                    if (!tagSpinnerInitialized[0]) {
+                        tagSpinnerInitialized[0] = true;
+                        return;
+                    }
                     String tag = pos > 0 ? p.getItemAtPosition(pos).toString() : "";
                     steps.get(idx).tag = tag;
                     callback.set(steps);
@@ -1536,6 +1619,7 @@ public class SettingsActivity extends Activity {
             @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
             @Override public void afterTextChanged(Editable s) {}
             @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                if (isInitializing) return;
                 String q = s.toString().toLowerCase();
                 List<String> filtered = new ArrayList<>();
                 for (Tag t : allTags) {
@@ -1626,6 +1710,7 @@ public class SettingsActivity extends Activity {
     private SeekBar.OnSeekBarChangeListener simple(final ProgressCallback cb) {
         return new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar sb, int p, boolean u) {
+                if (isInitializing) return;
                 cb.onProgress(p);
             }
             @Override public void onStartTrackingTouch(SeekBar sb) {}
@@ -1794,6 +1879,7 @@ public class SettingsActivity extends Activity {
                 @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
                 @Override public void onTextChanged(CharSequence s, int st, int b, int c) {}
                 @Override public void afterTextChanged(Editable s) {
+                    if (isInitializing) return;
                     m.name = s.toString().trim();
                     List<GestureSettings.GestureMacro> currentList = gestureSettings.loadMacros();
                     for (GestureSettings.GestureMacro currentM : currentList) {
