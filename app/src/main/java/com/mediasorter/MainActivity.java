@@ -76,7 +76,7 @@ public class MainActivity extends Activity
     private TagAdapter   tagAdapter;
 
     private List<MediaFile> fullList     = new ArrayList<>();
-    private List<MediaFile> currentFiles = new ArrayList<>();
+    private final List<MediaFile> currentFiles = new ArrayList<>();
     private static List<MediaFile> sLatestFullList = new ArrayList<>();
     private static List<Tag>       sLatestTagList  = new ArrayList<>();
     private int             currentIndex = -1;
@@ -208,7 +208,9 @@ public class MainActivity extends Activity
         if (mediaAdapter.isSelectMode()) {
             exitActiveSelectMode();
             btnScan.setText("SCAN");
-            btnScan.setOnClickListener(v -> startScan());
+            btnScan.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { startScan(); }
+            });
         } else {
             super.onBackPressed();
         }
@@ -343,9 +345,15 @@ public class MainActivity extends Activity
         indexer.setListener(this);
 
         // Auto-refresh tag list on any change
-        tagManager.setTagChangeListener(() ->
-                mainHandler.post(() ->
-                        tagAdapter.setTags(tagManager.getAllTags())));
+        tagManager.setTagChangeListener(new TagManager.TagChangeListener() {
+            @Override public void onTagsChanged() {
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        tagAdapter.setTags(tagManager.getAllTags());
+                    }
+                });
+            }
+        });
     }
 
     private int getWindowSize() {
@@ -354,55 +362,74 @@ public class MainActivity extends Activity
     }
 
     private void initAdapters() {
-        mediaAdapter = new MediaAdapter(thumbnailLoader, this::onFileSelected);
-        tagAdapter   = new TagAdapter(this::onTagToggled);
-
-        // Tapping the tags line in the file list shows the quick tag popup;
-        // with an active selection it targets every selected file at once.
-        mediaAdapter.setOnFileLongClickListener((file, anchor) -> {
-            if (mediaAdapter.isSelectMode() && mediaAdapter.getSelectedCount() > 0) {
-                showQuickTagPopup(new ArrayList<>(getActiveSelectedFiles()));
-            } else {
-                List<MediaFile> single = new ArrayList<>();
-                single.add(file);
-                showQuickTagPopup(single);
+        mediaAdapter = new MediaAdapter(thumbnailLoader, new MediaAdapter.OnFileClickListener() {
+            @Override public void onFileClick(MediaFile file) { onFileSelected(file); }
+        });
+        tagAdapter   = new TagAdapter(new TagAdapter.OnTagToggleListener() {
+            @Override public void onTagToggle(String tagName, boolean applied) {
+                onTagToggled(tagName, applied);
             }
         });
 
-        mediaAdapter.setSelectionListener(count -> {
-            mainHandler.post(() -> {
-                if (count > 0) {
-                    btnScan.setText(count + " selected");
-                    btnScan.setOnClickListener(v ->
-                            new AlertDialog.Builder(this)
-                                    .setTitle("Batch action")
-                                    .setItems(
-                                            new String[]{
-                                                    "Select all",
-                                                    "Deselect all",
-                                                    "Tag selected",
-                                                    "Rename selected",
-                                                    "Analyze colors",
-                                                    "Delete selected",
-                                                    "Auto-Link Sequential",
-                                                    "Cancel"
-                                            },
-                                            (d, which) -> {
-                                                if (which == 0)      mediaAdapter.selectAll();
-                                                else if (which == 1) mediaAdapter.deselectAll();
-                                                else if (which == 2) showBatchTagDialog();
-                                                else if (which == 3) showBatchRenameDialog();
-                                                else if (which == 4) showColorAnalysisDialog();
-                                                else if (which == 5) showBatchDeleteDialog();
-                                                else if (which == 6) showAutoLinkSequentialDialog();
-                                                else                 exitActiveSelectMode();
-                                            })
-                                    .show());
+        // Tapping the tags line in the file list shows the quick tag popup;
+        // with an active selection it targets every selected file at once.
+        mediaAdapter.setOnFileLongClickListener(new MediaAdapter.OnFileLongClickListener() {
+            @Override public void onFileLongClick(MediaFile file, View anchor) {
+                if (mediaAdapter.isSelectMode() && mediaAdapter.getSelectedCount() > 0) {
+                    showQuickTagPopup(new ArrayList<>(getActiveSelectedFiles()));
                 } else {
-                    btnScan.setText("SCAN");
-                    btnScan.setOnClickListener(v -> startScan());
+                    List<MediaFile> single = new ArrayList<>();
+                    single.add(file);
+                    showQuickTagPopup(single);
                 }
-            });
+            }
+        });
+
+        mediaAdapter.setSelectionListener(new MediaAdapter.OnSelectionChangedListener() {
+            @Override public void onSelectionChanged(final int count) {
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        if (count > 0) {
+                            btnScan.setText(count + " selected");
+                            btnScan.setOnClickListener(new View.OnClickListener() {
+                                @Override public void onClick(View v) {
+                                    new AlertDialog.Builder(MainActivity.this)
+                                            .setTitle("Batch action")
+                                            .setItems(
+                                                    new String[]{
+                                                            "Select all",
+                                                            "Deselect all",
+                                                            "Tag selected",
+                                                            "Rename selected",
+                                                            "Analyze colors",
+                                                            "Delete selected",
+                                                            "Auto-Link Sequential",
+                                                            "Cancel"
+                                                    },
+                                                    new DialogInterface.OnClickListener() {
+                                                        @Override public void onClick(DialogInterface d, int which) {
+                                                            if (which == 0) mediaAdapter.selectAll();
+                                                            else if (which == 1) mediaAdapter.deselectAll();
+                                                            else if (which == 2) showBatchTagDialog();
+                                                            else if (which == 3) showBatchRenameDialog();
+                                                            else if (which == 4) showColorAnalysisDialog();
+                                                            else if (which == 5) showBatchDeleteDialog();
+                                                            else if (which == 6) showAutoLinkSequentialDialog();
+                                                            else exitActiveSelectMode();
+                                                        }
+                                                    })
+                                            .show();
+                                }
+                            });
+                        } else {
+                            btnScan.setText("SCAN");
+                            btnScan.setOnClickListener(new View.OnClickListener() {
+                                @Override public void onClick(View v) { startScan(); }
+                            });
+                        }
+                    }
+                });
+            }
         });
     }
 
@@ -442,8 +469,11 @@ public class MainActivity extends Activity
         });
 
         // Side panel tag list click
-        previewManager.getSidePanelAdapter().setListener((tagName, applied) ->
-                applyTagToCurrentFile(tagName, applied));
+        previewManager.getSidePanelAdapter().setListener(new SidePanelTagAdapter.OnTagClickListener() {
+            @Override public void onTagClick(String tagName, boolean applied) {
+                applyTagToCurrentFile(tagName, applied);
+            }
+        });
 
         // Tag list spinner
         refreshTagListSpinner();
@@ -496,9 +526,11 @@ public class MainActivity extends Activity
         });
 
         // Long-press search bar to show search history
-        searchBar.setOnLongClickListener(v -> {
-            showSearchHistoryDialog();
-            return true;
+        searchBar.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                showSearchHistoryDialog();
+                return true;
+            }
         });
 
         ((EditText) findViewById(R.id.tagSearch)).addTextChangedListener(
@@ -545,13 +577,15 @@ public class MainActivity extends Activity
         });
 
         Button btnAddTag = findViewById(R.id.btnAddTag);
-        btnAddTag.setOnClickListener(v -> {
-            String name = newTagInput.getText().toString().trim();
-            if (name.isEmpty()) return;
-            tagManager.createTag(name);
-            tagAdapter.setTags(tagManager.getAllTags());
-            newTagInput.setText("");
-            tagSuggestView.setText("");
+        btnAddTag.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                String name = newTagInput.getText().toString().trim();
+                if (name.isEmpty()) return;
+                tagManager.createTag(name);
+                tagAdapter.setTags(tagManager.getAllTags());
+                newTagInput.setText("");
+                tagSuggestView.setText("");
+            }
         });
 
         // Tag panel toggle with initialisation fix
@@ -565,10 +599,14 @@ public class MainActivity extends Activity
 
         btnFilter = findViewById(R.id.btnFilter);
         btnFilter.setText(filterManager.getLabel());
-        btnFilter.setOnClickListener(v -> showFilterMenu(v));
+        btnFilter.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showFilterMenu(v); }
+        });
 
         btnScan = findViewById(R.id.btnScan);
-        btnScan.setOnClickListener(v -> startScan());
+        btnScan.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { startScan(); }
+        });
 
         // Scan progress bar (initially hidden)
         scanProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -582,37 +620,43 @@ public class MainActivity extends Activity
         }
 
         View btnRescanView = findViewById(R.id.btnRescan);
-        btnRescanView.setOnClickListener(v -> {
-            if (folderManager.isEmpty()) {
-                Toast.makeText(this, "No folder set", Toast.LENGTH_SHORT).show();
-                return;
+        btnRescanView.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (folderManager.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "No folder set", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                // If a scan is already running, our new indexer will queue the rescan
+                // instead of dropping it or crashing.
+                boolean wasScanning = indexer.isScanning();
+                for (String folder : folderManager.getFolders()) {
+                    indexer.rescanClean(folder);
+                }
+                Toast.makeText(MainActivity.this,
+                        wasScanning ? "Scan in progress — rescan queued" : "Rescanning…",
+                        Toast.LENGTH_SHORT).show();
             }
-            // If a scan is already running, our new indexer will queue the rescan
-            // instead of dropping it or crashing.
-            boolean wasScanning = indexer.isScanning();
-            for (String folder : folderManager.getFolders()) {
-                indexer.rescanClean(folder);
-            }
-            Toast.makeText(this,
-                    wasScanning ? "Scan in progress — rescan queued" : "Rescanning…",
-                    Toast.LENGTH_SHORT).show();
         });
         // Long-press to repair a folder that got corrupted by the old bug
         // (manifest contains file but index missing, folder appears empty).
-        btnRescanView.setOnLongClickListener(v -> {
-            if (folderManager.isEmpty()) return false;
-            new AlertDialog.Builder(this)
-                .setTitle("Repair folder?")
-                .setMessage("A previous crash could leave a folder with cached hashes but no visible files. Repair clears the stale cache for its folders and forces a full rescan.")
-                .setPositiveButton("Repair", (d, w) -> {
-                    for (String folder : folderManager.getFolders()) {
-                        indexer.repairFolder(folder);
-                    }
-                    Toast.makeText(this, "Repairing…", Toast.LENGTH_SHORT).show();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-            return true;
+        btnRescanView.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                if (folderManager.isEmpty()) return false;
+                new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("Repair folder?")
+                    .setMessage("A previous crash could leave a folder with cached hashes but no visible files. Repair clears the stale cache for its folders and forces a full rescan.")
+                    .setPositiveButton("Repair", new DialogInterface.OnClickListener() {
+                        @Override public void onClick(DialogInterface d, int w) {
+                            for (String folder : folderManager.getFolders()) {
+                                indexer.repairFolder(folder);
+                            }
+                            Toast.makeText(MainActivity.this, "Repairing…", Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+                return true;
+            }
         });
 
         findViewById(R.id.btnGroupBy).setOnClickListener(new View.OnClickListener() {
@@ -691,14 +735,18 @@ public class MainActivity extends Activity
 
         Button btnDelete = findViewById(R.id.btnDelete);
         if (btnDelete != null) {
-            btnDelete.setOnClickListener(v -> deleteCurrentFile());
+            btnDelete.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { deleteCurrentFile(); }
+            });
         }
 
         // Tapping the "1 / N" position counter opens the details dialog for
         // the file currently shown in the preview.
         TextView posCounter = findViewById(R.id.positionCounter);
         if (posCounter != null) {
-            posCounter.setOnClickListener(v -> showFileDetailsDialog());
+            posCounter.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { showFileDetailsDialog(); }
+            });
         }
 
         tagAdapter.setTags(tagManager.getAllTags());
@@ -714,20 +762,22 @@ public class MainActivity extends Activity
         tagPanel.setVisibility(View.GONE);
         syncTagToggleButton(btnToggle, false);
 
-        btnToggle.setOnClickListener(v -> {
-            if (tagManager != null && !tagManager.isTagsEnabled()) {
-                Toast.makeText(this,
-                        "Tags are disabled (Settings → Main Window)",
-                        Toast.LENGTH_SHORT).show();
-                return;
+        btnToggle.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (tagManager != null && !tagManager.isTagsEnabled()) {
+                    Toast.makeText(MainActivity.this,
+                            "Tags are disabled (Settings → Main Window)",
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                boolean visible = tagPanel.getVisibility() == View.VISIBLE;
+                if (visible) {
+                    tagPanel.setVisibility(View.GONE);
+                } else {
+                    tagPanel.setVisibility(View.VISIBLE);
+                }
+                syncTagToggleButton(btnToggle, !visible);
             }
-            boolean visible = tagPanel.getVisibility() == View.VISIBLE;
-            if (visible) {
-                tagPanel.setVisibility(View.GONE);
-            } else {
-                tagPanel.setVisibility(View.VISIBLE);
-            }
-            syncTagToggleButton(btnToggle, !visible);
         });
     }
 
@@ -822,9 +872,9 @@ public class MainActivity extends Activity
                     @Override public void run() {
                         if (sequence != refreshSequence || isFinishing()) return;
                         fullList = result;
-                        sLatestFullList = new ArrayList<>(fullList);
-                        sLatestTagList  = new ArrayList<>(tagManager.getAllTags());
                         windowManager.setFullIndex(fullList);
+                        sLatestFullList = windowManager.getFullIndexSnapshot();
+                        sLatestTagList  = new ArrayList<>(tagManager.getAllTags());
                         if (currentIndex >= 0 && currentIndex < fullList.size()) {
                             windowManager.centerOn(currentIndex);
                         }
@@ -840,13 +890,18 @@ public class MainActivity extends Activity
     // ── Window ────────────────────────────────────────────────────────────────
 
     private void updateWindow() {
-        currentFiles = windowManager.getWindow();
+        List<MediaFile> windowSnapshot = windowManager.getWindowSnapshot();
+        synchronized (currentFiles) {
+            currentFiles.clear();
+            currentFiles.addAll(windowSnapshot);
+        }
+        List<MediaFile> safeCurrentFiles = getCurrentFilesSnapshot();
 
         List<String> windowPaths = new ArrayList<>();
-        for (MediaFile f : currentFiles) windowPaths.add(f.getPath());
+        for (MediaFile f : safeCurrentFiles) windowPaths.add(f.getPath());
         thumbnailLoader.evictOutsideWindow(windowPaths);
 
-        mediaAdapter.setFiles(currentFiles);
+        mediaAdapter.setFiles(safeCurrentFiles);
 
         // If we have a current preview file, re-select it in the (new) window
         if (currentIndex >= 0 && currentIndex < fullList.size()) {
@@ -1082,7 +1137,9 @@ public class MainActivity extends Activity
         shiftWindowIfNeeded(currentIndex);
         loadFileAtIndex(currentIndex);
         // Defer precaching slightly to avoid jank during rapid file switching
-        mainHandler.postDelayed(this::precacheAdjacent, 120);
+        mainHandler.postDelayed(new Runnable() {
+            @Override public void run() { precacheAdjacent(); }
+        }, 120);
     }
 
     private void navigatePrev() {
@@ -1090,7 +1147,9 @@ public class MainActivity extends Activity
         currentIndex = (currentIndex - 1 + fullList.size()) % fullList.size();
         shiftWindowIfNeeded(currentIndex);
         loadFileAtIndex(currentIndex);
-        mainHandler.postDelayed(this::precacheAdjacent, 120);
+        mainHandler.postDelayed(new Runnable() {
+            @Override public void run() { precacheAdjacent(); }
+        }, 120);
     }
 
     /** Pre-cache thumbnails for the previous and next files. */
@@ -1122,12 +1181,18 @@ public class MainActivity extends Activity
         }
     }
 
+    private List<MediaFile> getCurrentFilesSnapshot() {
+        synchronized (currentFiles) {
+            return new ArrayList<>(currentFiles);
+        }
+    }
+
     /** Scrolls the file browser so the currently previewed file is visible. */
     private void scrollFileListToCurrent(int absoluteIndex) {
         if (fileBrowser == null) return;
 
         // Defensive copy to avoid ConcurrentModificationException during rapid switching / refresh
-        List<MediaFile> windowCopy = new ArrayList<>(currentFiles);
+        List<MediaFile> windowCopy = getCurrentFilesSnapshot();
         if (windowCopy.isEmpty()) return;
 
         // Find the position of this file inside the *current window* (currentFiles)
@@ -1187,8 +1252,10 @@ public class MainActivity extends Activity
             // Nothing to choose from yet — offer creating the first tag.
             // Only re-open this dialog once a tag exists, otherwise "Back"
             // would loop between the two dialogs forever.
-            showNewTagDialog(selectedFiles, () -> {
-                if (!tagManager.getAllTags().isEmpty()) showBatchTagDialog();
+            showNewTagDialog(selectedFiles, new Runnable() {
+                @Override public void run() {
+                    if (!tagManager.getAllTags().isEmpty()) showBatchTagDialog();
+                }
             });
             return;
         }
@@ -1228,30 +1295,39 @@ public class MainActivity extends Activity
         new AlertDialog.Builder(this)
                 .setTitle("Tag " + selectedFiles.size() + " files")
                 .setView(listView)
-                .setPositiveButton("Apply", (d, w) -> {
-                    for (QuickTagItem item : items) {
-                        if (item.currentType == item.initialType) continue;
-                        for (MediaFile file : selectedFiles) {
-                            if (item.currentType == 1) {
-                                tagManager.applyTag(file, item.name);
-                            } else if (item.currentType == 0) {
-                                tagManager.removeTag(file, item.name);
+                .setPositiveButton("Apply", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        for (QuickTagItem item : items) {
+                            if (item.currentType == item.initialType) continue;
+                            for (MediaFile file : selectedFiles) {
+                                if (item.currentType == 1) {
+                                    tagManager.applyTag(file, item.name);
+                                } else if (item.currentType == 0) {
+                                    tagManager.removeTag(file, item.name);
+                                }
                             }
                         }
+                        for (MediaFile file : selectedFiles) mediaAdapter.updateFile(file);
+                        exitActiveSelectMode();
+                        btnScan.setText("SCAN");
+                        btnScan.setOnClickListener(new View.OnClickListener() {
+                            @Override public void onClick(View v) { startScan(); }
+                        });
+                        scheduleRefresh();
+                        Toast.makeText(MainActivity.this,
+                                "Tagged " + selectedFiles.size() + " files",
+                                Toast.LENGTH_SHORT).show();
                     }
-                    for (MediaFile file : selectedFiles) mediaAdapter.updateFile(file);
-                    exitActiveSelectMode();
-                    btnScan.setText("SCAN");
-                    btnScan.setOnClickListener(v -> startScan());
-                    scheduleRefresh();
-                    Toast.makeText(this, "Tagged " + selectedFiles.size() + " files",
-                            Toast.LENGTH_SHORT).show();
                 })
-                .setNeutralButton("＋ New tag", (d, w) -> {
-                    // Snapshot the current states
-                    Map<String, Integer> edits = new java.util.HashMap<>();
-                    for (QuickTagItem item : items) edits.put(item.name, item.currentType);
-                    showNewTagDialog(selectedFiles, () -> showBatchTagDialog(edits));
+                .setNeutralButton("＋ New tag", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        // Snapshot the current states
+                        Map<String, Integer> edits = new java.util.HashMap<>();
+                        for (QuickTagItem item : items) edits.put(item.name, item.currentType);
+                        showNewTagDialog(selectedFiles, new Runnable() {
+                            @Override public void run() { showBatchTagDialog(edits); }
+                        });
+                    }
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
@@ -1501,40 +1577,49 @@ public class MainActivity extends Activity
     new AlertDialog.Builder(this)
         .setTitle("Batch Rename " + selectedFiles.size() + " files")
         .setView(sv)
-        .setPositiveButton("Rename", (d, w) -> {
-            // The preview updater has already applied the settings, so just commit
-            List<BatchRenameManager.RenamePreview> previews = batchRenameManager.preview(selectedFiles);
-            BatchRenameManager.RenameResult result = batchRenameManager.apply(previews);
-            Toast.makeText(this, "Renamed: " + result.succeeded
-                + (result.failed > 0 ? "  Failed: " + result.failed : ""), Toast.LENGTH_SHORT).show();
-            exitActiveSelectMode();
-            btnScan.setText("SCAN");
-            btnScan.setOnClickListener(v -> startScan());
-            scheduleRefresh();
-        })
-        .setNegativeButton("Cancel", (d, w) -> {
-            // Restore original settings
-            batchRenameManager.setSeparator(oldSep);
-            batchRenameManager.setOrder(oldOrd);
-            batchRenameManager.setCaseMode(oldCase);
-            batchRenameManager.setPrefix(oldPrefix);
-            batchRenameManager.setSuffix(oldSuffix);
-            batchRenameManager.setIncludeFolder(oldIncludeFolder);
-            batchRenameManager.setNumbering(oldNum);
-            batchRenameManager.setNumberStart(oldNumStart);
-            batchRenameManager.setNumberPadding(oldNumPad);
-            batchRenameManager.setDateFormat(oldDateFormat);
-            batchRenameManager.setNumberPosition(oldNumPos);
-            batchRenameManager.setNumberSeparator(oldNumSep);
-            batchRenameManager.setReplacements(oldReplacements);
-            batchRenameManager.setPattern(oldPattern);
-        })
-        .setNeutralButton("Undo", (d, w) -> {
-            if (batchRenameManager.canUndo()) {
-                BatchRenameManager.RenameResult result = batchRenameManager.undo();
-                Toast.makeText(this, "Undone: " + result.succeeded + " files", Toast.LENGTH_SHORT).show();
+        .setPositiveButton("Rename", new DialogInterface.OnClickListener() {
+            @Override public void onClick(DialogInterface d, int w) {
+                // The preview updater has already applied the settings, so just commit
+                List<BatchRenameManager.RenamePreview> previews = batchRenameManager.preview(selectedFiles);
+                BatchRenameManager.RenameResult result = batchRenameManager.apply(previews);
+                Toast.makeText(MainActivity.this, "Renamed: " + result.succeeded
+                    + (result.failed > 0 ? "  Failed: " + result.failed : ""), Toast.LENGTH_SHORT).show();
                 exitActiveSelectMode();
+                btnScan.setText("SCAN");
+                btnScan.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) { startScan(); }
+                });
                 scheduleRefresh();
+            }
+        })
+        .setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+            @Override public void onClick(DialogInterface d, int w) {
+                // Restore original settings
+                batchRenameManager.setSeparator(oldSep);
+                batchRenameManager.setOrder(oldOrd);
+                batchRenameManager.setCaseMode(oldCase);
+                batchRenameManager.setPrefix(oldPrefix);
+                batchRenameManager.setSuffix(oldSuffix);
+                batchRenameManager.setIncludeFolder(oldIncludeFolder);
+                batchRenameManager.setNumbering(oldNum);
+                batchRenameManager.setNumberStart(oldNumStart);
+                batchRenameManager.setNumberPadding(oldNumPad);
+                batchRenameManager.setDateFormat(oldDateFormat);
+                batchRenameManager.setNumberPosition(oldNumPos);
+                batchRenameManager.setNumberSeparator(oldNumSep);
+                batchRenameManager.setReplacements(oldReplacements);
+                batchRenameManager.setPattern(oldPattern);
+            }
+        })
+        .setNeutralButton("Undo", new DialogInterface.OnClickListener() {
+            @Override public void onClick(DialogInterface d, int w) {
+                if (batchRenameManager.canUndo()) {
+                    BatchRenameManager.RenameResult result = batchRenameManager.undo();
+                    Toast.makeText(MainActivity.this,
+                            "Undone: " + result.succeeded + " files", Toast.LENGTH_SHORT).show();
+                    exitActiveSelectMode();
+                    scheduleRefresh();
+                }
             }
         })
         .show();
@@ -1640,66 +1725,74 @@ private Spinner makeSpinner(String[] options) {
         new AlertDialog.Builder(this)
                 .setTitle("Color analysis — " + selectedFiles.size() + " files")
                 .setView(sv)
-                .setPositiveButton("Analyze", (d, w) -> {
-                    int topN;
-                    float threshold;
-                    try {
-                        topN = Integer.parseInt(colorCountInput.getText().toString().trim());
-                        topN = Math.max(1, Math.min(10, topN));
-                    } catch (Exception e) { topN = 3; }
+                .setPositiveButton("Analyze", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        int topN;
+                        float threshold;
+                        try {
+                            topN = Integer.parseInt(colorCountInput.getText().toString().trim());
+                            topN = Math.max(1, Math.min(10, topN));
+                        } catch (Exception e) { topN = 3; }
 
-                    try {
-                        threshold = Float.parseFloat(threshInput.getText().toString().trim());
-                        threshold = Math.max(1f, Math.min(100f, threshold));
-                    } catch (Exception e) { threshold = 20f; }
-                    ColorAnalyzer.Mode mode;
-                    switch (modeSpin.getSelectedItemPosition()) {
-                        case 0:  mode = ColorAnalyzer.Mode.TAG;            break;
-                        case 1:  mode = ColorAnalyzer.Mode.RENAME;         break;
-                        case 2:  mode = ColorAnalyzer.Mode.GROUP;          break;
-                        case 3:  mode = ColorAnalyzer.Mode.TAG_AND_RENAME; break;
-                        case 5:  mode = ColorAnalyzer.Mode.SIGNATURE;      break;
-                        case 6:  mode = ColorAnalyzer.Mode.GOLDEN_TICKET;  break;
-                        default: mode = ColorAnalyzer.Mode.ALL;            break;
-                    }
-                    final ColorAnalyzer.Mode finalMode = mode;
-                    final int finalTopN = topN;
-                    final float finalThreshold = threshold;
+                        try {
+                            threshold = Float.parseFloat(threshInput.getText().toString().trim());
+                            threshold = Math.max(1f, Math.min(100f, threshold));
+                        } catch (Exception e) { threshold = 20f; }
+                        ColorAnalyzer.Mode mode;
+                        switch (modeSpin.getSelectedItemPosition()) {
+                            case 0:  mode = ColorAnalyzer.Mode.TAG;            break;
+                            case 1:  mode = ColorAnalyzer.Mode.RENAME;         break;
+                            case 2:  mode = ColorAnalyzer.Mode.GROUP;          break;
+                            case 3:  mode = ColorAnalyzer.Mode.TAG_AND_RENAME; break;
+                            case 5:  mode = ColorAnalyzer.Mode.SIGNATURE;      break;
+                            case 6:  mode = ColorAnalyzer.Mode.GOLDEN_TICKET;  break;
+                            default: mode = ColorAnalyzer.Mode.ALL;            break;
+                        }
+                        final ColorAnalyzer.Mode finalMode = mode;
+                        final int finalTopN = topN;
+                        final float finalThreshold = threshold;
 
-                    folderWatcher.pauseAll();
-                    new Thread(() -> {
-                        List<ColorAnalyzer.Result> results =
-                                ColorAnalyzer.analyze(selectedFiles, finalTopN,
-                                        finalThreshold, finalMode, tagManager, batchRenameManager);
-                        mainHandler.post(() -> {
-                            folderWatcher.resumeAll();
-                            int ok = 0, signed = 0;
-                            java.util.Set<String> touchedFolders = new java.util.LinkedHashSet<>();
-                            for (ColorAnalyzer.Result r : results) {
-                                if (r.success) ok++;
-                                if (r.signatureColor != null) signed++;
-                                String p = (r.path != null) ? r.path : null;
-                                int slash = (p == null) ? -1 : p.lastIndexOf('/');
-                                if (slash > 0) touchedFolders.add(p.substring(0, slash));
+                        folderWatcher.pauseAll();
+                        new Thread(new Runnable() {
+                            @Override public void run() {
+                                final List<ColorAnalyzer.Result> results =
+                                        ColorAnalyzer.analyze(selectedFiles, finalTopN,
+                                                finalThreshold, finalMode, tagManager, batchRenameManager);
+                                mainHandler.post(new Runnable() {
+                                    @Override public void run() {
+                                        folderWatcher.resumeAll();
+                                        int ok = 0, signed = 0;
+                                        java.util.Set<String> touchedFolders = new java.util.LinkedHashSet<>();
+                                        for (ColorAnalyzer.Result r : results) {
+                                            if (r.success) ok++;
+                                            if (r.signatureColor != null) signed++;
+                                            String p = (r.path != null) ? r.path : null;
+                                            int slash = (p == null) ? -1 : p.lastIndexOf('/');
+                                            if (slash > 0) touchedFolders.add(p.substring(0, slash));
+                                        }
+                                        // Watchers were paused while files were renamed —
+                                        // reconcile the index so renamed entries don't linger.
+                                        for (String folder : touchedFolders) indexer.rescan(folder);
+                                        boolean golden = finalMode == ColorAnalyzer.Mode.SIGNATURE
+                                                || finalMode == ColorAnalyzer.Mode.GOLDEN_TICKET;
+                                        exitActiveSelectMode();
+                                        btnScan.setText("SCAN");
+                                        btnScan.setOnClickListener(new View.OnClickListener() {
+                                            @Override public void onClick(View v) { startScan(); }
+                                        });
+                                        scheduleRefresh();
+                                        Toast.makeText(MainActivity.this,
+                                                golden
+                                                    ? "★ Golden tickets: " + signed + " / "
+                                                        + selectedFiles.size() + " files"
+                                                    : "Analyzed " + ok + " / "
+                                                        + selectedFiles.size() + " files",
+                                                Toast.LENGTH_SHORT).show();
+                                    }
+                                });
                             }
-                            // Watchers were paused while files were renamed —
-                            // reconcile the index so renamed entries don't linger.
-                            for (String folder : touchedFolders) indexer.rescan(folder);
-                            boolean golden = finalMode == ColorAnalyzer.Mode.SIGNATURE
-                                    || finalMode == ColorAnalyzer.Mode.GOLDEN_TICKET;
-                            exitActiveSelectMode();
-                            btnScan.setText("SCAN");
-                            btnScan.setOnClickListener(v -> startScan());
-                            scheduleRefresh();
-                            Toast.makeText(this,
-                                    golden
-                                        ? "★ Golden tickets: " + signed + " / "
-                                            + selectedFiles.size() + " files"
-                                        : "Analyzed " + ok + " / "
-                                            + selectedFiles.size() + " files",
-                                    Toast.LENGTH_SHORT).show();
-                        });
-                    }).start();
+                        }).start();
+                    }
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
@@ -2052,17 +2145,19 @@ private Spinner makeSpinner(String[] options) {
         menu.getMenu().add("Flagged");
         menu.getMenu().add("Skipped");
         menu.getMenu().add("Done");
-        menu.setOnMenuItemClickListener(item -> {
-            switch (item.getTitle().toString()) {
-                case "All":      filterManager.setFilter(FilterManager.Filter.ALL);      break;
-                case "Untagged": filterManager.setFilter(FilterManager.Filter.UNTAGGED); break;
-                case "Flagged":  filterManager.setFilter(FilterManager.Filter.FLAGGED);  break;
-                case "Skipped":  filterManager.setFilter(FilterManager.Filter.SKIPPED);  break;
-                case "Done":     filterManager.setFilter(FilterManager.Filter.DONE);     break;
+        menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
+            @Override public boolean onMenuItemClick(android.view.MenuItem item) {
+                switch (item.getTitle().toString()) {
+                    case "All":      filterManager.setFilter(FilterManager.Filter.ALL);      break;
+                    case "Untagged": filterManager.setFilter(FilterManager.Filter.UNTAGGED); break;
+                    case "Flagged":  filterManager.setFilter(FilterManager.Filter.FLAGGED);  break;
+                    case "Skipped":  filterManager.setFilter(FilterManager.Filter.SKIPPED);  break;
+                    case "Done":     filterManager.setFilter(FilterManager.Filter.DONE);     break;
+                }
+                btnFilter.setText(filterManager.getLabel());
+                scheduleRefresh();
+                return true;
             }
-            btnFilter.setText(filterManager.getLabel());
-            scheduleRefresh();
-            return true;
         });
         menu.show();
     }
@@ -2073,15 +2168,17 @@ private Spinner makeSpinner(String[] options) {
         menu.getMenu().add("By Tag");
         menu.getMenu().add("By Date");
         menu.getMenu().add("By Folder");
-        menu.setOnMenuItemClickListener(item -> {
-            switch (item.getTitle().toString()) {
-                case "By File Type": groupManager.setGroupBy(Group.GroupBy.FILE_TYPE); break;
-                case "By Tag":       groupManager.setGroupBy(Group.GroupBy.TAG);       break;
-                case "By Date":      groupManager.setGroupBy(Group.GroupBy.DATE);      break;
-                case "By Folder":    groupManager.setGroupBy(Group.GroupBy.FOLDER);    break;
+        menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
+            @Override public boolean onMenuItemClick(android.view.MenuItem item) {
+                switch (item.getTitle().toString()) {
+                    case "By File Type": groupManager.setGroupBy(Group.GroupBy.FILE_TYPE); break;
+                    case "By Tag":       groupManager.setGroupBy(Group.GroupBy.TAG);       break;
+                    case "By Date":      groupManager.setGroupBy(Group.GroupBy.DATE);      break;
+                    case "By Folder":    groupManager.setGroupBy(Group.GroupBy.FOLDER);    break;
+                }
+                scheduleRefresh();
+                return true;
             }
-            scheduleRefresh();
-            return true;
         });
         menu.show();
     }
@@ -2108,11 +2205,13 @@ private Spinner makeSpinner(String[] options) {
         new AlertDialog.Builder(this)
                 .setTitle("Add folder to watch")
                 .setView(input)
-                .setPositiveButton("Add", (d, w) -> {
-                    String path = input.getText().toString().trim();
-                    if (!path.isEmpty()) {
-                        folderManager.addFolder(path);
-                        startScan();
+                .setPositiveButton("Add", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        String path = input.getText().toString().trim();
+                        if (!path.isEmpty()) {
+                            folderManager.addFolder(path);
+                            startScan();
+                        }
                     }
                 })
                 .setNegativeButton("Cancel", null)
@@ -2128,14 +2227,16 @@ private Spinner makeSpinner(String[] options) {
         new AlertDialog.Builder(this)
                 .setTitle("Delete file?")
                 .setMessage(file.getName())
-                .setPositiveButton("Delete", (d, w) -> {
-                    boolean deleted = indexer.deleteFile(file.getPath());
-                    if (deleted) {
-                        // Full refresh rebuilds everything consistently
-                        scheduleRefresh();
-                        Toast.makeText(this, "Deleted", Toast.LENGTH_SHORT).show();
-                    } else {
-                        Toast.makeText(this, "Could not delete", Toast.LENGTH_SHORT).show();
+                .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        boolean deleted = indexer.deleteFile(file.getPath());
+                        if (deleted) {
+                            // Full refresh rebuilds everything consistently
+                            scheduleRefresh();
+                            Toast.makeText(MainActivity.this, "Deleted", Toast.LENGTH_SHORT).show();
+                        } else {
+                            Toast.makeText(MainActivity.this, "Could not delete", Toast.LENGTH_SHORT).show();
+                        }
                     }
                 })
                 .setNegativeButton("Cancel", null)
@@ -2154,27 +2255,36 @@ private Spinner makeSpinner(String[] options) {
                     + "inside your first watched folder, so you can restore "
                     + "them later with any file manager.\n\n"
                     + "\"Delete permanently\" cannot be undone.")
-            .setNeutralButton("Move to trash", (d, w) -> {
-                int moved = moveSelectionToTrash(selectedFiles);
-                exitActiveSelectMode();
-                btnScan.setText("SCAN");
-                btnScan.setOnClickListener(v -> startScan());
-                scheduleRefresh();
-                Toast.makeText(this,
-                        moved > 0 ? moved + " file(s) moved to trash"
-                                  : "Trash failed (no watched folder?)",
-                        Toast.LENGTH_SHORT).show();
-            })
-            .setPositiveButton("Delete permanently", (d, w) -> {
-                int deleted = 0;
-                for (MediaFile file : selectedFiles) {
-                    if (indexer.deleteFile(file.getPath())) deleted++;
+            .setNeutralButton("Move to trash", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface d, int w) {
+                    int moved = moveSelectionToTrash(selectedFiles);
+                    exitActiveSelectMode();
+                    btnScan.setText("SCAN");
+                    btnScan.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View v) { startScan(); }
+                    });
+                    scheduleRefresh();
+                    Toast.makeText(MainActivity.this,
+                            moved > 0 ? moved + " file(s) moved to trash"
+                                      : "Trash failed (no watched folder?)",
+                            Toast.LENGTH_SHORT).show();
                 }
-                exitActiveSelectMode();
-                btnScan.setText("SCAN");
-                btnScan.setOnClickListener(v -> startScan());
-                scheduleRefresh();
-                Toast.makeText(this, "Deleted " + deleted + " files", Toast.LENGTH_SHORT).show();
+            })
+            .setPositiveButton("Delete permanently", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface d, int w) {
+                    int deleted = 0;
+                    for (MediaFile file : selectedFiles) {
+                        if (indexer.deleteFile(file.getPath())) deleted++;
+                    }
+                    exitActiveSelectMode();
+                    btnScan.setText("SCAN");
+                    btnScan.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View v) { startScan(); }
+                    });
+                    scheduleRefresh();
+                    Toast.makeText(MainActivity.this,
+                            "Deleted " + deleted + " files", Toast.LENGTH_SHORT).show();
+                }
             })
             .setNegativeButton("Cancel", null)
             .show();
@@ -2306,36 +2416,46 @@ private Spinner makeSpinner(String[] options) {
 
         new AlertDialog.Builder(this)
             .setTitle("Search History")
-            .setItems(items.toArray(new String[0]), (d, which) -> {
-                if (which >= types.size()) return;
-                String type = types.get(which);
-                if ("header".equals(type)) return;
+            .setItems(items.toArray(new String[0]), new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface d, int which) {
+                    if (which >= types.size()) return;
+                    String type = types.get(which);
+                    if ("header".equals(type)) return;
 
-                String itemText = items.get(which);
-                final String query = itemText.startsWith("★ ") ? itemText.substring(2) : itemText;
+                    String itemText = items.get(which);
+                    final String query = itemText.startsWith("★ ")
+                            ? itemText.substring(2) : itemText;
 
-                if ("saved".equals(type)) {
-                    // Long-press-like: offer to remove or re-run
-                    new AlertDialog.Builder(this)
-                        .setTitle(query)
-                        .setItems(new String[]{"Run search", "Remove from saved"}, (d2, w2) -> {
-                            if (w2 == 0) {
-                                searchBar.setText(query);
-                            } else {
-                                searchHistory.removeSavedSearch(query);
-                                Toast.makeText(this, "Removed", Toast.LENGTH_SHORT).show();
-                            }
-                        })
-                        .show();
-                } else {
-                    searchBar.setText(query);
+                    if ("saved".equals(type)) {
+                        // Long-press-like: offer to remove or re-run
+                        new AlertDialog.Builder(MainActivity.this)
+                            .setTitle(query)
+                            .setItems(new String[]{"Run search", "Remove from saved"},
+                                    new DialogInterface.OnClickListener() {
+                                        @Override public void onClick(DialogInterface d2, int w2) {
+                                            if (w2 == 0) {
+                                                searchBar.setText(query);
+                                            } else {
+                                                searchHistory.removeSavedSearch(query);
+                                                Toast.makeText(MainActivity.this,
+                                                        "Removed", Toast.LENGTH_SHORT).show();
+                                            }
+                                        }
+                                    })
+                            .show();
+                    } else {
+                        searchBar.setText(query);
+                    }
                 }
             })
-            .setNeutralButton("Save current", (d, w) -> {
-                String current = searchBar.getText().toString().trim();
-                if (!current.isEmpty()) {
-                    searchHistory.saveSearch(current);
-                    Toast.makeText(this, "Search saved", Toast.LENGTH_SHORT).show();
+            .setNeutralButton("Save current", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface d, int w) {
+                    String current = searchBar.getText().toString().trim();
+                    if (!current.isEmpty()) {
+                        searchHistory.saveSearch(current);
+                        Toast.makeText(MainActivity.this,
+                                "Search saved", Toast.LENGTH_SHORT).show();
+                    }
                 }
             })
             .setNegativeButton("Close", null)
@@ -2360,10 +2480,16 @@ private Spinner makeSpinner(String[] options) {
 
         Toast.makeText(this, "Scanning for duplicates...", Toast.LENGTH_SHORT).show();
 
-        new Thread(() -> {
-            List<DuplicateFinder.DuplicateGroup> dupes =
-                    DuplicateFinder.findDuplicates(files, (scanned, total, name) -> {});
-            mainHandler.post(() -> showDuplicateResults(dupes));
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final List<DuplicateFinder.DuplicateGroup> dupes =
+                        DuplicateFinder.findDuplicates(files, new DuplicateFinder.ProgressCallback() {
+                            @Override public void onProgress(int scanned, int total, String name) {}
+                        });
+                mainHandler.post(new Runnable() {
+                    @Override public void run() { showDuplicateResults(dupes); }
+                });
+            }
         }).start();
     }
 
@@ -2438,11 +2564,14 @@ private Spinner makeSpinner(String[] options) {
             // Nothing to choose from yet — go straight to creating the first
             // tag. Only come back to the popup once a tag actually exists,
             // otherwise "Back" would loop between the two dialogs forever.
-            showNewTagDialog(targets, () -> {
-                if (!tagManager.getAllTags().isEmpty()) {
-                    showQuickTagPopup(targets);
-                } else {
-                    Toast.makeText(this, "No tags yet", Toast.LENGTH_SHORT).show();
+            showNewTagDialog(targets, new Runnable() {
+                @Override public void run() {
+                    if (!tagManager.getAllTags().isEmpty()) {
+                        showQuickTagPopup(targets);
+                    } else {
+                        Toast.makeText(MainActivity.this,
+                                "No tags yet", Toast.LENGTH_SHORT).show();
+                    }
                 }
             });
             return;
@@ -2487,33 +2616,41 @@ private Spinner makeSpinner(String[] options) {
         new AlertDialog.Builder(this)
                 .setTitle(title)
                 .setView(listView)
-                .setPositiveButton("Apply", (dialog, which) -> {
-                    for (QuickTagItem item : items) {
-                        if (item.currentType == item.initialType) continue; // untouched
-                        for (MediaFile f : targets) {
-                            if (item.currentType == 1) {
-                                tagManager.applyTag(f, item.name);
-                            } else if (item.currentType == 0) {
-                                tagManager.removeTag(f, item.name);
+                .setPositiveButton("Apply", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        for (QuickTagItem item : items) {
+                            if (item.currentType == item.initialType) continue; // untouched
+                            for (MediaFile f : targets) {
+                                if (item.currentType == 1) {
+                                    tagManager.applyTag(f, item.name);
+                                } else if (item.currentType == 0) {
+                                    tagManager.removeTag(f, item.name);
+                                }
                             }
                         }
+                        for (MediaFile f : targets) mediaAdapter.updateFileTags(f);
+                        syncUiAfterTagging(targets);
+                        if (mediaAdapter.isSelectMode()) {
+                            exitActiveSelectMode();
+                            btnScan.setText("SCAN");
+                            btnScan.setOnClickListener(new View.OnClickListener() {
+                                @Override public void onClick(View v) { startScan(); }
+                            });
+                        }
+                        Toast.makeText(MainActivity.this,
+                                targets.size() == 1 ? "Tags updated"
+                                                    : "Tagged " + targets.size() + " files",
+                                Toast.LENGTH_SHORT).show();
                     }
-                    for (MediaFile f : targets) mediaAdapter.updateFileTags(f);
-                    syncUiAfterTagging(targets);
-                    if (mediaAdapter.isSelectMode()) {
-                        exitActiveSelectMode();
-                        btnScan.setText("SCAN");
-                        btnScan.setOnClickListener(v -> startScan());
-                    }
-                    Toast.makeText(this,
-                            targets.size() == 1 ? "Tags updated"
-                                                : "Tagged " + targets.size() + " files",
-                            Toast.LENGTH_SHORT).show();
                 })
-                .setNeutralButton("＋ New tag", (dialog, which) -> {
-                    Map<String, Integer> edits = new java.util.HashMap<>();
-                    for (QuickTagItem item : items) edits.put(item.name, item.currentType);
-                    showNewTagDialog(targets, () -> showQuickTagPopup(targets, edits));
+                .setNeutralButton("＋ New tag", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        Map<String, Integer> edits = new java.util.HashMap<>();
+                        for (QuickTagItem item : items) edits.put(item.name, item.currentType);
+                        showNewTagDialog(targets, new Runnable() {
+                            @Override public void run() { showQuickTagPopup(targets, edits); }
+                        });
+                    }
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
@@ -3325,9 +3462,11 @@ private Spinner makeSpinner(String[] options) {
 
     @Override
     public void onFileAdded(String path) {
-        mainHandler.post(() -> {
-            if (!indexer.isScanning()) {
-                indexer.rescan(new java.io.File(path).getParent());
+        mainHandler.post(new Runnable() {
+            @Override public void run() {
+                if (!indexer.isScanning()) {
+                    indexer.rescan(new java.io.File(path).getParent());
+                }
             }
         });
     }
@@ -3335,20 +3474,24 @@ private Spinner makeSpinner(String[] options) {
     @Override
     public void onFileDeleted(String path) {
         final String deletedPath = path;
-        mainHandler.post(() -> {
-            // Remove from adapter immediately for responsiveness,
-            // then do a full refresh to synchronise all data structures.
-            mediaAdapter.removeFile(deletedPath);
-            scheduleRefresh();
+        mainHandler.post(new Runnable() {
+            @Override public void run() {
+                // Remove from adapter immediately for responsiveness,
+                // then do a full refresh to synchronise all data structures.
+                mediaAdapter.removeFile(deletedPath);
+                scheduleRefresh();
+            }
         });
     }
 
     @Override
     public void onFileModified(String path) {
-        mainHandler.post(() -> {
-            if (!indexer.isScanning()) {
-                cacheManager.invalidateThumbnail(path);
-                indexer.rescan(new java.io.File(path).getParent());
+        mainHandler.post(new Runnable() {
+            @Override public void run() {
+                if (!indexer.isScanning()) {
+                    cacheManager.invalidateThumbnail(path);
+                    indexer.rescan(new java.io.File(path).getParent());
+                }
             }
         });
     }
@@ -3360,64 +3503,74 @@ private Spinner makeSpinner(String[] options) {
 
     @Override
     public void onScanProgress(int scanned, int total, String currentFile) {
-        mainHandler.post(() -> {
-            if (scanProgress != null) {
-                scanProgress.setVisibility(View.VISIBLE);
-                scanProgress.setMax(total > 0 ? total : 100);
-                scanProgress.setProgress(scanned);
-            }
-            if (btnScan != null) {
-                btnScan.setText(scanned + "/" + total);
+        mainHandler.post(new Runnable() {
+            @Override public void run() {
+                if (scanProgress != null) {
+                    scanProgress.setVisibility(View.VISIBLE);
+                    scanProgress.setMax(total > 0 ? total : 100);
+                    scanProgress.setProgress(scanned);
+                }
+                if (btnScan != null) {
+                    btnScan.setText(scanned + "/" + total);
+                }
             }
         });
     }
 
     @Override
     public void onPageLoaded(List<MediaFile> page) {
-        mainHandler.post(this::scheduleRefresh);
+        mainHandler.post(new Runnable() {
+            @Override public void run() { scheduleRefresh(); }
+        });
     }
 
     @Override
     public void onScanComplete(List<MediaFile> allFiles) {
-        mainHandler.post(() -> {
-            btnScan.setEnabled(true);
-            btnScan.setText("SCAN");
-            if (scanProgress != null) scanProgress.setVisibility(View.GONE);
+        mainHandler.post(new Runnable() {
+            @Override public void run() {
+                btnScan.setEnabled(true);
+                btnScan.setText("SCAN");
+                if (scanProgress != null) scanProgress.setVisibility(View.GONE);
 
-            // Import all tags found in scanned files into TagManager
-            List<String> allTagsFromFiles = indexer.getAllTagsFromIndex();
-            if (!allTagsFromFiles.isEmpty()) {
-                tagManager.importTagsFromFiles(allTagsFromFiles);
+                // Import all tags found in scanned files into TagManager
+                List<String> allTagsFromFiles = indexer.getAllTagsFromIndex();
+                if (!allTagsFromFiles.isEmpty()) {
+                    tagManager.importTagsFromFiles(allTagsFromFiles);
+                }
+
+                executeRefresh();
             }
-
-            executeRefresh();
         });
     }
 
     @Override
     public void onFileChanged(MediaFile file) {
-        mainHandler.post(() -> {
-            for (int i = 0; i < fullList.size(); i++) {
-                if (fullList.get(i).getPath().equals(file.getPath())) {
-                    fullList.set(i, file);
-                    break;
+        mainHandler.post(new Runnable() {
+            @Override public void run() {
+                for (int i = 0; i < fullList.size(); i++) {
+                    if (fullList.get(i).getPath().equals(file.getPath())) {
+                        fullList.set(i, file);
+                        break;
+                    }
                 }
+                mediaAdapter.updateFile(file);
+                if (galleryAdapter != null) galleryAdapter.setFiles(fullList);
             }
-            mediaAdapter.updateFile(file);
-            if (galleryAdapter != null) galleryAdapter.setFiles(fullList);
         });
     }
 
     @Override
     public void onFileRemoved(String path) {
-        mainHandler.post(() -> {
-            for (int i = fullList.size() - 1; i >= 0; i--) {
-                if (fullList.get(i).getPath().equals(path)) fullList.remove(i);
+        mainHandler.post(new Runnable() {
+            @Override public void run() {
+                for (int i = fullList.size() - 1; i >= 0; i--) {
+                    if (fullList.get(i).getPath().equals(path)) fullList.remove(i);
+                }
+                mediaAdapter.removeFile(path);
+                if (galleryAdapter != null) galleryAdapter.setFiles(fullList);
+                updateGalleryCount();
+                updateProgress();
             }
-            mediaAdapter.removeFile(path);
-            if (galleryAdapter != null) galleryAdapter.setFiles(fullList);
-            updateGalleryCount();
-            updateProgress();
         });
     }
 

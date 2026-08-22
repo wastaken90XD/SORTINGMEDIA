@@ -103,8 +103,10 @@ public class SidePanelTagAdapter extends
         // Applied indicator
         holder.appliedDot.setVisibility(applied ? View.VISIBLE : View.INVISIBLE);
 
-        holder.itemView.setOnClickListener(v -> {
-            if (listener != null) listener.onTagClick(tag, !applied);
+        holder.itemView.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (listener != null) listener.onTagClick(tag, !applied);
+            }
         });
     }
 

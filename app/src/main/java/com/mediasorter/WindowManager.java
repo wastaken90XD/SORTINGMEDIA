@@ -55,6 +55,23 @@ public class WindowManager {
         }
     }
 
+    /** Safe copy for callers that may outlive a window update. */
+    public List<MediaFile> getWindowSnapshot() {
+        synchronized (lock) {
+            if (fullIndex.isEmpty()) return new ArrayList<>();
+            int start = Math.max(0, windowStart);
+            int end = Math.min(fullIndex.size(), start + windowSize);
+            return new ArrayList<>(fullIndex.subList(start, end));
+        }
+    }
+
+    /** Safe copy of the complete indexed list. */
+    public List<MediaFile> getFullIndexSnapshot() {
+        synchronized (lock) {
+            return new ArrayList<>(fullIndex);
+        }
+    }
+
     // ── Center window on index ────────────────────────────────────────────────
 
     public void centerOn(int absoluteIndex) {

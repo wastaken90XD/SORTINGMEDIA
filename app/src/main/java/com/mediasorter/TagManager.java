@@ -62,14 +62,16 @@ public class TagManager {
     // ── Load ──────────────────────────────────────────────────────────────────
 
     private void loadTags() {
-        executor.submit(() -> {
-            List<Tag> tags = db.tagDao().getAllByUsage();
-            synchronized (tagMap) {
-                for (Tag t : tags) {
-                    String plain = TagText.plain(t.getName());
-                    if (plain.isEmpty()) continue;
-                    if (!plain.equals(t.getName())) t.setName(plain);
-                    tagMap.put(plain, t);
+        executor.submit(new Runnable() {
+            @Override public void run() {
+                List<Tag> tags = db.tagDao().getAllByUsage();
+                synchronized (tagMap) {
+                    for (Tag t : tags) {
+                        String plain = TagText.plain(t.getName());
+                        if (plain.isEmpty()) continue;
+                        if (!plain.equals(t.getName())) t.setName(plain);
+                        tagMap.put(plain, t);
+                    }
                 }
             }
         });
@@ -145,7 +147,9 @@ public class TagManager {
             tag = new Tag(trimmed);
             tagMap.put(trimmed, tag);
         }
-        executor.submit(() -> db.tagDao().insert(tag));
+        executor.submit(new Runnable() {
+            @Override public void run() { db.tagDao().insert(tag); }
+        });
         notifyTagsChanged();
     }
 
@@ -158,19 +162,21 @@ public class TagManager {
         addToRecent(plain);
         recordApplied(file.getPath(), plain);
 
-        executor.submit(() -> {
-            synchronized (tagMap) {
-                Tag tag = tagMap.get(plain);
-                if (tag == null) {
-                    tag = new Tag(plain);
-                    tagMap.put(plain, tag);
-                    db.tagDao().insert(tag);
+        executor.submit(new Runnable() {
+            @Override public void run() {
+                synchronized (tagMap) {
+                    Tag tag = tagMap.get(plain);
+                    if (tag == null) {
+                        tag = new Tag(plain);
+                        tagMap.put(plain, tag);
+                        db.tagDao().insert(tag);
+                    }
+                    tag.incrementUsage();
+                    db.tagDao().update(tag);
                 }
-                tag.incrementUsage();
-                db.tagDao().update(tag);
+                MetadataWriter.writeTags(file.getPath(), file.getTags());
+                notifyTagsChanged();
             }
-            MetadataWriter.writeTags(file.getPath(), file.getTags());
-            notifyTagsChanged();
         });
     }
 
@@ -182,16 +188,18 @@ public class TagManager {
         file.removeTag(plain);
         unrecordApplied(file.getPath(), plain);
 
-        executor.submit(() -> {
-            synchronized (tagMap) {
-                Tag tag = tagMap.get(plain);
-                if (tag != null) {
-                    tag.decrementUsage();
-                    db.tagDao().update(tag);
+        executor.submit(new Runnable() {
+            @Override public void run() {
+                synchronized (tagMap) {
+                    Tag tag = tagMap.get(plain);
+                    if (tag != null) {
+                        tag.decrementUsage();
+                        db.tagDao().update(tag);
+                    }
                 }
+                MetadataWriter.writeTags(file.getPath(), file.getTags());
+                notifyTagsChanged();
             }
-            MetadataWriter.writeTags(file.getPath(), file.getTags());
-            notifyTagsChanged();
         });
     }
 
@@ -259,12 +267,14 @@ public class TagManager {
     public void deleteTag(String name) {
         String plain = TagText.plain(name);
         if (plain.isEmpty()) return;
-        executor.submit(() -> {
-            synchronized (tagMap) {
-                Tag tag = tagMap.remove(plain);
-                if (tag != null) db.tagDao().delete(tag);
+        executor.submit(new Runnable() {
+            @Override public void run() {
+                synchronized (tagMap) {
+                    Tag tag = tagMap.remove(plain);
+                    if (tag != null) db.tagDao().delete(tag);
+                }
+                notifyTagsChanged();
             }
-            notifyTagsChanged();
         });
     }
 
@@ -272,18 +282,20 @@ public class TagManager {
 
     // Auto-populate tagMap from tags already written to files
     public void importTagsFromFiles(List<String> tagNames) {
-        executor.submit(() -> {
-            synchronized (tagMap) {
-                if (tagNames == null) return;
-                for (String name : tagNames) {
-                    String plain = TagText.plain(name);
-                    if (plain.isEmpty() || tagMap.containsKey(plain)) continue;
-                    Tag tag = new Tag(plain);
-                    db.tagDao().insert(tag);
-                    tagMap.put(plain, tag);
+        executor.submit(new Runnable() {
+            @Override public void run() {
+                synchronized (tagMap) {
+                    if (tagNames == null) return;
+                    for (String name : tagNames) {
+                        String plain = TagText.plain(name);
+                        if (plain.isEmpty() || tagMap.containsKey(plain)) continue;
+                        Tag tag = new Tag(plain);
+                        db.tagDao().insert(tag);
+                        tagMap.put(plain, tag);
+                    }
                 }
+                notifyTagsChanged();
             }
-            notifyTagsChanged();
         });
     }
 
@@ -292,8 +304,11 @@ public class TagManager {
     public List<Tag> getAllTags() {
         synchronized (tagMap) {
             List<Tag> list = new ArrayList<>(tagMap.values());
-            Collections.sort(list, (a, b) ->
-                Integer.compare(b.getUsageCount(), a.getUsageCount()));
+            Collections.sort(list, new java.util.Comparator<Tag>() {
+                @Override public int compare(Tag a, Tag b) {
+                    return Integer.compare(b.getUsageCount(), a.getUsageCount());
+                }
+            });
             return list;
         }
     }

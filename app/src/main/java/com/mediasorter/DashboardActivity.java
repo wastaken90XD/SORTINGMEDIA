@@ -129,7 +129,9 @@ public class DashboardActivity extends Activity {
             LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.topMargin = 48;
         btnBack.setLayoutParams(lp);
-        btnBack.setOnClickListener(v -> finish());
+        btnBack.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { finish(); }
+        });
         root.addView(btnBack);
 
         ScrollView scroll = new ScrollView(this);

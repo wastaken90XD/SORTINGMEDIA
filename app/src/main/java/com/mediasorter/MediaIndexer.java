@@ -153,22 +153,24 @@ public class MediaIndexer {
 
         scanning.set(true);
         final String folderToScan = next;
-        scanExecutor.submit(() -> {
-            try {
-                doFullScan(folderToScan);
-            } catch (Throwable t) {
-                t.printStackTrace();
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
                 try {
-                    // Ensure we still notify completion to unblock UI
-                    if (listener != null) {
-                        listener.onScanComplete(new ArrayList<>(getIndex()));
-                    }
-                } catch (Exception ignored) {}
-            } finally {
-                scanning.set(false);
-                // Schedule next in queue on same executor thread to avoid stack overflow
-                // post a new check
-                scheduleNext();
+                    doFullScan(folderToScan);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                    try {
+                        // Ensure we still notify completion to unblock UI
+                        if (listener != null) {
+                            listener.onScanComplete(new ArrayList<>(getIndex()));
+                        }
+                    } catch (Exception ignored) {}
+                } finally {
+                    scanning.set(false);
+                    // Schedule next in queue on same executor thread to avoid stack overflow
+                    // post a new check
+                    scheduleNext();
+                }
             }
         });
     }
@@ -276,16 +278,18 @@ public class MediaIndexer {
 
     public void rescan(String folderPath) {
         if (folderPath == null) return;
-        scanExecutor.submit(() -> {
-            // If a full scan is queued, we still run rescan; set scanning flag for UI
-            boolean prev = scanning.getAndSet(true);
-            try {
-                doRescan(folderPath);
-            } catch (Throwable t) {
-                t.printStackTrace();
-            } finally {
-                scanning.set(false);
-                scheduleNext();
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
+                // If a full scan is queued, we still run rescan; set scanning flag for UI
+                boolean prev = scanning.getAndSet(true);
+                try {
+                    doRescan(folderPath);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                } finally {
+                    scanning.set(false);
+                    scheduleNext();
+                }
             }
         });
     }
@@ -372,15 +376,17 @@ public class MediaIndexer {
 
     public void rescanClean(String folderPath) {
         if (folderPath == null) return;
-        scanExecutor.submit(() -> {
-            scanning.getAndSet(true);
-            try {
-                doRescanClean(folderPath);
-            } catch (Throwable t) {
-                t.printStackTrace();
-            } finally {
-                scanning.set(false);
-                scheduleNext();
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
+                scanning.getAndSet(true);
+                try {
+                    doRescanClean(folderPath);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                } finally {
+                    scanning.set(false);
+                    scheduleNext();
+                }
             }
         });
     }
@@ -450,23 +456,25 @@ public class MediaIndexer {
     public void fullReset(List<String> folders) {
         // Stop queue
         synchronized (folderQueue) { folderQueue.clear(); }
-        scanExecutor.submit(() -> {
-            scanning.set(true);
-            try {
-                synchronized (index) { index.clear(); }
-                manifest.clear();
-                if (hashPrefs != null) {
-                    try { hashPrefs.edit().clear().apply(); } catch (Exception ignored) {}
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
+                scanning.set(true);
+                try {
+                    synchronized (index) { index.clear(); }
+                    manifest.clear();
+                    if (hashPrefs != null) {
+                        try { hashPrefs.edit().clear().apply(); } catch (Exception ignored) {}
+                    }
+                } finally {
+                    scanning.set(false);
                 }
-            } finally {
-                scanning.set(false);
-            }
-            // Re-queue folders after clearing
-            if (folders != null) {
-                synchronized (folderQueue) {
-                    folderQueue.addAll(folders);
+                // Re-queue folders after clearing
+                if (folders != null) {
+                    synchronized (folderQueue) {
+                        folderQueue.addAll(folders);
+                    }
+                    scheduleNext();
                 }
-                scheduleNext();
             }
         });
     }
@@ -477,35 +485,37 @@ public class MediaIndexer {
      */
     public void repairFolder(String folderPath) {
         if (folderPath == null) return;
-        scanExecutor.submit(() -> {
-            scanning.set(true);
-            try {
-                String norm = folderPath.endsWith("/") ? folderPath : folderPath + "/";
-                // Remove manifest entries for this folder
-                List<String> keysToRemove = new ArrayList<>();
-                for (String key : manifest.keySet()) {
-                    if (key.startsWith(norm)) keysToRemove.add(key);
-                }
-                for (String k : keysToRemove) {
-                    manifest.remove(k);
-                    removePersistedHash(k);
-                }
-                // Remove index entries for this folder (will be re-added)
-                List<String> idxToRemove = new ArrayList<>();
-                synchronized (index) {
-                    for (MediaFile mf : index) {
-                        if (mf.getPath().startsWith(norm)) idxToRemove.add(mf.getPath());
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
+                scanning.set(true);
+                try {
+                    String norm = folderPath.endsWith("/") ? folderPath : folderPath + "/";
+                    // Remove manifest entries for this folder
+                    List<String> keysToRemove = new ArrayList<>();
+                    for (String key : manifest.keySet()) {
+                        if (key.startsWith(norm)) keysToRemove.add(key);
                     }
-                }
-                for (String p : idxToRemove) removeFromIndex(p);
+                    for (String k : keysToRemove) {
+                        manifest.remove(k);
+                        removePersistedHash(k);
+                    }
+                    // Remove index entries for this folder (will be re-added)
+                    List<String> idxToRemove = new ArrayList<>();
+                    synchronized (index) {
+                        for (MediaFile mf : index) {
+                            if (mf.getPath().startsWith(norm)) idxToRemove.add(mf.getPath());
+                        }
+                    }
+                    for (String p : idxToRemove) removeFromIndex(p);
 
-                // Now do a clean scan
-                doFullScan(folderPath);
-            } catch (Throwable t) {
-                t.printStackTrace();
-            } finally {
-                scanning.set(false);
-                scheduleNext();
+                    // Now do a clean scan
+                    doFullScan(folderPath);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                } finally {
+                    scanning.set(false);
+                    scheduleNext();
+                }
             }
         });
     }

@@ -113,18 +113,20 @@ public class QuickTagPanel {
             lp.setMargins(3, 2, 3, 2);
             btn.setLayoutParams(lp);
 
-            btn.setOnClickListener(v -> {
-                if (currentFile == null) return;
-                boolean nowApplied = currentFile.hasTag(tagName);
-                if (listener != null) {
-                    listener.onTagToggled(tagName, !nowApplied);
+            btn.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (currentFile == null) return;
+                    boolean nowApplied = currentFile.hasTag(tagName);
+                    if (listener != null) {
+                        listener.onTagToggled(tagName, !nowApplied);
+                    }
+                    // Update local file state immediately — fixes stale reference
+                    if (!nowApplied) currentFile.addTag(tagName);
+                    else             currentFile.removeTag(tagName);
+                    // Toggle visual
+                    btn.setBackgroundColor(!nowApplied ? 0xFFE94560 : 0xFF2A2A3E);
+                    btn.setTextColor(!nowApplied ? 0xFF121212 : 0xFFFFFFFF);
                 }
-                // Update local file state immediately — fixes stale reference
-                if (!nowApplied) currentFile.addTag(tagName);
-                else             currentFile.removeTag(tagName);
-                // Toggle visual
-                btn.setBackgroundColor(!nowApplied ? 0xFFE94560 : 0xFF2A2A3E);
-                btn.setTextColor(!nowApplied ? 0xFF121212 : 0xFFFFFFFF);
             });
 
             row.addView(btn);

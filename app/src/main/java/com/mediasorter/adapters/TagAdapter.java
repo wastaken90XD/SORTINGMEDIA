@@ -79,12 +79,17 @@ public class TagAdapter extends RecyclerView.Adapter<TagAdapter.ViewHolder> {
         holder.tagCheck.setOnCheckedChangeListener(null);
         holder.tagCheck.setChecked(applied);
 
-        holder.tagCheck.setOnCheckedChangeListener((btn, checked) -> {
-            if (listener != null) listener.onTagToggle(tagName, checked);
+        holder.tagCheck.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+            @Override public void onCheckedChanged(android.widget.CompoundButton btn,
+                                                   boolean checked) {
+                if (listener != null) listener.onTagToggle(tagName, checked);
+            }
         });
 
-        holder.itemView.setOnClickListener(v -> {
-            holder.tagCheck.toggle();
+        holder.itemView.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                holder.tagCheck.toggle();
+            }
         });
     }
 

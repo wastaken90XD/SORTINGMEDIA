@@ -87,11 +87,26 @@ public class MetadataWriter {
         // ".JPEG" on Turkish/Azeri devices ('I' -> dotless 'ı').
         String lower = filePath.toLowerCase(java.util.Locale.US);
         if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
-            return transform(file, (in, out, buf) -> writeJpegStream(in, out, buf, tags));
+            return transform(file, new StreamTransform() {
+                @Override public void run(InputStream in, OutputStream out, byte[] buf)
+                        throws IOException {
+                    writeJpegStream(in, out, buf, tags);
+                }
+            });
         } else if (lower.endsWith(".png")) {
-            return transform(file, (in, out, buf) -> writePngStream(in, out, buf, tags));
+            return transform(file, new StreamTransform() {
+                @Override public void run(InputStream in, OutputStream out, byte[] buf)
+                        throws IOException {
+                    writePngStream(in, out, buf, tags);
+                }
+            });
         } else if (lower.endsWith(".mp4") || lower.endsWith(".mov")) {
-            return transform(file, (in, out, buf) -> writeMp4Stream(in, out, buf, tags));
+            return transform(file, new StreamTransform() {
+                @Override public void run(InputStream in, OutputStream out, byte[] buf)
+                        throws IOException {
+                    writeMp4Stream(in, out, buf, tags);
+                }
+            });
         }
 
         Log.w(TAG, "Unsupported format: " + filePath);

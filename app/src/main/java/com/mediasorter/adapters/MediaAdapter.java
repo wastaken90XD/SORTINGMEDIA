@@ -272,36 +272,44 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
 
         loader.load(file, holder.thumbnail);
 
-        holder.itemView.setOnClickListener(v -> {
-            if (selectMode) {
-                toggleSelection(file.getPath(), holder);
-            } else {
-                setSelected(file.getPath());
-                if (listener != null) listener.onFileClick(file);
+        holder.itemView.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (selectMode) {
+                    toggleSelection(file.getPath(), holder);
+                } else {
+                    setSelected(file.getPath());
+                    if (listener != null) listener.onFileClick(file);
+                }
             }
         });
-        holder.checkBox.setOnClickListener(v -> {
-            if (selectMode) toggleSelection(file.getPath(), holder);
+        holder.checkBox.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (selectMode) toggleSelection(file.getPath(), holder);
+            }
         });
 
         // Quick tags live on the tag text so long-press remains dedicated to
         // multi-selection (the batch workflow users expect). Tapping the tag
         // text while a selection is active opens the quick-tag popup for the
         // whole selection — the fastest way to tag many files at once.
-        holder.fileTags.setOnClickListener(v -> {
-            if (selectMode && selected.isEmpty()) {
-                toggleSelection(file.getPath(), holder);
-            } else if (longClickListener != null) {
-                longClickListener.onFileLongClick(file, holder.fileTags);
+        holder.fileTags.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (selectMode && selected.isEmpty()) {
+                    toggleSelection(file.getPath(), holder);
+                } else if (longClickListener != null) {
+                    longClickListener.onFileLongClick(file, holder.fileTags);
+                }
             }
         });
 
-        holder.itemView.setOnLongClickListener(v -> {
-            if (!selectMode) enterSelectMode();
-            if (!selected.contains(file.getPath())) {
-                toggleSelection(file.getPath(), holder);
+        holder.itemView.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                if (!selectMode) enterSelectMode();
+                if (!selected.contains(file.getPath())) {
+                    toggleSelection(file.getPath(), holder);
+                }
+                return true;
             }
-            return true;
         });
     }
 
