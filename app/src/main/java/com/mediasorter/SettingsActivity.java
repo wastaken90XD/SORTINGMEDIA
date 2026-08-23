@@ -665,7 +665,7 @@ public class SettingsActivity extends Activity {
                 btnDel.setOnClickListener(new View.OnClickListener() {
                     @Override public void onClick(View v) {
                         tagListManager.deleteList(idx);
-                        recreate();
+                        if (!isInitializing) recreate();
                     }
                 });
                 nameRow.addView(btnDel);
@@ -699,7 +699,7 @@ public class SettingsActivity extends Activity {
                 Toast.makeText(SettingsActivity.this,
                     added + " tags added to " + tagListManager.getActiveList().getName(),
                     Toast.LENGTH_SHORT).show();
-                recreate();
+                if (!isInitializing) recreate();
             }
         });
         root.addView(btnBulkActive);
@@ -1810,7 +1810,7 @@ public class SettingsActivity extends Activity {
                     String name = input.getText().toString().trim();
                     if (!name.isEmpty()) {
                         tagListManager.createList(name);
-                        recreate();
+                        if (!isInitializing) recreate();
                     }
                 }
             })
@@ -1960,7 +1960,7 @@ public class SettingsActivity extends Activity {
                     if (!path.isEmpty()) {
                         folderManager.addFolder(path);
                         Toast.makeText(SettingsActivity.this, "Folder added", Toast.LENGTH_SHORT).show();
-                        recreate();
+                        if (!isInitializing) recreate();
                     }
                 }
             })
