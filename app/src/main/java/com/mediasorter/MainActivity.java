@@ -497,7 +497,7 @@ public class MainActivity extends Activity
                                 && currentIndex < fullList.size()
                                 && fullList.get(currentIndex) != null
                                 && path.equals(fullList.get(currentIndex).getPath())) {
-                            previewManager.updateStatusIndicator(fullList.get(currentIndex));
+                            previewManager.updateStatus(fullList.get(currentIndex));
                         }
                         updateStatsBarAsync();
                     }
@@ -1654,7 +1654,7 @@ public class MainActivity extends Activity
         // Update both visible indicators in the same UI turn; no refresh is
         // needed to make a gesture/button flag visible.
         if (mediaAdapter != null) mediaAdapter.updateFileStatus(file);
-        if (previewManager != null) previewManager.updateStatusIndicator(file);
+        if (previewManager != null) previewManager.updateStatus(file);
         if (galleryAdapter != null) galleryAdapter.notifyDataSetChanged();
         autoOrganizer.setActiveListIndex(currentIndex);
         autoOrganizer.applyToSingle(file);
@@ -5680,6 +5680,9 @@ private Spinner makeSpinner(String[] options) {
         for (MediaFile file : selected) {
             if (status == FileStatus.Status.FLAGGED) fileStatus.setFlagged(file.getPath());
             else if (status == FileStatus.Status.SKIPPED) fileStatus.setSkipped(file.getPath());
+            if (currentIndex >= 0 && currentIndex < fullList.size()
+                    && file.getPath().equals(fullList.get(currentIndex).getPath())
+                    && previewManager != null) previewManager.updateStatus(file);
         }
         galleryAdapter.notifyDataSetChanged();
         scheduleRefresh();

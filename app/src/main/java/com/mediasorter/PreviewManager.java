@@ -723,6 +723,12 @@ public class PreviewManager {
         flagState.setTextColor(flagged ? 0xFFFFAA00 : 0xFFAAAAAA);
     }
 
+    /** Repaint status controls without reloading the preview bitmap/video. */
+    public void updateStatus(MediaFile file) {
+        if (file == null) return;
+        updateButtonStates(file);
+    }
+
     private void updateButtonStates(MediaFile file) {
         if (fileStatus == null) return;
         String path = file.getPath();
