@@ -78,9 +78,13 @@ public class GestureSettings {
     public static final String KEY_LAST_MACRO = "last_macro_id";
 
     private final SharedPreferences prefs;
+    private final SharedPreferences settingsPrefs;
 
     public GestureSettings(Context context) {
         this.prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        // dpad_enabled is a UI/control setting, so it has one canonical home
+        // in settings_prefs rather than being duplicated in gesture_prefs.
+        this.settingsPrefs = context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
     }
 
     public static class GestureMacro {
@@ -394,11 +398,12 @@ public class GestureSettings {
     // ── D-pad enable / disable toggle ─────────────────────────────────────────
 
     public boolean isDpadEnabled() {
-        return prefs.getBoolean(KEY_DPAD_ENABLED, true);
+        return settingsPrefs.getBoolean(KEY_DPAD_ENABLED, true);
     }
 
     public void setDpadEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_DPAD_ENABLED, enabled).apply();
+        settingsPrefs.edit().putBoolean(KEY_DPAD_ENABLED, enabled).apply();
+        prefs.edit().remove(KEY_DPAD_ENABLED).apply();
     }
 
     // ── Always-prompt-for-tags toggle ─────────────────────────────────────────
@@ -426,8 +431,8 @@ public class GestureSettings {
             String action = GestureConstants.defaultActionForInput(input);
             editor.putString(input, action + "|");
         }
-        editor.putBoolean(KEY_DPAD_ENABLED, true);
         editor.putBoolean(KEY_TAGS_PROMPT, true);
         editor.apply();
+        settingsPrefs.edit().putBoolean(KEY_DPAD_ENABLED, true).apply();
     }
 }

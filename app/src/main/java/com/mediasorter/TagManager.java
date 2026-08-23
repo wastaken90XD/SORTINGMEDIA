@@ -92,7 +92,12 @@ public class TagManager {
         return list;
     }
 
-    private void saveRecentTags() {
+    public synchronized void reloadRecentTags() {
+        recentTags.clear();
+        recentTags.addAll(loadRecentTags());
+    }
+
+    private synchronized void saveRecentTags() {
         StringBuilder sb = new StringBuilder();
         for (String t : recentTags) {
             if (sb.length() > 0) sb.append(",");
@@ -101,7 +106,7 @@ public class TagManager {
         prefs.edit().putString(KEY_RECENT, sb.toString()).apply();
     }
 
-    private void addToRecent(String tagName) {
+    private synchronized void addToRecent(String tagName) {
         String plain = TagText.plain(tagName);
         if (plain.isEmpty()) return;
         recentTags.remove(plain);
@@ -327,7 +332,7 @@ public class TagManager {
         }
     }
 
-    public List<Tag> getRecentTags(int n) {
+    public synchronized List<Tag> getRecentTags(int n) {
         List<Tag> result = new ArrayList<>();
         synchronized (tagMap) {
             int count = 0;

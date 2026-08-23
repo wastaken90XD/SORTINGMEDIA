@@ -37,6 +37,16 @@ public class FileStatus {
         listener = value;
     }
 
+    /** Re-read imported status sets without replacing the manager/listener. */
+    public synchronized void reload() {
+        skipped.clear();
+        flagged.clear();
+        done.clear();
+        skipped.addAll(prefs.getStringSet(KEY_SKIP, new HashSet<String>()));
+        flagged.addAll(prefs.getStringSet(KEY_FLAG, new HashSet<String>()));
+        done.addAll(prefs.getStringSet(KEY_DONE, new HashSet<String>()));
+    }
+
     public synchronized void setSkipped(String path) {
         if (path == null) return;
         skipped.add(path);

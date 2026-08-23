@@ -171,6 +171,8 @@ public class MainActivity extends Activity
             if (previewManager != null) refreshTagListSpinner();
         }
         if (gestureSettings != null) lastRunMacroId = gestureSettings.getLastRunMacroId();
+        if (fileStatus != null) fileStatus.reload();
+        if (tagManager != null) tagManager.reloadRecentTags();
         if (autoOrganizer != null) autoOrganizer.reloadRules();
         if (autoOrganizer != null && !folderManager.getFolders().isEmpty()) {
             groupManager.setWatchedRoot(folderManager.getFolders().get(0));
@@ -205,6 +207,10 @@ public class MainActivity extends Activity
         }
         if (tagBarContainer != null) {
             tagBarContainer.setVisibility(sp.getBoolean("show_tag_bar", true) ? View.VISIBLE : View.GONE);
+        }
+        LinearLayout legacyTagPanel = findViewById(R.id.tagPanel);
+        if (legacyTagPanel != null && !sp.getBoolean("show_tag_bar", true)) {
+            legacyTagPanel.setVisibility(View.GONE);
         }
         TextView stats = statsBar;
         if (stats != null) stats.setVisibility(sp.getBoolean("show_stats_bar", true)
@@ -243,6 +249,7 @@ public class MainActivity extends Activity
         if (!enabled && tagPanel != null) {
             tagPanel.setVisibility(View.GONE);
         }
+        if (tagBarContainer != null && !enabled) tagBarContainer.setVisibility(View.GONE);
         if (btnToggle != null) {
             syncTagToggleButton(btnToggle,
                     enabled && tagPanel != null
@@ -1467,6 +1474,7 @@ public class MainActivity extends Activity
             tagManager.applyTag(file, tag);
             mediaAdapter.updateFileTags(file);
         }
+        if (tagAdapter != null) tagAdapter.setTags(tagManager.getAllTags());
         syncUiAfterTagging(targets);
         refreshTagBar();
         Toast.makeText(this, "Tagged " + targets.size() + " files as " + tag,
@@ -1893,6 +1901,8 @@ public class MainActivity extends Activity
                     tagManager.applyTag(file, generated);
                     mediaAdapter.updateFileTags(file);
                 }
+                if (tagAdapter != null) tagAdapter.setTags(tagManager.getAllTags());
+                refreshTagBar();
                 syncUiAfterTagging(selectedFiles);
                 Toast.makeText(MainActivity.this,
                         "Tagged " + selectedFiles.size() + " files as " + generated,

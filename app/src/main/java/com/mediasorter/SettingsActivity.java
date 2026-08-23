@@ -252,7 +252,7 @@ public class SettingsActivity extends Activity {
                 GestureConstants.INPUT_VOLUME_UP_LONG, GestureConstants.INPUT_VOLUME_DOWN_LONG});
         addGestureInputGroup(root, "Hardware", new String[]{
                 GestureConstants.INPUT_HARDWARE_BACK, GestureConstants.INPUT_HARDWARE_MENU});
-        Button reset = makeButton("Reset gestures to defaults");
+        Button reset = makeButton("Reset to defaults");
         reset.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
                 gestureSettings.resetToDefaults();

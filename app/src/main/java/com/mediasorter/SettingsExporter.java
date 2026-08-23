@@ -32,14 +32,14 @@ public final class SettingsExporter {
     private static final String[] PREFS_KEYS = {
             "gesture_prefs", "tag_list_prefs", "organizer_prefs", "folder_prefs",
             "cache_prefs", "thumb_prefs", "file_status_prefs", "window_prefs",
-            "settings_prefs", "tag_preset_prefs"
+            "settings_prefs", "tag_preset_prefs", "tag_recent_prefs"
     };
 
     private static final Set<String> SETTINGS_KEYS = new HashSet<String>(Arrays.asList(
             "auto_advance_flag", "auto_advance_tag", "auto_skip_dupes",
             "confirm_delete", "confirm_trash", "dpad_enabled", "tags_prompt_enabled", "volume_keys_enabled",
             "long_press_duration", "swipe_min_distance", "swipe_min_velocity",
-            "swipe_left_default", "swipe_right_default", "show_hidden",
+            "show_hidden",
             "show_seq_labels", "show_tag_count", "skip_videos", "skip_images",
             "strip_on_move", "video_autoplay", "video_loop", "precache_enabled",
             "precache_radius", "page_size", "max_undo_history", "metadata_backup",
@@ -64,7 +64,7 @@ public final class SettingsExporter {
             GestureConstants.INPUT_VOLUME_DOWN_LONG, GestureConstants.INPUT_TAP_SINGLE,
             GestureConstants.INPUT_TAP_DOUBLE, GestureConstants.INPUT_TAP_LONG,
             GestureConstants.INPUT_HARDWARE_BACK, GestureConstants.INPUT_HARDWARE_MENU,
-            "dpad_enabled", "tags_prompt_enabled", "gesture_macros",
+            "tags_prompt_enabled", "gesture_macros",
             GestureSettings.KEY_LAST_MACRO
     ));
 
@@ -195,6 +195,9 @@ public final class SettingsExporter {
         if ("window_prefs".equals(prefsName)) return "window_size".equals(key);
         if ("organizer_prefs".equals(prefsName)) return "rules".equals(key);
         if ("tag_preset_prefs".equals(prefsName)) return key.matches("preset_[0-9]+");
+        if ("tag_recent_prefs".equals(prefsName)) {
+            return "recent_tags".equals(key) || "tags_enabled".equals(key);
+        }
         if ("tag_list_prefs".equals(prefsName)) {
             return "list_count".equals(key) || "active_list".equals(key)
                     || key.matches("tag_lists_(name|default|tags)_[0-9]+");
