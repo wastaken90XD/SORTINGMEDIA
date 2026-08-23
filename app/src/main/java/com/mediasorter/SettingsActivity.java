@@ -982,6 +982,10 @@ public class SettingsActivity extends Activity {
                                 });
                         runOnUiThread(new Runnable() {
                             @Override public void run() {
+                                for (MediaFile file : files) file.setDuplicate(false);
+                                for (DuplicateFinder.DuplicateGroup group : dupes) {
+                                    for (MediaFile file : group.files) file.setDuplicate(true);
+                                }
                                 if (dupes.isEmpty()) {
                                     Toast.makeText(SettingsActivity.this, "No duplicates found", Toast.LENGTH_SHORT).show();
                                     return;

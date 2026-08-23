@@ -1732,6 +1732,10 @@ public class MainActivity extends Activity
         // MainActivity.currentIndex is the single source of truth. Update the
         // adapter's provider-driven highlight before any preview work.
         currentIndex = absoluteIndex;
+        if (!windowManager.isInWindow(absoluteIndex)) {
+            windowManager.centerOn(absoluteIndex);
+            updateWindow();
+        }
         if (mediaAdapter != null) mediaAdapter.notifyHighlightChanged();
         MediaFile file = fullList.get(absoluteIndex);
         previewManager.load(file);
@@ -5051,6 +5055,8 @@ private Spinner makeSpinner(String[] options) {
                 if (filter == FilterManager.Filter.BY_TAG) {
                     if (filterManager.isActive(filter)) {
                         filterManager.setTagFilter("");
+                        activeTagFilters.clear();
+                        refreshTagBar();
                         refreshGalleryFilterChips();
                         scheduleRefresh();
                     } else {
@@ -5080,6 +5086,8 @@ private Spinner makeSpinner(String[] options) {
         chip.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
                 filterManager.clearFilters();
+                activeTagFilters.clear();
+                refreshTagBar();
                 refreshGalleryFilterChips();
                 scheduleRefresh();
             }
@@ -5102,7 +5110,10 @@ private Spinner makeSpinner(String[] options) {
                 .setItems(names, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         if (which < 0 || which >= names.length) return;
-                        filterManager.setTagFilter(names[which]);
+                        activeTagFilters.clear();
+                        activeTagFilters.add(names[which]);
+                        filterManager.setTagFilters(activeTagFilters);
+                        refreshTagBar();
                         refreshGalleryFilterChips();
                         scheduleRefresh();
                     }
@@ -5616,6 +5627,7 @@ private Spinner makeSpinner(String[] options) {
                         for (MediaFile file : snapshot) file.setDuplicate(false);
                         for (DuplicateFinder.DuplicateGroup group : groups) {
                             for (MediaFile file : group.files) {
+                                file.setDuplicate(true);
                                 paths.add(file.getPath());
                                 matches.add(file);
                             }

@@ -273,14 +273,14 @@ public class TagManager {
     public void deleteTag(String name) {
         String plain = TagText.plain(name);
         if (plain.isEmpty()) return;
+        final Tag removed;
+        synchronized (tagMap) {
+            removed = tagMap.remove(plain);
+        }
+        if (removed == null) return;
+        notifyTagsChanged();
         executor.submit(new Runnable() {
-            @Override public void run() {
-                synchronized (tagMap) {
-                    Tag tag = tagMap.remove(plain);
-                    if (tag != null) db.tagDao().delete(tag);
-                }
-                notifyTagsChanged();
-            }
+            @Override public void run() { db.tagDao().delete(removed); }
         });
     }
 

@@ -48,7 +48,7 @@ public final class SettingsExporter {
             "gallery_columns", "gallery_show_filename", "gallery_thumb_quality",
             "gallery_animate_load", "gallery_cell_spacing", "gallery_show_tag_count",
             "gallery_show_flag", "gallery_show_seq", "gallery_mode_active",
-            "gallery_sort", "gallery_scroll", "gallery_low_memory_notice", "sort_sequence",
+            "gallery_sort", "gallery_low_memory_notice", "sort_sequence",
             "sort_tag_rules", "show_stats_bar", "show_tag_bar", "show_search_bar",
             "show_preview", "explorer_width_percent", "random_tag_format",
             "random_tag_custom_pattern", "toolbar_slots", "manual_groups"

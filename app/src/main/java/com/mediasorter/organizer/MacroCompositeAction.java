@@ -79,6 +79,22 @@ public class MacroCompositeAction extends Action {
         }
     }
 
+    @Override
+    public boolean undo(MediaFile file, Context context, TagManager tagManager,
+                        BatchRenameManager renamer, FileStatus fileStatus) {
+        if (file == null) return false;
+        boolean okay = true;
+        for (int i = actions.size() - 1; i >= 0; i--) {
+            Action action = actions.get(i);
+            if (action != null && !action.undo(file, context, tagManager, renamer, fileStatus)) {
+                // A child without an explicit inverse is still followed by
+                // the organizer snapshot restore; keep walking in reverse.
+                okay = false;
+            }
+        }
+        return okay;
+    }
+
     /** Called by AutoOrganizer for the one undo entry representing the macro. */
     public boolean undoCaptured(String originalPath, String currentPath,
                                 Context context, TagManager tagManager,
