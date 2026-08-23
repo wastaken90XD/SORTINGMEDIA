@@ -401,6 +401,8 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
             holder.selectionOrder.setVisibility(View.GONE);
             holder.itemView.setBackgroundColor(highlighted ? 0xFF1A1A4E : 0x00000000);
         }
+        // Highlight payloads must also preserve the flagged-row indicator.
+        bindFlagIndicator(holder, file);
     }
 
     /** Accent-tinted row makes a flagged file visible without an icon. */
