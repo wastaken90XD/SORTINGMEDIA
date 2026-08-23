@@ -155,7 +155,6 @@ public class GroupManager {
     private List<Group> groupByColor(List<MediaFile> files) {
         if (!hasColorProfiles(files)) {
             lastError = "Run color analysis first.";
-            Group empty = new Group("Run color analysis first.", Group.GroupBy.COLOR_PROFILE);
             return new ArrayList<Group>();
         }
         Map<String, Group> map = new LinkedHashMap<String, Group>();

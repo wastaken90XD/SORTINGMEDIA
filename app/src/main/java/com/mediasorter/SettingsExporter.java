@@ -292,6 +292,7 @@ public final class SettingsExporter {
             JSONObject gestures = root.getJSONObject("gestures");
             SharedPreferences gesturePrefs = context.getSharedPreferences(
                     "gesture_prefs", Context.MODE_PRIVATE);
+            clearKnownValues(gesturePrefs, "gesture_prefs", result);
             Iterator<String> gestureKeys = gestures.keys();
             while (gestureKeys.hasNext()) {
                 String key = gestureKeys.next();
@@ -310,7 +311,7 @@ public final class SettingsExporter {
             // object (dpad toggle, last macro id, etc.).
             JSONObject gesturePrefsObject = preferences.optJSONObject("gesture_prefs");
             if (gesturePrefsObject != null) {
-                applyPreferenceObject(context, "gesture_prefs", gesturePrefsObject, result);
+                applyPreferenceObjectWithoutClear(context, "gesture_prefs", gesturePrefsObject, result);
             }
 
             // 5. Macros
@@ -363,9 +364,38 @@ public final class SettingsExporter {
                 || "gesture_prefs".equals(prefsName) || "tag_preset_prefs".equals(prefsName);
     }
 
+    private static void clearKnownValues(SharedPreferences prefs, String prefsName,
+                                          ApplyResult result) {
+        try {
+            SharedPreferences.Editor editor = prefs.edit();
+            boolean changed = false;
+            for (String key : prefs.getAll().keySet()) {
+                if (isKnownKey(prefsName, key)) {
+                    editor.remove(key);
+                    changed = true;
+                }
+            }
+            if (changed && !editor.commit()) recordFailure(result, prefsName + ".clear");
+        } catch (Exception error) {
+            recordFailure(result, prefsName + ".clear", error);
+        }
+    }
+
     private static void applyPreferenceObject(Context context, String prefsName,
                                               JSONObject values, ApplyResult result) {
         SharedPreferences prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE);
+        clearKnownValues(prefs, prefsName, result);
+        applyPreferenceValues(prefs, prefsName, values, result);
+    }
+
+    private static void applyPreferenceObjectWithoutClear(Context context, String prefsName,
+                                                          JSONObject values, ApplyResult result) {
+        SharedPreferences prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE);
+        applyPreferenceValues(prefs, prefsName, values, result);
+    }
+
+    private static void applyPreferenceValues(SharedPreferences prefs, String prefsName,
+                                              JSONObject values, ApplyResult result) {
         Iterator<String> keys = values.keys();
         while (keys.hasNext()) {
             String key = keys.next();

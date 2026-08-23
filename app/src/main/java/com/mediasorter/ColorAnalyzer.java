@@ -309,6 +309,7 @@ public class ColorAnalyzer {
 
         String newName = prefix + "_" + oldName + ext;
         File oldFile = new File(r.path);
+        String oldPath = oldFile.getAbsolutePath();
         File newFile = new File(oldFile.getParent(), newName);
 
         if (newFile.equals(oldFile)) return;      // nothing to do
@@ -316,6 +317,11 @@ public class ColorAnalyzer {
         if (oldFile.renameTo(newFile)) {
             r.path = newFile.getAbsolutePath();
             f.setPath(newFile.getAbsolutePath());
+            String family = f.getColorFamily();
+            if (!family.isEmpty()) {
+                LAST_COLOR_FAMILIES.remove(oldPath);
+                LAST_COLOR_FAMILIES.put(f.getPath(), family);
+            }
         }
         // else: leave r.path unchanged so the caller sees what happened
     }

@@ -159,7 +159,13 @@ public class SettingsActivity extends Activity {
         root.addView(makeLabel("Available actions:"));
         final List<String> ids = GestureConstants.getToolbarActionIds();
         final String[] labels = new String[ids.size()];
-        for (int i = 0; i < ids.size(); i++) labels[i] = GestureConstants.label(ids.get(i));
+        StringBuilder available = new StringBuilder();
+        for (int i = 0; i < ids.size(); i++) {
+            labels[i] = GestureConstants.label(ids.get(i));
+            if (i > 0) available.append(", ");
+            available.append(labels[i]);
+        }
+        root.addView(makeLabel(available.toString()));
         List<String> saved = loadToolbarSlots();
         final List<Spinner> spinners = new ArrayList<Spinner>();
         for (int slot = 0; slot < 5; slot++) {
