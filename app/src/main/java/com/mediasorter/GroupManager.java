@@ -206,8 +206,11 @@ public class GroupManager {
         for (String value : file.getTags()) {
             if (value == null) continue;
             String tag = value.trim();
-            if (tag.startsWith("link_")) return tag.substring(5);
-            if (tag.startsWith("link-")) return tag.substring(5);
+            if (tag.startsWith("link_") || tag.startsWith("link-")) {
+                String group = tag.substring(5);
+                int sequence = group.indexOf("_seq_");
+                return sequence > 0 ? group.substring(0, sequence) : group;
+            }
         }
         return "";
     }

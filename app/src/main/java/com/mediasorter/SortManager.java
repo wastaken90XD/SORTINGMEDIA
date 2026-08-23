@@ -434,8 +434,11 @@ public class SortManager {
         for (String tag : file.getTags()) {
             if (tag == null) continue;
             String plain = tag.trim();
-            if (plain.startsWith("link_")) return plain.substring(5);
-            if (plain.startsWith("link-")) return plain.substring(5);
+            if (plain.startsWith("link_") || plain.startsWith("link-")) {
+                String group = plain.substring(5);
+                int marker = group.indexOf("_seq_");
+                return marker > 0 ? group.substring(0, marker) : group;
+            }
         }
         return "";
     }

@@ -73,6 +73,7 @@ public class TagManager {
                         tagMap.put(plain, t);
                     }
                 }
+                notifyTagsChanged();
             }
         });
     }

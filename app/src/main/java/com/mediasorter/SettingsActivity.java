@@ -194,16 +194,17 @@ public class SettingsActivity extends Activity {
 
     private List<String> loadToolbarSlots() {
         List<String> result = new ArrayList<String>();
-        String raw = settingsPrefs.getString("toolbar_slots", "[]");
+        String raw = settingsPrefs.getString("toolbar_slots", "");
+        boolean hasSavedSlots = raw != null && !raw.trim().isEmpty();
         try {
-            org.json.JSONArray array = new org.json.JSONArray(raw);
+            org.json.JSONArray array = new org.json.JSONArray(hasSavedSlots ? raw : "[]");
             for (int i = 0; i < array.length() && result.size() < 5; i++) {
                 String id = array.optString(i, "");
                 if (GestureConstants.isKnownAction(id) && !GestureConstants.ACTION_DONE.equals(id)
                         && !GestureConstants.ACTION_NOTHING.equals(id)) result.add(id);
             }
         } catch (Exception ignored) {}
-        if (result.isEmpty()) {
+        if (result.isEmpty() && !hasSavedSlots) {
             result.add(GestureConstants.ACTION_FLAG);
             result.add(GestureConstants.ACTION_QUICK_TAGS);
             result.add(GestureConstants.ACTION_SURPRISE_ME);
@@ -347,7 +348,8 @@ public class SettingsActivity extends Activity {
             List<String> ids = GestureConstants.getActionIds(category);
             boolean headerAdded = false;
             for (String id : ids) {
-                if (GestureConstants.ACTION_DONE.equals(id)) continue;
+                if (GestureConstants.ACTION_DONE.equals(id)
+                        || GestureConstants.ACTION_NOTHING.equals(id)) continue;
                 String label = GestureConstants.label(id);
                 if (!lower.isEmpty() && !label.toLowerCase().contains(lower)) continue;
                 if (!headerAdded) {
@@ -889,10 +891,8 @@ public class SettingsActivity extends Activity {
                                 public void run() {
                                     SettingsExporter.ApplyResult res = SettingsExporter.applyImport(SettingsActivity.this, rootObj);
                                     if (res.isSuccess) {
-                                        // Trigger rescan of newly imported folders
-                                        FolderManager fm = new FolderManager(SettingsActivity.this);
-                                        indexer.scanFolders(fm.getFolders());
-
+                                        // MainActivity reconciles newly imported folders when this
+                                        // screen finishes; this Activity does not restart itself.
                                         String summary = "Import complete — " 
                                                 + res.preferencesCount + " preferences, "
                                                 + res.foldersCount + " folders, "

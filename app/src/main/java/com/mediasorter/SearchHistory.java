@@ -28,9 +28,11 @@ public class SearchHistory {
     public synchronized List<String> getRecentSearches() {
         String raw = prefs.getString(KEY_HISTORY, "");
         List<String> result = parseJsonArray(raw);
-        if (result.isEmpty() && raw.trim().isEmpty()) {
+        if (result.isEmpty() && !raw.trim().startsWith("[")) {
             // Migrate the pre-JSON newline format once it is encountered.
-            result = parseLegacy(prefs.getString(KEY_LEGACY_RECENT, ""));
+            String legacy = raw.trim().isEmpty()
+                    ? prefs.getString(KEY_LEGACY_RECENT, "") : raw;
+            result = parseLegacy(legacy);
         }
         return result;
     }

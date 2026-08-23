@@ -174,10 +174,10 @@ public class MainActivity extends Activity
         rebuildToolbarIfNeeded();
         if (previewManager != null && gestureSettings != null) updateDpadLabels();
         if (indexer.isScanning()) return;
-        if (!indexer.getIndex().isEmpty()) {
-            for (String folder : folderManager.getFolders()) {
-                indexer.rescan(folder);
-            }
+        // Reconcile after returning from Settings as well as after the first
+        // scan; imported folders may be the only source of the initial index.
+        for (String folder : folderManager.getFolders()) {
+            indexer.rescan(folder);
         }
     }
 
@@ -1114,14 +1114,15 @@ public class MainActivity extends Activity
                 int tagged = 0;
                 int completed = 0;
                 int flagged = 0;
+                Set<String> countedPaths = new java.util.HashSet<String>();
                 for (MediaFile file : filteredSnapshot) {
-                    if (file == null) continue;
+                    if (file == null || !countedPaths.add(file.getPath())) continue;
                     if (!file.getTags().isEmpty()) tagged++;
                     if (fileStatus != null && fileStatus.isDone(file.getPath())) completed++;
                     if (fileStatus != null && fileStatus.isFlagged(file.getPath())) flagged++;
                 }
                 final String text = "Total: " + totalSnapshot.size()
-                        + "  Filtered: " + filteredSnapshot.size()
+                        + "  Filtered: " + countedPaths.size()
                         + "  Tagged: " + tagged
                         + "  Completed: " + completed
                         + "  Flagged: " + flagged;
@@ -1373,7 +1374,7 @@ public class MainActivity extends Activity
             case PREV_FILE: navigatePrev(); break;
             case SKIP: handleSkip(); break;
             case FLAG: handleFlag(); break;
-            case DONE: handleDone(); break; // legacy mappings only; not a default/picker action
+            case DONE: break; // retained only for deserializing old mappings; no direct Done UI action
             case FILTER_CYCLE: cycleFilter(); break;
             case QUICK_TAGS: openQuickTagAction(); break;
             case QUICK_RANDOM_TAG: applyQuickRandomTag(); break;
@@ -1623,13 +1624,6 @@ public class MainActivity extends Activity
         updateStatsBarAsync();
     }
 
-    private void handleDone() {
-    if (currentIndex < 0 || currentIndex >= fullList.size()) return;
-    MediaFile file = fullList.get(currentIndex);
-    fileStatus.setDone(file.getPath());
-    autoOrganizer.applyToSingle(file); 
-    navigateNext();
-}
     private void cycleFilter() {
         FilterManager.Filter[] filters = {
                 FilterManager.Filter.ALL, FilterManager.Filter.UNTAGGED,
@@ -4255,6 +4249,8 @@ private Spinner makeSpinner(String[] options) {
                 mediaAdapter.updateFile(file);
                 mediaAdapter.notifyHighlightChanged();
                 if (galleryAdapter != null) galleryAdapter.setFiles(fullList);
+                updateProgress();
+                updateStatsBarAsync();
             }
         });
     }
@@ -4553,8 +4549,9 @@ private Spinner makeSpinner(String[] options) {
     private List<String> getToolbarSlotIds() {
         List<String> result = new ArrayList<String>();
         String raw = galleryPrefs().getString("toolbar_slots", "");
+        boolean hasSavedSlots = raw != null && !raw.trim().isEmpty();
         try {
-            if (raw != null && !raw.trim().isEmpty()) {
+            if (hasSavedSlots) {
                 org.json.JSONArray array = new org.json.JSONArray(raw);
                 for (int i = 0; i < array.length() && result.size() < 5; i++) {
                     String id = array.optString(i, "");
@@ -4567,7 +4564,7 @@ private Spinner makeSpinner(String[] options) {
         } catch (Exception error) {
             android.util.Log.w("MainActivity", "Invalid toolbar_slots", error);
         }
-        if (result.isEmpty()) {
+        if (result.isEmpty() && !hasSavedSlots) {
             result.add(GestureConstants.ACTION_FLAG);
             result.add(GestureConstants.ACTION_QUICK_TAGS);
             result.add(GestureConstants.ACTION_SURPRISE_ME);
@@ -4630,6 +4627,7 @@ private Spinner makeSpinner(String[] options) {
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_FILTER_PICKER);
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_GROUP_PICKER);
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_OPEN_GALLERY);
+        addOverflowCustom(menu, actionByTitle, "Gallery settings", "GALLERY_SETTINGS");
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_TOGGLE_GALLERY);
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_TOGGLE_STATS_BAR);
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_TOGGLE_INFO_OVERLAY);
@@ -4641,6 +4639,7 @@ private Spinner makeSpinner(String[] options) {
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_SURPRISE_ME);
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_QUICK_RANDOM_TAG);
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_UNDO);
+        addOverflowCustom(menu, actionByTitle, "Run rules", "RUN_RULES");
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_OPEN_RULES);
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_TRIGGER_RESCAN);
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_DELETE);
@@ -4682,12 +4681,21 @@ private Spinner makeSpinner(String[] options) {
             @Override public boolean onMenuItemClick(android.view.MenuItem item) {
                 String id = actionByTitle.get(item.getTitle().toString());
                 if ("ABOUT".equals(id)) showAboutFromOverflow();
+                else if ("GALLERY_SETTINGS".equals(id)) showGallerySettings();
+                else if ("RUN_RULES".equals(id)) openRules();
                 else if (id != null) performToolbarAction(id);
                 else return false;
                 return true;
             }
         });
         popup.show();
+    }
+
+    private void addOverflowCustom(android.view.Menu menu, Map<String, String> actionByTitle,
+                                   String title, String actionId) {
+        if (actionByTitle.containsKey(title)) return;
+        menu.add(title);
+        actionByTitle.put(title, actionId);
     }
 
     private void addOverflowAction(android.view.Menu menu, Map<String, String> actionByTitle,
@@ -4809,7 +4817,7 @@ private Spinner makeSpinner(String[] options) {
             refreshGalleryFilterChips();
             updateGalleryCount();
             updateGalleryMemoryWindow();
-            if (galleryLowMemory && userInitiated && !galleryPrefs().getBoolean(
+            if (galleryLowMemory && !galleryPrefs().getBoolean(
                     "gallery_low_memory_notice", false)) {
                 galleryPrefs().edit().putBoolean("gallery_low_memory_notice", true).apply();
                 Toast.makeText(this, "Low memory device — gallery optimized automatically.",
@@ -5602,7 +5610,6 @@ private Spinner makeSpinner(String[] options) {
         for (MediaFile file : selected) {
             if (status == FileStatus.Status.FLAGGED) fileStatus.setFlagged(file.getPath());
             else if (status == FileStatus.Status.SKIPPED) fileStatus.setSkipped(file.getPath());
-            else if (status == FileStatus.Status.DONE) fileStatus.setDone(file.getPath());
         }
         galleryAdapter.notifyDataSetChanged();
         scheduleRefresh();
@@ -5629,8 +5636,11 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void showGalleryMacroPicker() {
-        final List<GestureSettings.GestureMacro> macros = gestureSettings.loadMacros();
-        if (macros.isEmpty()) return;
+        final List<GestureSettings.GestureMacro> macros = gestureSettings.getUsableMacros();
+        if (macros.isEmpty()) {
+            Toast.makeText(this, "No steps", Toast.LENGTH_SHORT).show();
+            return;
+        }
         String[] names = new String[macros.size()];
         for (int i = 0; i < macros.size(); i++) names[i] = macros.get(i).name;
         new AlertDialog.Builder(this)
