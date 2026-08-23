@@ -171,7 +171,15 @@ public class MainActivity extends Activity
             if (previewManager != null) refreshTagListSpinner();
         }
         if (gestureSettings != null) lastRunMacroId = gestureSettings.getLastRunMacroId();
+        if (autoOrganizer != null) autoOrganizer.reloadRules();
+        if (autoOrganizer != null && !folderManager.getFolders().isEmpty()) {
+            groupManager.setWatchedRoot(folderManager.getFolders().get(0));
+        }
         rebuildToolbarIfNeeded();
+        if (galleryRoot != null) {
+            boolean persistedGallery = galleryPrefs().getBoolean("gallery_mode_active", false);
+            if (persistedGallery != galleryModeActive) setGalleryMode(persistedGallery, false);
+        }
         if (previewManager != null && gestureSettings != null) updateDpadLabels();
         if (indexer.isScanning()) return;
         // Reconcile after returning from Settings as well as after the first

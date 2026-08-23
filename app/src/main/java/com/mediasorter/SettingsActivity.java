@@ -1049,16 +1049,6 @@ public class SettingsActivity extends Activity {
         // ── 12. Browsing ──────────────────────────────────────────────────────
         root.addView(makeTitle("Browsing"));
 
-        String[] sortOptions = {"Name A-Z", "Name Z-A", "Date Newest", "Oldest", "Size Largest", "Smallest", "Type"};
-        String currentSort = settingsPrefs.getString("default_sort", "Name A-Z");
-        int sortIdx = 0;
-        for (int i = 0; i < sortOptions.length; i++) {
-            if (sortOptions[i].equalsIgnoreCase(currentSort)) { sortIdx = i; break; }
-        }
-        root.addView(makeSpinnerRow("Default sort:", sortOptions, sortIdx, new OnSpinnerSelectedListener() {
-            @Override public void onSelected(String value, int pos) { saveString("default_sort", value); }
-        }));
-
         int currentWindowSize = getSharedPreferences("window_prefs", MODE_PRIVATE).getInt("window_size", 20);
         int currentPageSize = settingsPrefs.getInt("page_size", currentWindowSize);
         root.addView(makeNumericInputRow("Page size (10-500):", currentPageSize, 10, 500, new OnNumericChangeListener() {

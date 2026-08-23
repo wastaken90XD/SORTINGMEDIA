@@ -372,10 +372,12 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
      */
     private void bindSelectionVisual(ViewHolder holder, MediaFile file) {
         boolean isSel = selected.contains(file.getPath());
+        boolean highlighted = highlightProvider != null && highlightProvider.isHighlighted(file);
         if (selectMode) {
             holder.checkBox.setVisibility(View.VISIBLE);
             holder.checkBox.setChecked(isSel);
-            holder.itemView.setBackgroundColor(isSel ? 0xFF2A2A6E : 0x00000000);
+            holder.itemView.setBackgroundColor(isSel ? 0xFF2A2A6E
+                    : highlighted ? 0xFF1A1A4E : 0x00000000);
 
             // Show selection order badge if enabled
             boolean showSeqLabels = holder.itemView.getContext()
@@ -397,8 +399,6 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         } else {
             holder.checkBox.setVisibility(View.GONE);
             holder.selectionOrder.setVisibility(View.GONE);
-            boolean highlighted = highlightProvider != null
-                    && highlightProvider.isHighlighted(file);
             holder.itemView.setBackgroundColor(highlighted ? 0xFF1A1A4E : 0x00000000);
         }
     }

@@ -44,6 +44,7 @@ public class AutoOrganizer {
     }
 
     public List<Rule> getRules() { return rules; }
+    public void reloadRules() { rules = RuleSerializer.loadRules(context); }
     public void setActiveListIndex(int index) { activeIndex = index; }
 
     /**

@@ -43,7 +43,7 @@ public final class SettingsExporter {
             "show_seq_labels", "show_tag_count", "skip_videos", "skip_images",
             "strip_on_move", "video_autoplay", "video_loop", "precache_enabled",
             "precache_radius", "page_size", "max_undo_history", "metadata_backup",
-            "metadata_write_immediate", "default_move_path", "default_sort",
+            "metadata_write_immediate", "default_move_path",
             "default_zoom", "hash_algorithm", "trash_path", "info_overlay_default",
             "gallery_columns", "gallery_show_filename", "gallery_thumb_quality",
             "gallery_animate_load", "gallery_cell_spacing", "gallery_show_tag_count",
