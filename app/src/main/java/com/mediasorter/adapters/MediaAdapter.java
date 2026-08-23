@@ -67,6 +67,14 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         if (!files.isEmpty()) notifyItemRangeChanged(0, files.size(), "highlight");
     }
 
+    /**
+     * Compatibility-facing name for navigation callers. The absolute index is
+     * owned by MainActivity; this adapter only re-reads its provider.
+     */
+    public void setHighlightedPosition(int ignoredAbsoluteIndex) {
+        notifyHighlightChanged();
+    }
+
     /** Rebind one row immediately after a status toggle. */
     public void updateFileStatus(MediaFile file) {
         if (file == null) return;

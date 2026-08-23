@@ -705,6 +705,14 @@ public class MainActivity extends Activity
                 else if (searchHistoryPopup != null) searchHistoryPopup.dismiss();
             }
         });
+        searchBar.setOnEditorActionListener(new TextView.OnEditorActionListener() {
+            @Override public boolean onEditorAction(TextView view, int actionId, android.view.KeyEvent event) {
+                saveSearchToHistory(searchBar.getText().toString().trim());
+                if (searchHistoryPopup != null) searchHistoryPopup.dismiss();
+                scheduleRefresh();
+                return false;
+            }
+        });
         searchBar.setOnLongClickListener(new View.OnLongClickListener() {
             @Override public boolean onLongClick(View v) {
                 showSearchHistoryDialog();
@@ -1241,7 +1249,6 @@ public class MainActivity extends Activity
         final String query = searchBar != null
                 ? searchBar.getText().toString().trim()
                 : "";
-        if (!query.isEmpty()) saveSearchToHistory(query);
         final String currentPathBeforeRefresh = currentIndex >= 0
                 && currentIndex < fullList.size()
                 && fullList.get(currentIndex) != null
@@ -1742,7 +1749,8 @@ public class MainActivity extends Activity
             windowManager.centerOn(absoluteIndex);
             updateWindow();
         }
-        if (mediaAdapter != null) mediaAdapter.notifyHighlightChanged();
+        if (mediaAdapter != null) mediaAdapter.setHighlightedPosition(currentIndex);
+        scrollFileListToCurrent(currentIndex);
         MediaFile file = fullList.get(absoluteIndex);
         previewManager.load(file);
         previewManager.setPosition(absoluteIndex + 1, fullList.size());
@@ -1750,8 +1758,6 @@ public class MainActivity extends Activity
         tagAdapter.setTags(tagManager.getAllTags());
         refreshSidePanel();
 
-        // Keep the file list in sync with the preview (bidirectional)
-        scrollFileListToCurrent(absoluteIndex);
         if (galleryModeActive && galleryBrowser != null) {
             galleryBrowser.scrollToPosition(absoluteIndex);
             updateGalleryMemoryWindow();
@@ -1789,7 +1795,6 @@ public class MainActivity extends Activity
         fileBrowser.post(new Runnable() {
             @Override public void run() {
                 if (fileBrowser == null) return;
-                android.view.ViewGroup.LayoutParams params = fileBrowser.getLayoutParams();
                 LinearLayoutManager manager = (LinearLayoutManager) fileBrowser.getLayoutManager();
                 if (manager == null) return;
                 int itemHeight = 0;
@@ -4285,6 +4290,7 @@ private Spinner makeSpinner(String[] options) {
                 mediaAdapter.updateFile(file);
                 mediaAdapter.notifyHighlightChanged();
                 if (galleryAdapter != null) galleryAdapter.setFiles(fullList);
+                refreshTagBar();
                 updateProgress();
                 updateStatsBarAsync();
             }
@@ -4304,6 +4310,7 @@ private Spinner makeSpinner(String[] options) {
                 mediaAdapter.removeFile(path);
                 mediaAdapter.notifyHighlightChanged();
                 if (galleryAdapter != null) galleryAdapter.setFiles(fullList);
+                refreshTagBar();
                 updateGalleryCount();
                 updateProgress();
             }
@@ -5530,9 +5537,9 @@ private Spinner makeSpinner(String[] options) {
             result = mediaAdapter != null
                     ? mediaAdapter.getSelectedFiles() : new ArrayList<MediaFile>();
         }
-        if (sortManager != null && sortManager.isManualOrderActive()) {
-            sortManager.sort(result);
-        }
+        // Do not sort here: this helper is called by dialogs on the UI
+        // thread. Full list sorting is performed by refreshExecutor; selection
+        // order is already deterministic in each adapter.
         return result;
     }
 

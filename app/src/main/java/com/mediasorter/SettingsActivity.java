@@ -186,8 +186,13 @@ public class SettingsActivity extends Activity {
             if (selectedPosition < 0) selectedPosition = 0;
             spinner.setSelection(selectedPosition);
             final Spinner currentSpinner = spinner;
+            final boolean[] spinnerReady = new boolean[]{false};
             spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                    if (!spinnerReady[0]) {
+                        spinnerReady[0] = true;
+                        return;
+                    }
                     if (!isInitializing) saveToolbarSlots(spinners, ids);
                 }
                 @Override public void onNothingSelected(AdapterView<?> parent) {}
