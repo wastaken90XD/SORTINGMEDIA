@@ -127,6 +127,21 @@ public class GalleryThumbnailLoader {
         scrollSuspended = suspended;
     }
 
+    /**
+     * Suspend from a RecyclerView scroll callback and defer cache clearing
+     * until that RecyclerView has finished its current draw pass.
+     */
+    public void setScrollSuspended(boolean suspended, View postTarget) {
+        scrollSuspended = suspended;
+        if (suspended && postTarget != null) {
+            postTarget.post(new Runnable() {
+                @Override public void run() {
+                    if (scrollSuspended) clearAfterScroll();
+                }
+            });
+        }
+    }
+
     /** Must be called from a posted RecyclerView callback after a frame. */
     public void clearAfterScroll() {
         cancelPendingDecodes();

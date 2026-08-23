@@ -4681,7 +4681,7 @@ private Spinner makeSpinner(String[] options) {
                         lastSweepSelectedIndex = RecyclerView.NO_POSITION;
                         return consumeRelease;
                     }
-                    return sweepTouchActive && sweepMoved;
+                    return false;
                 }
             });
 
@@ -5188,16 +5188,7 @@ private Spinner makeSpinner(String[] options) {
                 && galleryThumbnailLoader.isScrollSuspended() == fast) return;
         galleryFastScrolling = fast;
         if (galleryThumbnailLoader != null) {
-            galleryThumbnailLoader.setScrollSuspended(fast);
-            if (fast && galleryBrowser != null) {
-                galleryBrowser.post(new Runnable() {
-                    @Override public void run() {
-                        if (galleryFastScrolling && galleryThumbnailLoader != null) {
-                            galleryThumbnailLoader.clearAfterScroll();
-                        }
-                    }
-                });
-            }
+            galleryThumbnailLoader.setScrollSuspended(fast, fast ? galleryBrowser : null);
         }
         if (galleryAdapter != null && galleryLayoutManager != null
                 && galleryBrowser != null) {
