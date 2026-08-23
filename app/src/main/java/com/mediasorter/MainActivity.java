@@ -1404,6 +1404,8 @@ public class MainActivity extends Activity
             case OPEN_COLOR_ANALYZER: showColorAnalysisDialog(); break;
             case OPEN_DUPLICATE_FINDER: showDuplicateFinderDialog(); break;
             case OPEN_SETTINGS: startActivity(new Intent(this, SettingsActivity.class)); break;
+            case OPEN_ABOUT: showAboutFromOverflow(); break;
+            case GALLERY_SETTINGS: showGallerySettings(); break;
             case EXPORT_SETTINGS: exportSettingsFromOverflow(); break;
             case TRIGGER_RESCAN:
             case SCAN: requestRescan(); break;

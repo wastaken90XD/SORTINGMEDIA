@@ -37,6 +37,8 @@ public final class GestureConstants {
     public static final String ACTION_OPEN_COLOR_ANALYZER = "OPEN_COLOR_ANALYZER";
     public static final String ACTION_OPEN_DUPLICATE_FINDER = "OPEN_DUPLICATE_FINDER";
     public static final String ACTION_OPEN_SETTINGS = "OPEN_SETTINGS";
+    public static final String ACTION_OPEN_ABOUT = "OPEN_ABOUT";
+    public static final String ACTION_GALLERY_SETTINGS = "GALLERY_SETTINGS";
     public static final String ACTION_EXPORT_SETTINGS = "EXPORT_SETTINGS";
     public static final String ACTION_TRIGGER_RESCAN = "TRIGGER_RESCAN";
     public static final String ACTION_QUICK_RANDOM_TAG = "QUICK_RANDOM_TAG";
@@ -138,6 +140,8 @@ public final class GestureConstants {
         add(ACTION_TOGGLE_INFO_OVERLAY, "Toggle info overlay", Category.VIEWING);
 
         add(ACTION_OPEN_SETTINGS, "Open settings", Category.UTILITY);
+        add(ACTION_OPEN_ABOUT, "About", Category.UTILITY);
+        add(ACTION_GALLERY_SETTINGS, "Gallery settings", Category.VIEWING);
         add(ACTION_TRIGGER_RESCAN, "Trigger rescan", Category.UTILITY);
         add(ACTION_REPEAT_LAST_MACRO, "Repeat last macro", Category.MACROS);
         add(ACTION_MACRO, "Macro", Category.MACROS);

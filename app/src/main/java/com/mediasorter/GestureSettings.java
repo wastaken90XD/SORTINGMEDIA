@@ -27,6 +27,8 @@ public class GestureSettings {
         OPEN_COLOR_ANALYZER,
         OPEN_DUPLICATE_FINDER,
         OPEN_SETTINGS,
+        OPEN_ABOUT,
+        GALLERY_SETTINGS,
         EXPORT_SETTINGS,
         TRIGGER_RESCAN,
         QUICK_RANDOM_TAG,
