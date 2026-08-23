@@ -181,6 +181,11 @@ public class MainActivity extends Activity
         if (galleryRoot != null) {
             boolean persistedGallery = galleryPrefs().getBoolean("gallery_mode_active", false);
             if (persistedGallery != galleryModeActive) setGalleryMode(persistedGallery, false);
+            if (galleryThumbnailLoader != null) {
+                galleryThumbnailLoader.setQuality(galleryQuality());
+                galleryThumbnailLoader.setAnimate(galleryAnimate());
+            }
+            if (galleryAdapter != null) galleryAdapter.refreshBadgeSettings();
         }
         if (previewManager != null && gestureSettings != null) updateDpadLabels();
         if (indexer.isScanning()) return;
@@ -212,6 +217,7 @@ public class MainActivity extends Activity
         if (legacyTagPanel != null && !sp.getBoolean("show_tag_bar", true)) {
             legacyTagPanel.setVisibility(View.GONE);
         }
+        infoOverlayVisible = sp.getBoolean("info_overlay_default", false);
         TextView stats = statsBar;
         if (stats != null) stats.setVisibility(sp.getBoolean("show_stats_bar", true)
                 ? View.VISIBLE : View.GONE);
@@ -5283,6 +5289,7 @@ private Spinner makeSpinner(String[] options) {
                     if (temp.renameTo(destination)) {
                         String oldPath = file.getPath();
                         file.setPath(destination.getAbsolutePath());
+                        groupManager.moveManualAssignment(oldPath, file.getPath());
                         android.content.SharedPreferences.Editor editor =
                                 getSharedPreferences("settings_prefs", MODE_PRIVATE).edit();
                         int manual = file.getManualOrder();
@@ -5294,6 +5301,7 @@ private Spinner makeSpinner(String[] options) {
                         temp.renameTo(original);
                     }
                 }
+                saveManualGroupAssignments();
                 final int renamed = success;
                 final String completedPrefix = prefix;
                 mainHandler.post(new Runnable() {
@@ -5379,6 +5387,21 @@ private Spinner makeSpinner(String[] options) {
         form.addView(galleryLabel("Thumbnail quality"));
         form.addView(quality);
 
+        final String[] gallerySortOptions = {"Name", "Date", "Size", "Tag count"};
+        Spinner gallerySort = new Spinner(this);
+        ArrayAdapter<String> gallerySortAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, gallerySortOptions);
+        gallerySortAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        gallerySort.setAdapter(gallerySortAdapter);
+        String savedGallerySort = galleryPrefs().getString("gallery_sort", "Name");
+        int gallerySortIndex = 0;
+        for (int i = 0; i < gallerySortOptions.length; i++) {
+            if (gallerySortOptions[i].equalsIgnoreCase(savedGallerySort)) gallerySortIndex = i;
+        }
+        gallerySort.setSelection(gallerySortIndex);
+        form.addView(galleryLabel("Gallery sort"));
+        form.addView(gallerySort);
+
         CheckBox showFilename = galleryCheck("Show filename below thumbnail",
                 galleryPrefs().getBoolean("gallery_show_filename", true));
         CheckBox showTag = galleryCheck("Show tag count badge",
@@ -5432,6 +5455,9 @@ private Spinner makeSpinner(String[] options) {
                                 quality.getSelectedItemPosition()))];
                         android.content.SharedPreferences.Editor editor = galleryPrefs().edit();
                         editor.putInt("gallery_columns", columnValue);
+                        editor.putString("gallery_sort", gallerySortOptions[Math.max(0,
+                                Math.min(gallerySortOptions.length - 1,
+                                        gallerySort.getSelectedItemPosition()))]);
                         editor.putString("gallery_thumb_quality", qualityValue);
                         editor.putBoolean("gallery_show_filename", showFilename.isChecked());
                         editor.putBoolean("gallery_show_tag_count", galleryLowMemory ? false : showTag.isChecked());

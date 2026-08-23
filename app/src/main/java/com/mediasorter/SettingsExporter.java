@@ -37,7 +37,7 @@ public final class SettingsExporter {
 
     private static final Set<String> SETTINGS_KEYS = new HashSet<String>(Arrays.asList(
             "auto_advance_flag", "auto_advance_tag", "auto_skip_dupes",
-            "confirm_delete", "confirm_trash", "dpad_enabled", "tags_prompt_enabled", "volume_keys_enabled",
+            "confirm_delete", "confirm_trash", "dpad_enabled", "volume_keys_enabled",
             "long_press_duration", "swipe_min_distance", "swipe_min_velocity",
             "show_hidden",
             "show_seq_labels", "show_tag_count", "skip_videos", "skip_images",
@@ -343,8 +343,12 @@ public final class SettingsExporter {
                     editor.putString("preset_" + i, presets.optString(i, ""));
                 }
                 if (!editor.commit()) recordFailure(result, "tag_preset_prefs");
-                else verifyPreference(presetPrefs, "preset_0", presets.length() > 0
-                        ? presets.optString(0, "") : null, result);
+                else {
+                    for (int i = 0; i < Math.min(5, presets.length()); i++) {
+                        verifyPreference(presetPrefs, "preset_" + i,
+                                presets.optString(i, ""), result);
+                    }
+                }
             } catch (Exception error) {
                 recordFailure(result, "tag_preset_prefs", error);
             }
@@ -461,8 +465,23 @@ public final class SettingsExporter {
         try {
             JSONArray folders = root.optJSONArray("folders");
             SharedPreferences folderPrefs = context.getSharedPreferences("folder_prefs", Context.MODE_PRIVATE);
-            if (folders != null && !folderPrefs.contains("watched_folders")) {
-                recordFailure(result, "folder_prefs.watched_folders");
+            if (folders != null) {
+                Set<String> expectedFolders = new HashSet<String>();
+                for (int i = 0; i < folders.length(); i++) {
+                    String folder = folders.optString(i, "").trim();
+                    if (!folder.isEmpty()) expectedFolders.add(folder);
+                }
+                Set<String> actualFolders = new HashSet<String>(folderPrefs.getStringSet(
+                        "watched_folders", new HashSet<String>()));
+                if (!expectedFolders.equals(actualFolders)) {
+                    recordFailure(result, "folder_prefs.watched_folders");
+                }
+            }
+            JSONArray expectedRules = root.optJSONArray("rules");
+            if (expectedRules != null) {
+                String actualRules = context.getSharedPreferences("organizer_prefs", Context.MODE_PRIVATE)
+                        .getString("rules", "[]");
+                if (!expectedRules.toString().equals(actualRules)) recordFailure(result, "organizer_prefs.rules");
             }
             JSONObject prefs = root.optJSONObject("preferences");
             if (prefs != null) {

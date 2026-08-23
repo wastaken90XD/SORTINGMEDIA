@@ -1533,11 +1533,11 @@ public class SettingsActivity extends Activity {
         spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                if (isInitializing) return;
                 if (!spinnerInitialized[0]) {
                     spinnerInitialized[0] = true;
-                    return;
+                    if (isInitializing) return;
                 }
+                if (isInitializing) return;
                 listener.onSelected(options[position], position);
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}

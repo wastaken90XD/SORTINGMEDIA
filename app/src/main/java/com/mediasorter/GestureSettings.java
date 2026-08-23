@@ -105,6 +105,9 @@ public class GestureSettings {
                 GestureMacro m = new GestureMacro();
                 m.id = obj.optString("id", "");
                 m.name = obj.optString("name", "");
+                if (m.name == null || m.name.trim().isEmpty()) {
+                    m.name = "Macro " + m.id;
+                }
                 m.actions = new ArrayList<>();
                 org.json.JSONArray actArr = obj.optJSONArray("actions");
                 if (actArr != null) {

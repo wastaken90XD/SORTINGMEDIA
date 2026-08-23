@@ -44,6 +44,12 @@ public class GroupManager {
         if (path != null) manualAssignments.remove(path);
     }
 
+    public void moveManualAssignment(String oldPath, String newPath) {
+        if (oldPath == null || newPath == null) return;
+        String group = manualAssignments.remove(oldPath);
+        if (group != null) manualAssignments.put(newPath, group);
+    }
+
     public Map<String, String> getManualAssignments() {
         return new java.util.HashMap<String, String>(manualAssignments);
     }
