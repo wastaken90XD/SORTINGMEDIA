@@ -1091,6 +1091,7 @@ public class MainActivity extends Activity
 
         tagAdapter.setTags(tagManager.getAllTags());
         setupGalleryMode();
+        installExplorerWidthLayoutListener();
     }
 
     private void setupStatsAndTagBar() {
