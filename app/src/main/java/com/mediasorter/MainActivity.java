@@ -1281,6 +1281,12 @@ public class MainActivity extends Activity
                         sLatestFullList = windowManager.getFullIndexSnapshot();
                         sLatestTagList  = new ArrayList<>(tagManager.getAllTags());
                         if (currentIndex >= 0) windowManager.centerOn(currentIndex);
+                        else {
+                            if (tagAdapter != null) tagAdapter.setCurrentFile(null);
+                            if (currentPathBeforeRefresh != null && previewManager != null) {
+                                previewManager.clearCurrent();
+                            }
+                        }
                         updateWindow();
                         updateGalleryData();
                         updateProgress();

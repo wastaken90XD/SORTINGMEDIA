@@ -116,8 +116,13 @@ public class AutoOrganizer {
     private boolean resolveCondition(Condition condition, MediaFile file, int index) {
         if (condition instanceof NameCondition) {
             NameCondition value = (NameCondition) condition;
-            return new NameCondition(resolvePattern(value.pattern, file, index), value.type, value.negate)
-                    .matches(file, fileStatus);
+            try {
+                return new NameCondition(resolvePattern(value.pattern, file, index), value.type, value.negate)
+                        .matches(file, fileStatus);
+            } catch (Exception error) {
+                log.add("Invalid name condition: " + error.getMessage());
+                return false;
+            }
         }
         if (condition instanceof TagCondition) {
             TagCondition value = (TagCondition) condition;

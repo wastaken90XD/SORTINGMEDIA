@@ -565,6 +565,17 @@ public class PreviewManager {
         }
     }
 
+    /** Clear stale preview state when filtering removes the current file. */
+    public void clearCurrent() {
+        currentPath = null;
+        stopMedia();
+        hideAll();
+        if (detailFileName != null) detailFileName.setText("");
+        if (detailMeta != null) detailMeta.setText("");
+        if (flagState != null) flagState.setVisibility(View.GONE);
+        setPosition(0, 0);
+    }
+
     // ── Image ─────────────────────────────────────────────────────────────────
 
     private void loadImage(final MediaFile file) {
