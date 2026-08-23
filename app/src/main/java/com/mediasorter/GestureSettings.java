@@ -87,6 +87,34 @@ public class GestureSettings {
         // dpad_enabled is a UI/control setting, so it has one canonical home
         // in settings_prefs rather than being duplicated in gesture_prefs.
         this.settingsPrefs = context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
+        migrateLegacyControlKeys();
+    }
+
+    private void migrateLegacyControlKeys() {
+        if (!settingsPrefs.contains(KEY_DPAD_ENABLED) && prefs.contains(KEY_DPAD_ENABLED)) {
+            boolean value = prefs.getBoolean(KEY_DPAD_ENABLED, true);
+            settingsPrefs.edit().putBoolean(KEY_DPAD_ENABLED, value).commit();
+        }
+        if (prefs.contains(KEY_DPAD_ENABLED)) {
+            prefs.edit().remove(KEY_DPAD_ENABLED).commit();
+        }
+        migrateLegacySwipeDefault("swipe_left_default", KEY_SWIPE_LEFT);
+        migrateLegacySwipeDefault("swipe_right_default", KEY_SWIPE_RIGHT);
+    }
+
+    private void migrateLegacySwipeDefault(String oldKey, String inputKey) {
+        if (settingsPrefs.contains(oldKey)) {
+            if (!prefs.contains(inputKey)) {
+                int value = settingsPrefs.getInt(oldKey, 0);
+                GestureAction action = value == 1 ? GestureAction.SKIP
+                        : value == 2 ? GestureAction.FLAG
+                        : value == 3 ? GestureAction.NOTHING
+                        : value == 4 ? GestureAction.APPLY_TAG
+                        : GestureAction.NEXT_FILE;
+                prefs.edit().putString(inputKey, action.name() + "|").commit();
+            }
+            settingsPrefs.edit().remove(oldKey).commit();
+        }
     }
 
     public static class GestureMacro {

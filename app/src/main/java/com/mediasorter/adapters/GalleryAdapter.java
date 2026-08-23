@@ -169,8 +169,10 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
                     || path.equals(draggedPath));
             MediaFile file = findFile(path);
             if (!keep) {
-                holder.thumbnail.setImageDrawable(null);
-                if (file != null) holder.thumbnail.setBackgroundColor(placeholderColor(file));
+                if (holder.thumbnail.isAttachedToWindow()) {
+                    holder.thumbnail.setImageDrawable(null);
+                    if (file != null) holder.thumbnail.setBackgroundColor(placeholderColor(file));
+                }
                 continue;
             }
             if (file != null
@@ -417,7 +419,9 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
             for (Object payload : payloads) {
                 if ("gallery_scroll".equals(payload)) {
                     MediaFile file = files.get(position);
-                    holder.thumbnail.setImageDrawable(null);
+                    if (holder.thumbnail.isAttachedToWindow()) {
+                        holder.thumbnail.setImageDrawable(null);
+                    }
                     holder.thumbnail.setAlpha(1.0f);
                     holder.thumbnail.setBackgroundColor(placeholderColor(file));
                     return;
@@ -437,7 +441,9 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         holder.thumbnail.setTag(file.getPath());
         boolean keepDragBitmap = dragThumbnailActive
                 && file.getPath().equals(draggedThumbnailPath);
-        if (!keepDragBitmap && !alreadyLoaded) holder.thumbnail.setImageDrawable(null);
+        if (!keepDragBitmap && !alreadyLoaded && holder.thumbnail.isAttachedToWindow()) {
+            holder.thumbnail.setImageDrawable(null);
+        }
         holder.thumbnail.setAlpha(1.0f);
         holder.thumbnail.setBackgroundColor(placeholderColor(file));
         holder.filename.setText(file.getName());
@@ -538,8 +544,10 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     private void applyGroupBorder(ViewHolder holder, MediaFile file) {
         String group = null;
         for (String tag : file.getTags()) {
-            if (tag != null && tag.startsWith("link_")) {
-                group = tag;
+            if (tag != null && (tag.startsWith("link_") || tag.startsWith("link-"))) {
+                group = tag.substring(5);
+                int sequence = group.indexOf("_seq_");
+                if (sequence > 0) group = group.substring(0, sequence);
                 break;
             }
         }
@@ -555,9 +563,14 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     private int groupBorderColor(String group) {
         Integer cached = groupBorderColors.get(group);
         if (cached != null) return cached;
-        float[] hsv = new float[]{Math.abs(group.hashCode()) % 360, 0.65f, 0.9f};
-        int color = Color.HSVToColor(hsv);
-        groupBorderColors.put(group, color);
+        String prefix = group == null ? "" : group;
+        int hash = 5381;
+        for (int i = 0; i < prefix.length(); i++) {
+            hash = ((hash << 5) + hash) + prefix.charAt(i);
+        }
+        int hue = (hash & 0x7fffffff) % 360;
+        int color = Color.HSVToColor(new float[]{hue, 0.6f, 0.85f});
+        groupBorderColors.put(prefix, color);
         return color;
     }
 
@@ -645,7 +658,9 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         boolean keepDragged = dragThumbnailActive && path != null
                 && path.equals(draggedThumbnailPath);
         if (!keepDragged) {
-            holder.thumbnail.setImageDrawable(null);
+            if (holder.thumbnail.isAttachedToWindow()) {
+                holder.thumbnail.setImageDrawable(null);
+            }
             if (path != null) loader.release(path);
         }
         super.onViewDetachedFromWindow(holder);
@@ -658,7 +673,9 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         boolean keepDragged = dragThumbnailActive && path != null
                 && path.equals(draggedThumbnailPath);
         if (!keepDragged) {
-            holder.thumbnail.setImageDrawable(null);
+            if (holder.thumbnail.isAttachedToWindow()) {
+                holder.thumbnail.setImageDrawable(null);
+            }
             if (path != null) loader.release(path);
         }
         super.onViewRecycled(holder);

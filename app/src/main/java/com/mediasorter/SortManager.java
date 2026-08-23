@@ -72,6 +72,33 @@ public class SortManager {
 
     public SortManager(Context context) {
         setPreferences(context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE));
+        migrateLegacySortKey();
+    }
+
+    private void migrateLegacySortKey() {
+        if (prefs == null || !prefs.contains("default_sort")) return;
+        if (!prefs.contains(KEY_SORT_SEQUENCE)) {
+            String value = prefs.getString("default_sort", "Name A-Z");
+            String id = NAME;
+            String direction = "ASC";
+            if ("Name Z-A".equalsIgnoreCase(value)) direction = "DESC";
+            else if (value.toLowerCase(java.util.Locale.US).contains("date")) {
+                id = DATE;
+                direction = value.toLowerCase(java.util.Locale.US).contains("newest") ? "DESC" : "ASC";
+            } else if (value.toLowerCase(java.util.Locale.US).contains("size")) {
+                id = SIZE;
+                direction = value.toLowerCase(java.util.Locale.US).contains("largest") ? "DESC" : "ASC";
+            } else if ("Type".equalsIgnoreCase(value)) id = TYPE;
+            JSONArray sequence = new JSONArray();
+            JSONObject entry = new JSONObject();
+            try {
+                entry.put("id", id);
+                entry.put("direction", direction);
+                sequence.put(entry);
+                prefs.edit().putString(KEY_SORT_SEQUENCE, sequence.toString()).commit();
+            } catch (Exception ignored) {}
+        }
+        prefs.edit().remove("default_sort").commit();
     }
 
     public void setPreferences(SharedPreferences preferences) {

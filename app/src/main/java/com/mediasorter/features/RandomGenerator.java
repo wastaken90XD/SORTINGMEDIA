@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Random;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Log;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.HashSet;
@@ -18,6 +19,10 @@ import java.util.Set;
 public final class RandomGenerator {
 
     private static final Random RAND = new Random();
+    private static final java.util.regex.Pattern CUSTOM_TOKEN =
+            java.util.regex.Pattern.compile("\\{([^{}]+)\\}");
+    private static final java.util.regex.Pattern TAG_TOKEN =
+            java.util.regex.Pattern.compile("tag:[0-9]+");
 
     private static final java.util.regex.Pattern LEADING_PATTERN = java.util.regex.Pattern.compile("^(link_|tag_)", java.util.regex.Pattern.CASE_INSENSITIVE);
     private static final java.util.regex.Pattern TRAILING_SEQ = java.util.regex.Pattern.compile("_seq_[a-z0-9]+$", java.util.regex.Pattern.CASE_INSENSITIVE);
@@ -179,12 +184,57 @@ public final class RandomGenerator {
     private static String resolveCustomPattern(String pattern, Set<String> existingTags) {
         String value = pattern == null || pattern.trim().isEmpty()
                 ? "{syl}-{date}" : pattern;
+        Calendar now = Calendar.getInstance();
         value = value.replace("{syl}", randomSyllableTag());
         value = value.replace("{hex}", randomHex(6));
         value = value.replace("{seq}", nextCustomSequence(existingTags));
         value = value.replace("{date}", new SimpleDateFormat(
-                "yyyyMMdd", Locale.US).format(Calendar.getInstance().getTime()));
-        return value.trim();
+                "yyyyMMdd", Locale.US).format(now.getTime()));
+        value = value.replace("{year}", String.format(Locale.US, "%04d", now.get(Calendar.YEAR)));
+        value = value.replace("{month}", String.format(Locale.US, "%02d", now.get(Calendar.MONTH) + 1));
+        value = value.replace("{day}", String.format(Locale.US, "%02d", now.get(Calendar.DAY_OF_MONTH)));
+        value = value.replace("{random}", randomSyllableTag());
+        // These variables require a MediaFile and are therefore empty in a
+        // standalone random tag pattern. They are still known placeholders.
+        value = value.replace("{filename}", "");
+        value = value.replace("{ext}", "");
+        value = value.replace("{size}", "");
+        value = value.replace("{index}", "");
+        java.util.regex.Matcher tagMatcher = TAG_TOKEN.matcher(value);
+        StringBuffer tagBuffer = new StringBuffer();
+        while (tagMatcher.find()) tagMatcher.appendReplacement(tagBuffer, "");
+        tagMatcher.appendTail(tagBuffer);
+        value = tagBuffer.toString();
+
+        java.util.regex.Matcher matcher = CUSTOM_TOKEN.matcher(value);
+        StringBuffer buffer = new StringBuffer();
+        while (matcher.find()) {
+            String token = matcher.group(1);
+            Log.w("RandomGenerator", "Unknown random tag placeholder: {" + token + "}");
+            matcher.appendReplacement(buffer, "");
+        }
+        matcher.appendTail(buffer);
+        return buffer.toString().trim();
+    }
+
+    /** Return unknown {placeholder} tokens for SettingsActivity validation. */
+    public static List<String> findUnknownPlaceholders(String pattern) {
+        List<String> unknown = new ArrayList<String>();
+        if (pattern == null) return unknown;
+        java.util.regex.Matcher matcher = CUSTOM_TOKEN.matcher(pattern);
+        while (matcher.find()) {
+            String token = matcher.group(1);
+            if (!isKnownCustomPlaceholder(token) && !unknown.contains(token)) unknown.add(token);
+        }
+        return unknown;
+    }
+
+    private static boolean isKnownCustomPlaceholder(String token) {
+        return "syl".equals(token) || "hex".equals(token) || "seq".equals(token)
+                || "date".equals(token) || "year".equals(token) || "month".equals(token)
+                || "day".equals(token) || "index".equals(token) || "random".equals(token)
+                || "filename".equals(token) || "ext".equals(token) || "size".equals(token)
+                || TAG_TOKEN.matcher(token).matches();
     }
 
     private static String randomHex(int count) {

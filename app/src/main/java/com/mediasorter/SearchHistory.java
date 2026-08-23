@@ -23,6 +23,22 @@ public class SearchHistory {
 
     public SearchHistory(Context context) {
         this.prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        migrateLegacyHistory();
+    }
+
+    private void migrateLegacyHistory() {
+        if (!prefs.contains(KEY_LEGACY_RECENT)) return;
+        if (!prefs.contains(KEY_HISTORY)) {
+            JSONArray array = new JSONArray();
+            for (String value : parseLegacy(prefs.getString(KEY_LEGACY_RECENT, ""))) {
+                if (array.length() >= MAX_RECENT) break;
+                array.put(value);
+            }
+            prefs.edit().putString(KEY_HISTORY, array.toString())
+                    .remove(KEY_LEGACY_RECENT).commit();
+        } else {
+            prefs.edit().remove(KEY_LEGACY_RECENT).commit();
+        }
     }
 
     public synchronized List<String> getRecentSearches() {
@@ -42,7 +58,9 @@ public class SearchHistory {
         String clean = query.trim();
         if (clean.isEmpty()) return;
         List<String> recent = getRecentSearches();
-        recent.remove(clean);
+        while (recent.remove(clean)) {
+            // Remove every duplicate before inserting the newest query.
+        }
         recent.add(0, clean);
         while (recent.size() > MAX_RECENT) recent.remove(recent.size() - 1);
         saveJson(KEY_HISTORY, recent);

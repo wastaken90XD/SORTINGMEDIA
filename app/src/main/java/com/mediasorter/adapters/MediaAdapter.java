@@ -49,6 +49,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     private ThumbnailLoader            loader;
     private FileStatus                 fileStatus;
     private HighlightProvider           highlightProvider;
+    private int                         absoluteWindowStart;
     private boolean                    selectMode   = false;
     private final LinkedHashSet<String> selected     = new LinkedHashSet<>();
 
@@ -58,6 +59,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     }
 
     public void setFileStatus(FileStatus status) { this.fileStatus = status; }
+    public void setAbsoluteWindowStart(int start) { absoluteWindowStart = Math.max(0, start); }
     public void setHighlightProvider(HighlightProvider provider) {
         this.highlightProvider = provider;
     }
@@ -84,6 +86,17 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
                 return;
             }
         }
+    }
+
+    /** Immediate status notification for MainActivity's absolute index. */
+    public void notifyFlagChanged(int currentIndex) {
+        if (currentIndex >= 0 && currentIndex < files.size()
+                && absoluteWindowStart == 0) {
+            notifyItemChanged(currentIndex, "status");
+            return;
+        }
+        int local = currentIndex - absoluteWindowStart;
+        if (local >= 0 && local < files.size()) notifyItemChanged(local, "status");
     }
 
     @Override

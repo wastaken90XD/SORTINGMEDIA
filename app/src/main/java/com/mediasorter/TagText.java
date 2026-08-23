@@ -1,5 +1,7 @@
 package com.mediasorter;
 
+import java.text.Normalizer;
+
 /**
  * Normalizes values that are used as media tags.
  *
@@ -18,10 +20,11 @@ public final class TagText {
      */
     public static String plain(String value) {
         if (value == null || value.isEmpty()) return "";
+        String normalized = Normalizer.normalize(value, Normalizer.Form.NFC);
 
-        StringBuilder result = new StringBuilder(value.length());
-        for (int offset = 0; offset < value.length();) {
-            int codePoint = value.codePointAt(offset);
+        StringBuilder result = new StringBuilder(normalized.length());
+        for (int offset = 0; offset < normalized.length();) {
+            int codePoint = normalized.codePointAt(offset);
             offset += Character.charCount(codePoint);
 
             if (isEmoji(codePoint)
@@ -35,6 +38,13 @@ public final class TagText {
         }
         return result.toString().trim();
     }
+
+    /* Manual sanitization checks:
+     * plain("Café")       -> "Café"       (accented Latin survives)
+     * plain("Crème 你好")   -> "Crème 你好"   (CJK survives)
+     * plain("مرحبا")       -> "مرحبا"       (Arabic survives)
+     * plain("Beach 🏖️")     -> "Beach"       (emoji is removed)
+     */
 
     /**
      * Covers the Unicode emoji blocks plus the legacy symbols that have emoji

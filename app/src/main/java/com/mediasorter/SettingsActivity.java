@@ -52,6 +52,7 @@ public class SettingsActivity extends Activity {
     private View precacheRadiusRow, videoLoopRow;
     private boolean refreshingResumeViews;
     private boolean isInitializing = true;
+    private EditText randomPatternInput;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -74,6 +75,9 @@ public class SettingsActivity extends Activity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus && isInitializing) isInitializing = false;
+        if (!hasFocus && !isInitializing && randomPatternInput != null) {
+            saveValidatedRandomPattern(randomPatternInput);
+        }
     }
 
     /**
@@ -402,6 +406,50 @@ public class SettingsActivity extends Activity {
                 }).setNegativeButton("Cancel", null).show();
     }
 
+    private View makeValidatedRandomPatternRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.addView(makeLabel("Custom pattern ({syl}, {hex}, {seq}, {date}):"));
+        final EditText input = new EditText(this);
+        randomPatternInput = input;
+        input.setText(settingsPrefs.getString("random_tag_custom_pattern", "{syl}-{date}"));
+        input.setTextColor(0xFFFFFFFF);
+        input.setSingleLine(true);
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable editable) {
+                if (isInitializing) return;
+                String value = editable.toString().trim();
+                if (RandomGenerator.findUnknownPlaceholders(value).isEmpty()) {
+                    saveString("random_tag_custom_pattern",
+                            value.isEmpty() ? "{syl}-{date}" : value);
+                }
+            }
+        });
+        input.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override public void onFocusChange(View view, boolean hasFocus) {
+                if (hasFocus || isInitializing) return;
+                saveValidatedRandomPattern(input);
+            }
+        });
+        row.addView(input);
+        return row;
+    }
+
+    private void saveValidatedRandomPattern(EditText input) {
+        String value = input.getText().toString().trim();
+        List<String> unknown = RandomGenerator.findUnknownPlaceholders(value);
+        if (!unknown.isEmpty()) {
+            input.setError("Unknown placeholder: {" + unknown.get(0) + "}");
+            Toast.makeText(this, "Unknown placeholder: {" + unknown.get(0) + "}",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        input.setError(null);
+        saveString("random_tag_custom_pattern", value.isEmpty() ? "{syl}-{date}" : value);
+    }
+
     private void addRandomTagFormatSection(LinearLayout root) {
         root.addView(makeTitle("Random Tag Format"));
         final String[] formats = {"Syllable triplet", "Hex placeholder", "Custom pattern", "Random pattern"};
@@ -417,14 +465,7 @@ public class SettingsActivity extends Activity {
                         saveString("random_tag_format", id);
                     }
                 }));
-        root.addView(makeTextInputRow("Custom pattern ({syl}, {hex}, {seq}, {date}):",
-                settingsPrefs.getString("random_tag_custom_pattern", "{syl}-{date}"),
-                new OnTextChangeListener() {
-                    @Override public void onChange(String text) {
-                        saveString("random_tag_custom_pattern",
-                                text.isEmpty() ? "{syl}-{date}" : text);
-                    }
-                }));
+        root.addView(makeValidatedRandomPatternRow());
         root.addView(makeLabel("Example: {syl}-{date} → ka-mi-ra-" +
                 new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
                         .format(new java.util.Date())));
@@ -814,12 +855,8 @@ public class SettingsActivity extends Activity {
                                                 .show();
                                     }
                                 } else {
-                                    File checkDir = new File(directoryPath);
-                                    if (!checkDir.exists()) {
-                                        Toast.makeText(SettingsActivity.this, "Cannot write to that location", Toast.LENGTH_SHORT).show();
-                                    } else {
-                                        Toast.makeText(SettingsActivity.this, "Export failed — storage error", Toast.LENGTH_SHORT).show();
-                                    }
+                                    Toast.makeText(SettingsActivity.this,
+                                            "Export failed — storage error", Toast.LENGTH_SHORT).show();
                                 }
                             }
                         })
@@ -917,6 +954,10 @@ public class SettingsActivity extends Activity {
                                             summary += "\n" + res.failedKeys + " settings could not be verified and were skipped.";
                                         }
 
+                                        // All writes and verification are complete; delay
+                                        // the one MainActivity recreation to let slow API 21
+                                        // storage finish flushing.
+                                        MainActivity.requestRecreateAfterImport();
                                         final String importSummary = summary;
                                         new AlertDialog.Builder(SettingsActivity.this)
                                                 .setTitle("Import Successful")

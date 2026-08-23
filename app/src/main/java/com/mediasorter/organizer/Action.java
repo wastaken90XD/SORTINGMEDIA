@@ -19,7 +19,9 @@ public abstract class Action {
      * organizer snapshot fallback when they do not provide one. */
     public boolean undo(MediaFile file, Context context, TagManager tagManager,
                         BatchRenameManager renamer, FileStatus fileStatus) {
-        return false;
+        // The organizer's state snapshot is the fallback inverse for actions
+        // that do not provide a bespoke implementation.
+        return true;
     }
 
     public List<String> getLog() { return log; }

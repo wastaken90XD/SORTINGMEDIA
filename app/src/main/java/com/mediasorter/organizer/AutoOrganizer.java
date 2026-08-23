@@ -1,6 +1,7 @@
 package com.mediasorter.organizer;
 
 import android.content.Context;
+import android.util.Log;
 import com.mediasorter.BatchRenameManager;
 import com.mediasorter.FileStatus;
 import com.mediasorter.MetadataWriter;
@@ -11,8 +12,10 @@ import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 import java.util.Stack;
@@ -29,6 +32,7 @@ public class AutoOrganizer {
     private final List<String> log = new ArrayList<String>();
     private final Stack<List<UndoEntry>> undoStack = new Stack<List<UndoEntry>>();
     private volatile int activeIndex = -1;
+    private volatile boolean lastUndoPartial;
 
     public AutoOrganizer(Context ctx, TagManager tm, BatchRenameManager rm, FileStatus fs) {
         context = ctx;
@@ -56,7 +60,17 @@ public class AutoOrganizer {
     }
 
     public String resolvePattern(String pattern, MediaFile file, int index) {
-        if (pattern == null || file == null) return pattern == null ? "" : pattern;
+        return resolvePattern(pattern, file, index, -1);
+    }
+
+    /** Resolver overload used by a batch run with its allocated {seq} value. */
+    public String resolvePattern(String pattern, MediaFile file, int index,
+                                 int sequenceCounter) {
+        if (file == null) {
+            Log.w("AutoOrganizer", "Cannot resolve rule variables without a MediaFile");
+            return pattern;
+        }
+        if (pattern == null) return "";
         String name = file.getName() == null ? "" : file.getName();
         int dot = name.lastIndexOf('.');
         String filename = dot > 0 ? name.substring(0, dot) : name;
@@ -76,7 +90,9 @@ public class AutoOrganizer {
         resolved = resolved.replace("{day}", String.format(Locale.US, "%02d", calendar.get(Calendar.DAY_OF_MONTH)));
         resolved = resolved.replace("{size}", String.valueOf(file.getSize()));
         resolved = resolved.replace("{index}", String.valueOf(index < 0 ? 0 : index));
-        resolved = resolved.replace("{seq}", nextSequence(file));
+        String sequence = sequenceCounter >= 0
+                ? RandomGenerator.sequenceLabel(sequenceCounter) : nextSequence(file);
+        resolved = resolved.replace("{seq}", sequence);
         resolved = resolved.replace("{random}", RandomGenerator.randomSyllableTag());
 
         Matcher tagMatcher = Pattern.compile("\\{tag:(\\d+)\\}").matcher(resolved);
@@ -93,31 +109,67 @@ public class AutoOrganizer {
         return buffer.toString();
     }
 
-    private String nextSequence(MediaFile file) {
+    private String sequencePrefix(MediaFile file) {
         String prefix = "seq";
-        String name = file.getName() == null ? "" : file.getName();
-        int marker = name.indexOf("_seq_");
-        if (marker > 0) prefix = name.substring(0, marker);
+        if (file != null && file.getName() != null) {
+            int marker = file.getName().indexOf("_seq_");
+            if (marker > 0) prefix = file.getName().substring(0, marker);
+        }
+        return prefix;
+    }
+
+    private Set<String> existingTagNames() {
         Set<String> existing = new HashSet<String>();
         if (tagManager != null) {
             for (com.mediasorter.models.Tag tag : tagManager.getAllTags()) existing.add(tag.getName());
         }
-        return RandomGenerator.sequenceLabel(RandomGenerator.nextSequenceIndex(prefix, existing));
+        return existing;
+    }
+
+    private String nextSequence(MediaFile file) {
+        Set<String> existing = existingTagNames();
+        return RandomGenerator.sequenceLabel(RandomGenerator.nextSequenceIndex(
+                sequencePrefix(file), existing));
+    }
+
+    private int sequenceCounterFor(MediaFile file, Map<String, Integer> counters,
+                                   Set<String> existingTags) {
+        String prefix = sequencePrefix(file);
+        Integer value = counters.get(prefix);
+        if (value == null) {
+            value = RandomGenerator.nextSequenceIndex(prefix, existingTags);
+            counters.put(prefix, value);
+        }
+        return value;
+    }
+
+    private void advanceSequenceCounter(MediaFile file, Map<String, Integer> counters,
+                                        int current) {
+        counters.put(sequencePrefix(file), current + 1);
     }
 
     private boolean matchesRule(Rule rule, MediaFile file, int index) {
+        return matchesRule(rule, file, index, -1);
+    }
+
+    private boolean matchesRule(Rule rule, MediaFile file, int index, int sequenceCounter) {
         if (rule == null || rule.conditions == null || rule.conditions.isEmpty()) return false;
         for (Condition condition : rule.conditions) {
-            if (!resolveCondition(condition, file, index)) return false;
+            if (!resolveCondition(condition, file, index, sequenceCounter)) return false;
         }
         return true;
     }
 
     private boolean resolveCondition(Condition condition, MediaFile file, int index) {
+        return resolveCondition(condition, file, index, -1);
+    }
+
+    private boolean resolveCondition(Condition condition, MediaFile file, int index,
+                                     int sequenceCounter) {
         if (condition instanceof NameCondition) {
             NameCondition value = (NameCondition) condition;
             try {
-                return new NameCondition(resolvePattern(value.pattern, file, index), value.type, value.negate)
+                return new NameCondition(resolvePattern(value.pattern, file, index, sequenceCounter), value.type, value.negate)
                         .matches(file, fileStatus);
             } catch (Exception error) {
                 log.add("Invalid name condition: " + error.getMessage());
@@ -127,53 +179,58 @@ public class AutoOrganizer {
         if (condition instanceof TagCondition) {
             TagCondition value = (TagCondition) condition;
             List<String> add = new ArrayList<String>();
-            for (String tag : value.tags) add.add(resolvePattern(tag, file, index));
+            for (String tag : value.tags) add.add(resolvePattern(tag, file, index, sequenceCounter));
             return new TagCondition(add, value.matchAny, value.negate).matches(file, fileStatus);
         }
         if (condition instanceof FolderCondition) {
             FolderCondition value = (FolderCondition) condition;
-            return new FolderCondition(resolvePattern(value.folderPath, file, index), value.negate)
+            return new FolderCondition(resolvePattern(value.folderPath, file, index, sequenceCounter), value.negate)
                     .matches(file, fileStatus);
         }
         return condition != null && condition.matches(file, fileStatus);
     }
 
     private Action resolveAction(Action action, MediaFile file, int index) {
+        return resolveAction(action, file, index, -1);
+    }
+
+    private Action resolveAction(Action action, MediaFile file, int index,
+                                 int sequenceCounter) {
         if (action instanceof MoveAction) {
             MoveAction value = (MoveAction) action;
-            return new MoveAction(resolvePattern(value.destFolder, file, index), value.conflict);
+            return new MoveAction(resolvePattern(value.destFolder, file, index, sequenceCounter), value.conflict);
         }
         if (action instanceof CopyAction) {
             CopyAction value = (CopyAction) action;
-            return new CopyAction(resolvePattern(value.destFolder, file, index), value.conflict);
+            return new CopyAction(resolvePattern(value.destFolder, file, index, sequenceCounter), value.conflict);
         }
         if (action instanceof DeleteAction) {
             DeleteAction value = (DeleteAction) action;
-            return new DeleteAction(value.useTrash, resolvePattern(value.trashFolder, file, index));
+            return new DeleteAction(value.useTrash, resolvePattern(value.trashFolder, file, index, sequenceCounter));
         }
         if (action instanceof TagAction) {
             TagAction value = (TagAction) action;
             List<String> add = new ArrayList<String>();
             List<String> remove = new ArrayList<String>();
-            for (String tag : value.tagsToAdd) add.add(resolvePattern(tag, file, index));
-            for (String tag : value.tagsToRemove) remove.add(resolvePattern(tag, file, index));
+            for (String tag : value.tagsToAdd) add.add(resolvePattern(tag, file, index, sequenceCounter));
+            for (String tag : value.tagsToRemove) remove.add(resolvePattern(tag, file, index, sequenceCounter));
             return new TagAction(add, remove);
         }
         if (action instanceof RenameAction) {
-            return new RenameAction(resolvePattern(((RenameAction) action).pattern, file, index));
+            return new RenameAction(resolvePattern(((RenameAction) action).pattern, file, index, sequenceCounter));
         }
         if (action instanceof ChangeExtensionAction) {
             return new ChangeExtensionAction(resolvePattern(
-                    ((ChangeExtensionAction) action).newExtension, file, index));
+                    ((ChangeExtensionAction) action).newExtension, file, index, sequenceCounter));
         }
         if (action instanceof AffixAction) {
             AffixAction value = (AffixAction) action;
-            return new AffixAction(value.position, resolvePattern(value.text, file, index));
+            return new AffixAction(value.position, resolvePattern(value.text, file, index, sequenceCounter));
         }
         if (action instanceof MacroCompositeAction) {
             List<Action> resolved = new ArrayList<Action>();
             for (Action step : ((MacroCompositeAction) action).getActions()) {
-                resolved.add(resolveAction(step, file, index));
+                resolved.add(resolveAction(step, file, index, sequenceCounter));
             }
             return new MacroCompositeAction(resolved);
         }
@@ -188,12 +245,25 @@ public class AutoOrganizer {
         int affected = 0;
         for (Rule rule : rules) {
             if (rule == null || !rule.enabled) continue;
+            // One counter map belongs to this rule's complete file batch and
+            // is never reset while that rule processes its files.
+            Map<String, Integer> sequenceCounters = new HashMap<String, Integer>();
+            Set<String> existingTags = existingTagNames();
             for (int i = 0; i < files.size(); i++) {
                 MediaFile file = files.get(i);
-                if (file == null || !matchesRule(rule, file, i)) continue;
+                if (file == null) continue;
+                int sequenceCounter = sequenceCounterFor(file, sequenceCounters, existingTags);
+                boolean matches = matchesRule(rule, file, i, sequenceCounter);
+                if (!matches) {
+                    advanceSequenceCounter(file, sequenceCounters, sequenceCounter);
+                    continue;
+                }
                 activeIndex = i;
                 UndoEntry entry = captureState(file);
-                Action action = resolveAction(rule.action, file, i);
+                Action action = resolveAction(rule.action, file, i, sequenceCounter);
+                // Allocate the next value only after every condition/action
+                // variable for this file has used the current value.
+                advanceSequenceCounter(file, sequenceCounters, sequenceCounter);
                 boolean okay = action != null && action.execute(file, context, tagManager, renamer, fileStatus);
                 if (okay) {
                     checkStripOnMove(rule, file);
@@ -243,10 +313,14 @@ public class AutoOrganizer {
     /** Apply the first matching auto-apply rule to a status-triggered file. */
     public boolean applyToSingle(MediaFile file) {
         if (rules == null || file == null) return false;
+        Map<String, Integer> sequenceCounters = new HashMap<String, Integer>();
+        Set<String> existingTags = existingTagNames();
         for (Rule rule : rules) {
             if (rule == null || !rule.enabled || !rule.autoApply) continue;
-            if (matchesRule(rule, file, activeIndex)) {
-                Action action = resolveAction(rule.action, file, activeIndex);
+            int sequenceCounter = sequenceCounterFor(file, sequenceCounters, existingTags);
+            if (matchesRule(rule, file, activeIndex, sequenceCounter)) {
+                Action action = resolveAction(rule.action, file, activeIndex, sequenceCounter);
+                advanceSequenceCounter(file, sequenceCounters, sequenceCounter);
                 boolean okay = action != null && action.execute(file, context, tagManager, renamer, fileStatus);
                 if (okay) {
                     checkStripOnMove(rule, file);
@@ -324,8 +398,10 @@ public class AutoOrganizer {
     }
 
     public boolean canUndo() { return !undoStack.isEmpty(); }
+    public boolean wasLastUndoPartial() { return lastUndoPartial; }
 
     public int undoLastRun() {
+        lastUndoPartial = false;
         if (undoStack.isEmpty()) return 0;
         List<UndoEntry> batch = undoStack.pop();
         int restored = 0;
@@ -334,8 +410,11 @@ public class AutoOrganizer {
             UndoEntry entry = batch.get(i);
             try {
                 if (entry.action instanceof MacroCompositeAction) {
-                    ((MacroCompositeAction) entry.action).undoCaptured(entry.originalPath,
-                            entry.newPath, context, tagManager, renamer, fileStatus);
+                    boolean macroUndoOkay = ((MacroCompositeAction) entry.action).undoCaptured(
+                            entry.originalPath, entry.newPath, context, tagManager, renamer, fileStatus);
+                    if (!macroUndoOkay || ((MacroCompositeAction) entry.action).wasLastUndoPartial()) {
+                        lastUndoPartial = true;
+                    }
                 }
                 if (entry.wasMoved && entry.newPath != null
                         && !entry.newPath.equals(entry.originalPath)) {
@@ -381,13 +460,17 @@ public class AutoOrganizer {
     public int execute(Rule rule, List<MediaFile> files) {
         if (rule == null || files == null || files.isEmpty()) return -1;
         List<UndoEntry> batch = new ArrayList<UndoEntry>();
+        Map<String, Integer> sequenceCounters = new HashMap<String, Integer>();
+        Set<String> existingTags = existingTagNames();
         int failedStep = -1;
         for (int i = 0; i < files.size(); i++) {
             MediaFile file = files.get(i);
             if (file == null) continue;
             activeIndex = i;
+            int sequenceCounter = sequenceCounterFor(file, sequenceCounters, existingTags);
             UndoEntry entry = captureState(file);
-            Action action = resolveAction(rule.action, file, i);
+            Action action = resolveAction(rule.action, file, i, sequenceCounter);
+            advanceSequenceCounter(file, sequenceCounters, sequenceCounter);
             boolean okay = false;
             if (action instanceof MacroCompositeAction) {
                 MacroCompositeAction composite = (MacroCompositeAction) action;

@@ -1,6 +1,7 @@
 package com.mediasorter.organizer;
 
 import com.mediasorter.FileStatus;
+import com.mediasorter.TagText;
 import com.mediasorter.models.MediaFile;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,12 +25,14 @@ public class TagCondition extends Condition {
         if (matchAny) {
             result = false;
             for (String t : tags) {
-                if (fileTags.contains(t)) { result = true; break; }
+                String clean = TagText.plain(t);
+                if (!clean.isEmpty() && fileTags.contains(clean)) { result = true; break; }
             }
         } else {
             result = true;
             for (String t : tags) {
-                if (!fileTags.contains(t)) { result = false; break; }
+                String clean = TagText.plain(t);
+                if (clean.isEmpty() || !fileTags.contains(clean)) { result = false; break; }
             }
         }
         return negate ? !result : result;

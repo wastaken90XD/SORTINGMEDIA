@@ -55,6 +55,28 @@ import com.mediasorter.RulesActivity;
 public class MainActivity extends Activity
         implements FolderWatcher.Listener, MediaIndexer.IndexListener {
 
+    private static final Object IMPORT_RECREATE_LOCK = new Object();
+    private static java.lang.ref.WeakReference<MainActivity> activeInstance;
+    private static boolean importRecreateScheduled;
+
+    /** Recreate the main screen once, after the import commits have flushed. */
+    public static void requestRecreateAfterImport() {
+        synchronized (IMPORT_RECREATE_LOCK) {
+            if (importRecreateScheduled) return;
+            importRecreateScheduled = true;
+        }
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override public void run() {
+                MainActivity activity = null;
+                synchronized (IMPORT_RECREATE_LOCK) {
+                    if (activeInstance != null) activity = activeInstance.get();
+                    importRecreateScheduled = false;
+                }
+                if (activity != null && !activity.isFinishing()) activity.recreate();
+            }
+        }, 200L);
+    }
+
     private BatchRenameManager batchRenameManager = new BatchRenameManager();
     private MediaIndexer    indexer;
     private TagManager      tagManager;
@@ -88,6 +110,7 @@ public class MainActivity extends Activity
     private enum TagBarSort { USAGE, ALPHABETICAL, RECENT }
 
     private List<MediaFile> fullList     = new ArrayList<>();
+    private final Object fullListLock = new Object();
     private final List<MediaFile> currentFiles = new ArrayList<>();
     private static List<MediaFile> sLatestFullList = new ArrayList<>();
     private static List<Tag>       sLatestTagList  = new ArrayList<>();
@@ -125,7 +148,7 @@ public class MainActivity extends Activity
     private Button toolbarSearchToggle;
     private Button toolbarOverflowButton;
     private LinearLayout toolbarActionContainer;
-    private String toolbarSlotsSnapshot = "";
+    private int toolbarSlotsChecksum;
     private boolean galleryFastScrolling;
     private boolean galleryScrollSettled = true;
     private long galleryLastScrollTime;
@@ -136,6 +159,8 @@ public class MainActivity extends Activity
     private float galleryLastTouchY;
     private final java.util.Stack<List<MediaFile>> galleryManualUndo =
             new java.util.Stack<List<MediaFile>>();
+    private static final java.util.HashMap<String, Object> MANUAL_RENAME_LOCKS =
+            new java.util.HashMap<String, Object>();
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final java.util.concurrent.ExecutorService refreshExecutor =
@@ -147,7 +172,15 @@ public class MainActivity extends Activity
     private long volumeDownTime;
     private long volumeUpTime;
     private boolean infoOverlayVisible;
+    private boolean isGestureExecuting;
+    private boolean volumeLongHandledUp;
+    private boolean volumeLongHandledDown;
+    private Runnable volumeLongPressUpRunnable;
+    private Runnable volumeLongPressDownRunnable;
+    private int lastSweepSelectedIndex = RecyclerView.NO_POSITION;
+    private boolean sweepTouchActive;
     private android.widget.PopupWindow searchHistoryPopup;
+    private android.view.ViewTreeObserver.OnGlobalLayoutListener explorerWidthLayoutListener;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -156,6 +189,9 @@ public class MainActivity extends Activity
         // Use Application context to avoid memory leak
         CrashLogger.init(getApplicationContext());
         super.onCreate(savedInstanceState);
+        synchronized (IMPORT_RECREATE_LOCK) {
+            activeInstance = new java.lang.ref.WeakReference<MainActivity>(this);
+        }
         setContentView(R.layout.activity_main);
         initManagers();  // ← must be first
         initAdapters();  // ← depends on thumbnailLoader from initManagers
@@ -225,8 +261,33 @@ public class MainActivity extends Activity
         if (preview != null) {
             boolean showPreview = sp.getBoolean("show_preview", true);
             preview.setVisibility(showPreview ? View.VISIBLE : View.GONE);
-            applyExplorerWidth(sp.getInt("explorer_width_percent", 40), showPreview);
         }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) installExplorerWidthLayoutListener();
+    }
+
+    private void installExplorerWidthLayoutListener() {
+        if (fileBrowser == null) return;
+        final android.view.ViewTreeObserver observer = fileBrowser.getViewTreeObserver();
+        if (!observer.isAlive()) return;
+        if (explorerWidthLayoutListener != null) return;
+        explorerWidthLayoutListener = new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override public void onGlobalLayout() {
+                if (fileBrowser == null || fileBrowser.getWidth() <= 0 || fileBrowser.getHeight() <= 0) return;
+                android.content.SharedPreferences prefs = getSharedPreferences(
+                        "settings_prefs", MODE_PRIVATE);
+                boolean showPreview = prefs.getBoolean("show_preview", true);
+                applyExplorerWidth(prefs.getInt("explorer_width_percent", 40), showPreview);
+                android.view.ViewTreeObserver current = fileBrowser.getViewTreeObserver();
+                if (current.isAlive()) current.removeOnGlobalLayoutListener(explorerWidthLayoutListener);
+                explorerWidthLayoutListener = null;
+            }
+        };
+        observer.addOnGlobalLayoutListener(explorerWidthLayoutListener);
     }
 
     private void applyExplorerWidth(int percent, boolean previewVisible) {
@@ -265,12 +326,22 @@ public class MainActivity extends Activity
 
     @Override
     protected void onDestroy() {
+        synchronized (IMPORT_RECREATE_LOCK) {
+            if (activeInstance != null && activeInstance.get() == this) activeInstance = null;
+        }
         super.onDestroy();
         folderWatcher.unwatchAll();
         if (previewManager != null) previewManager.release();
         thumbnailLoader.shutdown();
         if (galleryThumbnailLoader != null) galleryThumbnailLoader.shutdown();
         if (searchHistoryPopup != null) searchHistoryPopup.dismiss();
+        cancelVolumeLongPress(android.view.KeyEvent.KEYCODE_VOLUME_UP);
+        cancelVolumeLongPress(android.view.KeyEvent.KEYCODE_VOLUME_DOWN);
+        if (explorerWidthLayoutListener != null && fileBrowser != null
+                && fileBrowser.getViewTreeObserver().isAlive()) {
+            fileBrowser.getViewTreeObserver().removeOnGlobalLayoutListener(explorerWidthLayoutListener);
+            explorerWidthLayoutListener = null;
+        }
         refreshExecutor.shutdownNow();
         statsExecutor.shutdownNow();
     }
@@ -311,6 +382,7 @@ public class MainActivity extends Activity
 
     @Override
     public boolean onKeyDown(int keyCode, android.view.KeyEvent event) {
+        if (isGestureInputKey(keyCode) && isGestureExecuting) return true;
         if (keyCode == android.view.KeyEvent.KEYCODE_MENU && gestureSettings != null) {
             List<GestureSettings.GestureStep> hardware = gestureSettings.getSteps(
                     GestureConstants.INPUT_HARDWARE_MENU);
@@ -353,6 +425,11 @@ public class MainActivity extends Activity
             long now = event == null ? System.currentTimeMillis() : event.getEventTime();
             if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) volumeUpTime = now;
             else volumeDownTime = now;
+            if (event == null || event.getRepeatCount() == 0) {
+                if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) volumeLongHandledUp = false;
+                else volumeLongHandledDown = false;
+                scheduleVolumeLongPress(keyCode);
+            }
             List<GestureSettings.GestureStep> steps = getVolumeSteps(keyCode, false);
             if (previewManager != null) previewManager.showHintLabel(gestureSettings.getSummary(steps));
             return true;
@@ -361,8 +438,61 @@ public class MainActivity extends Activity
         return super.onKeyDown(keyCode, event);
     }
 
+    private void scheduleVolumeLongPress(final int keyCode) {
+        cancelVolumeLongPress(keyCode);
+        Runnable runnable = new Runnable() {
+            @Override public void run() {
+                if (isTextInputFocused()) return;
+                if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) volumeLongHandledUp = true;
+                else volumeLongHandledDown = true;
+                if (previewManager != null) previewManager.hideHintLabel();
+                executeGestureSteps(getVolumeSteps(keyCode, true));
+            }
+        };
+        long delay = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getInt("long_press_duration", 500);
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
+            volumeLongPressUpRunnable = runnable;
+        } else {
+            volumeLongPressDownRunnable = runnable;
+        }
+        mainHandler.postDelayed(runnable, Math.max(1, delay));
+    }
+
+    private void cancelVolumeLongPress(int keyCode) {
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
+            if (volumeLongPressUpRunnable != null) mainHandler.removeCallbacks(volumeLongPressUpRunnable);
+            volumeLongPressUpRunnable = null;
+        } else {
+            if (volumeLongPressDownRunnable != null) mainHandler.removeCallbacks(volumeLongPressDownRunnable);
+            volumeLongPressDownRunnable = null;
+        }
+    }
+
+    @Override
+    public boolean onKeyLongPress(int keyCode, android.view.KeyEvent event) {
+        if (!isVolumeKey(keyCode) || isTextInputFocused()) {
+            return super.onKeyLongPress(keyCode, event);
+        }
+        android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        if (!sp.getBoolean("volume_keys_enabled", true)) return super.onKeyLongPress(keyCode, event);
+        boolean alreadyHandled = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
+                ? volumeLongHandledUp : volumeLongHandledDown;
+        if (alreadyHandled) return true;
+        cancelVolumeLongPress(keyCode);
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) volumeLongHandledUp = true;
+        else volumeLongHandledDown = true;
+        if (previewManager != null) previewManager.hideHintLabel();
+        executeGestureSteps(getVolumeSteps(keyCode, true));
+        return true;
+    }
+
     @Override
     public boolean onKeyUp(int keyCode, android.view.KeyEvent event) {
+        if (isGestureInputKey(keyCode) && isGestureExecuting) {
+            isGestureExecuting = false;
+            return true;
+        }
         if (isDpadKey(keyCode)) {
             android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
             boolean dpadEnabled = sp.getBoolean("dpad_enabled", true) && (gestureSettings == null || gestureSettings.isDpadEnabled());
@@ -376,6 +506,15 @@ public class MainActivity extends Activity
 
         if (isVolumeKey(keyCode)) {
             if (isTextInputFocused()) return super.onKeyUp(keyCode, event);
+            boolean longHandled = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
+                    ? volumeLongHandledUp : volumeLongHandledDown;
+            cancelVolumeLongPress(keyCode);
+            if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) volumeLongHandledUp = false;
+            else volumeLongHandledDown = false;
+            if (longHandled) {
+                if (previewManager != null) previewManager.hideHintLabel();
+                return true;
+            }
             android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
             if (!sp.getBoolean("volume_keys_enabled", true)) return super.onKeyUp(keyCode, event);
             long now = event == null ? System.currentTimeMillis() : event.getEventTime();
@@ -390,6 +529,11 @@ public class MainActivity extends Activity
         }
 
         return super.onKeyUp(keyCode, event);
+    }
+
+    private boolean isGestureInputKey(int keyCode) {
+        return isDpadKey(keyCode) || isVolumeKey(keyCode)
+                || keyCode == android.view.KeyEvent.KEYCODE_MENU;
     }
 
     private boolean isDpadKey(int keyCode) {
@@ -430,6 +574,12 @@ public class MainActivity extends Activity
     private boolean isTextInputFocused() {
         View focused = getCurrentFocus();
         return focused instanceof EditText;
+    }
+
+    private boolean isGestureTextInputFocused() {
+        View focused = getCurrentFocus();
+        if (focused instanceof EditText) return true;
+        return focused instanceof TextView && ((TextView) focused).isTextSelectable();
     }
 
     private boolean hasAssignedGesture(List<GestureSettings.GestureStep> steps) {
@@ -478,7 +628,9 @@ public class MainActivity extends Activity
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
                         if (tagAdapter != null) tagAdapter.setTags(tagManager.getAllTags());
+                        boolean removedGhost = reconcileDeletedTagFilters();
                         refreshTagBar();
+                        if (removedGhost) scheduleRefresh();
                         updateStatsBarAsync();
                     }
                 });
@@ -989,6 +1141,22 @@ public class MainActivity extends Activity
         updateStatsBarAsync();
     }
 
+    private boolean reconcileDeletedTagFilters() {
+        if (activeTagFilters.isEmpty() || tagManager == null) return false;
+        Set<String> existing = new java.util.HashSet<String>();
+        for (Tag tag : tagManager.getAllTags()) existing.add(tag.getName());
+        boolean changed = false;
+        java.util.Iterator<String> iterator = activeTagFilters.iterator();
+        while (iterator.hasNext()) {
+            if (!existing.contains(iterator.next())) {
+                iterator.remove();
+                changed = true;
+            }
+        }
+        if (changed) filterManager.setTagFilters(activeTagFilters);
+        return changed;
+    }
+
     private void refreshTagBar() {
         if (tagBarAdapter == null || tagManager == null) return;
         String query = tagBarSearch == null ? "" : tagBarSearch.getText().toString().trim().toLowerCase();
@@ -1137,7 +1305,11 @@ public class MainActivity extends Activity
         final long request = ++statsSequence;
         final List<MediaFile> totalSnapshot = indexer == null
                 ? new ArrayList<MediaFile>() : indexer.getIndex();
-        final List<MediaFile> filteredSnapshot = new ArrayList<>(fullList);
+        final List<MediaFile> filteredSnapshot = getFullListSnapshot();
+        final Set<String> doneSnapshot = fileStatus == null
+                ? new java.util.HashSet<String>() : fileStatus.getAllDone();
+        final Set<String> flaggedSnapshot = fileStatus == null
+                ? new java.util.HashSet<String>() : fileStatus.getAllFlagged();
         statsExecutor.submit(new Runnable() {
             @Override public void run() {
                 int tagged = 0;
@@ -1147,8 +1319,8 @@ public class MainActivity extends Activity
                 for (MediaFile file : filteredSnapshot) {
                     if (file == null || !countedPaths.add(file.getPath())) continue;
                     if (!file.getTags().isEmpty()) tagged++;
-                    if (fileStatus != null && fileStatus.isDone(file.getPath())) completed++;
-                    if (fileStatus != null && fileStatus.isFlagged(file.getPath())) flagged++;
+                    if (doneSnapshot.contains(file.getPath())) completed++;
+                    if (flaggedSnapshot.contains(file.getPath())) flagged++;
                 }
                 final String text = "Total: " + totalSnapshot.size()
                         + "  Filtered: " + countedPaths.size()
@@ -1285,7 +1457,9 @@ public class MainActivity extends Activity
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
                         if (sequence != refreshSequence || isFinishing()) return;
-                        fullList = result;
+                        synchronized (fullListLock) {
+                            fullList = result;
+                        }
                         // Recalculate the highlight by path after every filter,
                         // search, and sort. A numeric index from the old list is
                         // never reused for a different file.
@@ -1325,6 +1499,7 @@ public class MainActivity extends Activity
         for (MediaFile f : safeCurrentFiles) windowPaths.add(f.getPath());
         thumbnailLoader.evictOutsideWindow(windowPaths);
 
+        mediaAdapter.setAbsoluteWindowStart(windowManager.toAbsolute(0));
         mediaAdapter.setFiles(safeCurrentFiles);
 
         // If we have a current preview file, re-select it in the (new) window
@@ -1385,19 +1560,34 @@ public class MainActivity extends Activity
     }
 
     private void executeGestureSteps(List<GestureSettings.GestureStep> steps) {
-        if (steps == null) return;
-        for (GestureSettings.GestureStep step : steps) {
-            if (step == null) continue;
-            if (step.action == GestureSettings.GestureAction.APPLY_TAG
+        if (steps == null || steps.isEmpty() || isGestureExecuting) return;
+        isGestureExecuting = true;
+        try {
+            for (GestureSettings.GestureStep step : steps) {
+                if (step == null) continue;
+                if (step.action == GestureSettings.GestureAction.APPLY_TAG
                     && step.tag != null && !step.tag.isEmpty()) {
                 applyQuickTagToCurrent(step.tag);
             } else if (step.action == GestureSettings.GestureAction.MACRO) {
+                if (isGestureTextInputFocused()) continue;
+                if (currentFileReference() == null) {
+                    Toast.makeText(this, "No file selected", Toast.LENGTH_SHORT).show();
+                    continue;
+                }
                 executeMacro(step.tag);
             } else if (step.action == GestureSettings.GestureAction.REPEAT_LAST_MACRO) {
+                if (isGestureTextInputFocused()) continue;
+                if (currentFileReference() == null) {
+                    Toast.makeText(this, "No file selected", Toast.LENGTH_SHORT).show();
+                    continue;
+                }
                 executeRepeatLastMacro();
             } else {
                 executeAction(step.action);
             }
+            }
+        } finally {
+            isGestureExecuting = false;
         }
     }
 
@@ -1554,9 +1744,13 @@ public class MainActivity extends Activity
 
     private void undoLastAction() {
         int undone = 0;
-        if (autoOrganizer != null && autoOrganizer.canUndo()) undone = autoOrganizer.undoLastRun();
-        else if (batchRenameManager.canUndo()) undone = batchRenameManager.undo().succeeded;
-        Toast.makeText(this, undone > 0 ? "Undone: " + undone + " operations" : "Nothing to undo",
+        boolean partial = false;
+        if (autoOrganizer != null && autoOrganizer.canUndo()) {
+            undone = autoOrganizer.undoLastRun();
+            partial = autoOrganizer.wasLastUndoPartial();
+        } else if (batchRenameManager.canUndo()) undone = batchRenameManager.undo().succeeded;
+        Toast.makeText(this, partial ? "Undo partially complete"
+                : undone > 0 ? "Undone: " + undone + " operations" : "Nothing to undo",
                 Toast.LENGTH_SHORT).show();
         scheduleRefresh();
     }
@@ -1578,6 +1772,11 @@ public class MainActivity extends Activity
         else next = Math.max(0, Math.min(fullList.size() - 1, next + (direction > 0 ? 1 : -1)));
         mediaAdapter.selectPath(fullList.get(next).getPath());
         loadFileAtIndex(next);
+    }
+
+    private MediaFile currentFileReference() {
+        if (currentIndex < 0 || currentIndex >= fullList.size()) return null;
+        return fullList.get(currentIndex);
     }
 
     private void executeMacro(String id) {
@@ -1651,9 +1850,9 @@ public class MainActivity extends Activity
         MediaFile file = fullList.get(currentIndex);
         if (fileStatus.isFlagged(file.getPath())) fileStatus.clearStatus(file.getPath());
         else fileStatus.setFlagged(file.getPath());
-        // Update both visible indicators in the same UI turn; no refresh is
-        // needed to make a gesture/button flag visible.
-        if (mediaAdapter != null) mediaAdapter.updateFileStatus(file);
+        // Update the adapter on the main thread immediately after the toggle;
+        // no refresh or background callback is required for the row indicator.
+        if (mediaAdapter != null) mediaAdapter.notifyFlagChanged(currentIndex);
         if (previewManager != null) previewManager.updateStatus(file);
         if (galleryAdapter != null) galleryAdapter.notifyDataSetChanged();
         autoOrganizer.setActiveListIndex(currentIndex);
@@ -1767,6 +1966,13 @@ public class MainActivity extends Activity
     private List<MediaFile> getCurrentFilesSnapshot() {
         synchronized (currentFiles) {
             return new ArrayList<>(currentFiles);
+        }
+    }
+
+    /** Snapshot of the complete filtered/sorted view for background counters. */
+    private List<MediaFile> getFullListSnapshot() {
+        synchronized (fullListLock) {
+            return new ArrayList<MediaFile>(fullList);
         }
     }
 
@@ -4443,19 +4649,30 @@ private Spinner makeSpinner(String[] options) {
                 @Override
                 public boolean onInterceptTouchEvent(RecyclerView recyclerView,
                                                       MotionEvent event) {
-                    if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                    int action = event.getActionMasked();
+                    if (action == MotionEvent.ACTION_DOWN) {
                         dismissGalleryInfoPopup();
-                    }
-                    if (galleryAdapter != null && galleryAdapter.isSelectMode()
-                            && event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                        sweepTouchActive = galleryAdapter != null && galleryAdapter.isSelectMode();
+                        lastSweepSelectedIndex = RecyclerView.NO_POSITION;
+                    } else if (action == MotionEvent.ACTION_MOVE && sweepTouchActive
+                            && galleryAdapter != null && galleryAdapter.isSelectMode()) {
                         View child = recyclerView.findChildViewUnder(event.getX(), event.getY());
                         if (child != null) {
                             int position = recyclerView.getChildAdapterPosition(child);
-                            MediaFile file = galleryAdapter.getFile(position);
-                            if (file != null && !galleryAdapter.isSelected(file.getPath())) {
-                                galleryAdapter.selectPath(file.getPath());
+                            if (position != RecyclerView.NO_POSITION
+                                    && position != lastSweepSelectedIndex
+                                    && position < galleryAdapter.getItemCount()) {
+                                lastSweepSelectedIndex = position;
+                                MediaFile file = galleryAdapter.getFile(position);
+                                if (file != null) galleryAdapter.selectPath(file.getPath());
                             }
                         }
+                    } else if (action == MotionEvent.ACTION_UP
+                            || action == MotionEvent.ACTION_CANCEL) {
+                        // Do not select the release location. The last move
+                        // event is the complete sweep selection.
+                        sweepTouchActive = false;
+                        lastSweepSelectedIndex = RecyclerView.NO_POSITION;
                     }
                     return false;
                 }
@@ -4472,7 +4689,11 @@ private Spinner makeSpinner(String[] options) {
                             || !(target instanceof GalleryAdapter.ViewHolder)) return false;
                     int from = source.getAdapterPosition();
                     int to = target.getAdapterPosition();
-                    if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) return false;
+                    if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION
+                            || to >= galleryAdapter.getItemCount()) {
+                        endGalleryDragOutOfBounds();
+                        return false;
+                    }
                     if (galleryDragFrom < 0) galleryDragFrom = from;
                     View targetView = target.itemView;
                     float centerX = targetView.getLeft() + targetView.getWidth() / 2.0f;
@@ -4617,18 +4838,22 @@ private Spinner makeSpinner(String[] options) {
         return result;
     }
 
+    private int toolbarSlotsChecksum() {
+        String raw = galleryPrefs().getString("toolbar_slots", "");
+        return raw == null ? 0 : raw.hashCode();
+    }
+
     private void rebuildToolbarIfNeeded() {
         if (toolbarActionContainer == null) return;
-        List<String> slots = getToolbarSlotIds();
-        String signature = slots.toString();
-        if (!signature.equals(toolbarSlotsSnapshot)) rebuildCustomToolbar();
+        int checksum = toolbarSlotsChecksum();
+        if (checksum != toolbarSlotsChecksum) rebuildCustomToolbar();
     }
 
     private void rebuildCustomToolbar() {
         if (toolbarActionContainer == null) return;
         toolbarActionContainer.removeAllViews();
         List<String> slots = getToolbarSlotIds();
-        toolbarSlotsSnapshot = slots.toString();
+        toolbarSlotsChecksum = toolbarSlotsChecksum();
         for (String action : slots) {
             Button button = new Button(this);
             button.setText(GestureConstants.label(action));
@@ -4790,7 +5015,7 @@ private Spinner makeSpinner(String[] options) {
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
                         Toast.makeText(MainActivity.this,
-                                path == null ? "Export failed" : "Exported successfully",
+                                path == null ? "Export failed — storage error" : "Exported successfully",
                                 Toast.LENGTH_SHORT).show();
                     }
                 });
@@ -4903,14 +5128,37 @@ private Spinner makeSpinner(String[] options) {
         if (!galleryDragging || galleryBrowser == null || galleryAdapter == null) return;
         List<MediaFile> files = galleryAdapter.getFiles();
         if (files.isEmpty()) return;
-        int center = Math.max(0, Math.min(files.size() - 1, galleryDragTo));
-        int start = Math.max(0, center - 3);
-        int end = Math.min(files.size() - 1, center + 3);
+        if (galleryDragTo < 0 || galleryDragTo >= files.size()) {
+            endGalleryDragOutOfBounds();
+            return;
+        }
+        int hoverIndex = galleryDragTo;
+        int start = Math.max(0, hoverIndex - 3);
+        int end = Math.min(files.size() - 1, hoverIndex + 3);
         List<String> paths = new ArrayList<>();
         for (int i = start; i <= end; i++) {
             paths.add(files.get(i).getPath());
         }
         galleryAdapter.updateDragThumbnailWindow(galleryBrowser, paths, galleryDraggedPath);
+    }
+
+    private void endGalleryDragOutOfBounds() {
+        if (!galleryDragging) return;
+        if (galleryAdapter != null && !galleryDragOriginalFiles.isEmpty()) {
+            galleryAdapter.setFiles(galleryDragOriginalFiles);
+            indexer.updateManualOrder(galleryDragOriginalFiles);
+        }
+        if (galleryAdapter != null) galleryAdapter.clearDragThumbnailWindow();
+        galleryDraggedPath = null;
+        galleryDragging = false;
+        galleryDragFrom = -1;
+        galleryDragTo = -1;
+        galleryDragOriginalOrder.clear();
+        galleryDragOriginalFiles.clear();
+        if (galleryBrowser != null && galleryAdapter != null) {
+            galleryAdapter.reloadVisibleThumbnails(galleryBrowser);
+        }
+        updateGalleryMemoryWindow();
     }
 
     private void updateGalleryScrollVelocity(int dx, int dy) {
@@ -4934,6 +5182,15 @@ private Spinner makeSpinner(String[] options) {
         galleryFastScrolling = fast;
         if (galleryThumbnailLoader != null) {
             galleryThumbnailLoader.setScrollSuspended(fast);
+            if (fast && galleryBrowser != null) {
+                galleryBrowser.post(new Runnable() {
+                    @Override public void run() {
+                        if (galleryFastScrolling && galleryThumbnailLoader != null) {
+                            galleryThumbnailLoader.clearAfterScroll();
+                        }
+                    }
+                });
+            }
         }
         if (galleryAdapter != null && galleryLayoutManager != null
                 && galleryBrowser != null) {
@@ -5259,67 +5516,136 @@ private Spinner makeSpinner(String[] options) {
         return "manual-" + System.currentTimeMillis();
     }
 
+    private Object manualRenameLock(String directoryPath) {
+        synchronized (MANUAL_RENAME_LOCKS) {
+            Object lock = MANUAL_RENAME_LOCKS.get(directoryPath);
+            if (lock == null) {
+                lock = new Object();
+                MANUAL_RENAME_LOCKS.put(directoryPath, lock);
+            }
+            return lock;
+        }
+    }
+
+    /** Highest existing sequence index for one prefix in a directory. */
+    private int highestExistingSequenceIndex(java.io.File directory, String prefix) {
+        if (directory == null || prefix == null) return -1;
+        String marker = prefix + "_seq_";
+        String[] names = directory.list();
+        int highest = -1;
+        if (names == null) return highest;
+        for (String name : names) {
+            if (name == null || !name.startsWith(marker)) continue;
+            String label = name.substring(marker.length());
+            int dot = label.lastIndexOf('.');
+            if (dot > 0) label = label.substring(0, dot);
+            int index = sequenceLabelIndex(label);
+            if (index > highest) highest = index;
+        }
+        return highest;
+    }
+
+    private int sequenceLabelIndex(String label) {
+        if (label == null || label.isEmpty()) return -1;
+        int value = 0;
+        for (int i = 0; i < label.length(); i++) {
+            char c = Character.toLowerCase(label.charAt(i));
+            if (c < 'a' || c > 'z') return -1;
+            value = value * 26 + (c - 'a' + 1);
+        }
+        return value - 27;
+    }
+
     private void renameGalleryManualRange(final List<MediaFile> affected) {
         if (affected == null || affected.isEmpty()) return;
         Toast.makeText(this, "Updating manual order…", Toast.LENGTH_SHORT).show();
         new Thread(new Runnable() {
             @Override public void run() {
-                int success = 0;
-                String prefix = uniqueManualGroupPrefix(affected);
-                java.util.List<java.io.File> sources = new ArrayList<>();
-                java.util.List<java.io.File> temporary = new ArrayList<>();
-                java.util.List<MediaFile> renamedFiles = new ArrayList<>();
-                long stamp = System.currentTimeMillis();
-                for (int i = 0; i < affected.size(); i++) {
-                    MediaFile file = affected.get(i);
-                    java.io.File source = new java.io.File(file.getPath());
-                    if (!source.exists()) continue;
-                    java.io.File temp = new java.io.File(source.getParentFile(),
-                            ".gallery_order_" + stamp + "_" + i + source.getName());
-                    if (source.renameTo(temp)) {
-                        sources.add(source);
-                        temporary.add(temp);
-                        renamedFiles.add(file);
+                String directoryPath = "";
+                for (MediaFile file : affected) {
+                    if (file != null && file.getPath() != null) {
+                        java.io.File parent = new java.io.File(file.getPath()).getParentFile();
+                        if (parent != null) {
+                            directoryPath = parent.getAbsolutePath();
+                            break;
+                        }
                     }
                 }
-                for (int i = 0; i < temporary.size(); i++) {
-                    java.io.File temp = temporary.get(i);
-                    java.io.File original = sources.get(i);
-                    MediaFile file = renamedFiles.get(i);
-                    String originalName = original.getName();
-                    int dot = originalName.lastIndexOf('.');
-                    String ext = dot >= 0 ? originalName.substring(dot) : "";
-                    java.io.File destination = new java.io.File(original.getParentFile(),
-                            prefix + "_seq_" + com.mediasorter.features.RandomGenerator.sequenceLabel(
-                                    renamedFiles.indexOf(file)) + ext);
-                    if (temp.renameTo(destination)) {
-                        String oldPath = file.getPath();
-                        file.setPath(destination.getAbsolutePath());
-                        groupManager.moveManualAssignment(oldPath, file.getPath());
-                        android.content.SharedPreferences.Editor editor =
-                                getSharedPreferences("settings_prefs", MODE_PRIVATE).edit();
-                        int manual = file.getManualOrder();
-                        editor.remove("manual_order:" + oldPath);
-                        editor.putInt("manual_order:" + file.getPath(), manual);
-                        editor.apply();
-                        success++;
-                    } else {
-                        temp.renameTo(original);
+                final Object renameLock = manualRenameLock(directoryPath);
+                // A drag operation owns this directory lock from the initial
+                // sequence scan through allocation and queuing of its UI
+                // completion callback. A concurrent drag therefore sees all
+                // names committed by this operation before it allocates labels.
+                synchronized (renameLock) {
+                    int success = 0;
+                    String prefix = uniqueManualGroupPrefix(affected);
+                    java.io.File directory = directoryPath.isEmpty()
+                            ? null : new java.io.File(directoryPath);
+                    int highestExisting = highestExistingSequenceIndex(directory, prefix);
+                    int nextSequence = highestExisting + 1;
+                    java.util.List<java.io.File> sources = new ArrayList<>();
+                    java.util.List<java.io.File> temporary = new ArrayList<>();
+                    java.util.List<MediaFile> renamedFiles = new ArrayList<>();
+                    long stamp = System.currentTimeMillis();
+                    for (int i = 0; i < affected.size(); i++) {
+                        MediaFile file = affected.get(i);
+                        if (file == null) continue;
+                        java.io.File source = new java.io.File(file.getPath());
+                        if (!source.exists()) continue;
+                        java.io.File temp = new java.io.File(source.getParentFile(),
+                                ".gallery_order_" + stamp + "_" + i + source.getName());
+                        if (source.renameTo(temp)) {
+                            sources.add(source);
+                            temporary.add(temp);
+                            renamedFiles.add(file);
+                        }
                     }
+                    for (int i = 0; i < temporary.size(); i++) {
+                        java.io.File temp = temporary.get(i);
+                        java.io.File original = sources.get(i);
+                        MediaFile file = renamedFiles.get(i);
+                        String originalName = original.getName();
+                        int dot = originalName.lastIndexOf('.');
+                        String ext = dot >= 0 ? originalName.substring(dot) : "";
+                        java.io.File destination = new java.io.File(original.getParentFile(),
+                                prefix + "_seq_" + com.mediasorter.features.RandomGenerator.sequenceLabel(
+                                        nextSequence + i) + ext);
+                        if (temp.renameTo(destination)) {
+                            String oldPath = file.getPath();
+                            file.setPath(destination.getAbsolutePath());
+                            groupManager.moveManualAssignment(oldPath, file.getPath());
+                            android.content.SharedPreferences.Editor editor =
+                                    getSharedPreferences("settings_prefs", MODE_PRIVATE).edit();
+                            int manual = file.getManualOrder();
+                            editor.remove("manual_order:" + oldPath);
+                            editor.putInt("manual_order:" + file.getPath(), manual);
+                            editor.commit();
+                            success++;
+                        } else {
+                            temp.renameTo(original);
+                        }
+                    }
+                    saveManualGroupAssignments();
+                    final int renamed = success;
+                    final String completedPrefix = prefix;
+                    // Queued before releasing renameLock, so the next drag
+                    // cannot begin its read/allocation phase ahead of this UI
+                    // reconciliation request.
+                    mainHandler.post(new Runnable() {
+                        @Override public void run() {
+                            for (MediaFile file : affected) {
+                                if (file != null) {
+                                    indexer.rescan(new java.io.File(file.getPath()).getParent());
+                                }
+                            }
+                            scheduleRefresh();
+                            Toast.makeText(MainActivity.this,
+                                    "Manual order updated: " + renamed + " files ("
+                                            + completedPrefix + ")",
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                    });
                 }
-                saveManualGroupAssignments();
-                final int renamed = success;
-                final String completedPrefix = prefix;
-                mainHandler.post(new Runnable() {
-                    @Override public void run() {
-                        for (MediaFile file : affected) indexer.rescan(new java.io.File(file.getPath()).getParent());
-                        scheduleRefresh();
-                        Toast.makeText(MainActivity.this,
-                                "Manual order updated: " + renamed + " files ("
-                                        + completedPrefix + ")",
-                                Toast.LENGTH_SHORT).show();
-                    }
-                });
             }
         }).start();
     }

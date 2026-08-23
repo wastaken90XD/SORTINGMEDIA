@@ -9,6 +9,7 @@ import com.mediasorter.organizer.RuleSerializer;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -150,20 +151,100 @@ public final class SettingsExporter {
             } finally {
                 if (output != null) try { output.close(); } catch (Exception ignored) {}
             }
+            // Never touch an existing backup until the complete replacement is
+            // known to be present and non-empty.
             if (!temporary.exists() || temporary.length() == 0) {
                 temporary.delete();
+                Log.e(TAG, "Export failed — storage error: temp file is empty");
                 return null;
             }
-            if (destination.exists()) destination.delete();
-            if (!temporary.renameTo(destination)) {
+
+            boolean renamed = !destination.exists() && temporary.renameTo(destination);
+            if (renamed) {
+                if (destination.exists() && destination.length() > 0) {
+                    Log.d(TAG, "Exported successfully to " + destination.getAbsolutePath());
+                    return destination.getAbsolutePath();
+                }
+                destination.delete();
+                Log.e(TAG, "Export failed — storage error: final file is empty");
+                return null;
+            }
+
+            // renameTo can fail silently on API 21 (and across storage
+            // providers). Copy to a second temporary file first, then swap it
+            // into place while preserving the old backup on every failure.
+            File replacement = new File(directory, filename + ".copy.tmp");
+            File oldBackup = new File(directory, filename + ".old.tmp");
+            try {
+                if (oldBackup.exists()) oldBackup.delete();
+                copyFile(temporary, replacement);
+                if (!replacement.exists() || replacement.length() == 0) {
+                    replacement.delete();
+                    temporary.delete();
+                    Log.e(TAG, "Export failed — storage error: copy is empty");
+                    return null;
+                }
+                if (destination.exists() && !destination.renameTo(oldBackup)) {
+                    replacement.delete();
+                    temporary.delete();
+                    Log.e(TAG, "Export failed — storage error: target could not be staged");
+                    return null;
+                }
+                if (!replacement.renameTo(destination)) {
+                    restoreBackup(oldBackup, destination);
+                    replacement.delete();
+                    temporary.delete();
+                    Log.e(TAG, "Export failed — storage error: replacement could not be moved");
+                    return null;
+                }
+                if (!destination.exists() || destination.length() == 0) {
+                    destination.delete();
+                    restoreBackup(oldBackup, destination);
+                    temporary.delete();
+                    Log.e(TAG, "Export failed — storage error: final file is empty");
+                    return null;
+                }
+                oldBackup.delete();
                 temporary.delete();
+                Log.d(TAG, "Exported successfully to " + destination.getAbsolutePath());
+                return destination.getAbsolutePath();
+            } catch (Exception copyError) {
+                replacement.delete();
+                temporary.delete();
+                if (oldBackup.exists() && !destination.exists()) restoreBackup(oldBackup, destination);
+                Log.e(TAG, "Export failed — storage error", copyError);
                 return null;
             }
-            Log.d(TAG, "Exported successfully to " + destination.getAbsolutePath());
-            return destination.getAbsolutePath();
         } catch (Exception error) {
             Log.e(TAG, "Export failed", error);
             return null;
+        }
+    }
+
+    private static void copyFile(File source, File destination) throws Exception {
+        FileInputStream input = null;
+        FileOutputStream output = null;
+        try {
+            input = new FileInputStream(source);
+            output = new FileOutputStream(destination);
+            byte[] buffer = new byte[256 * 1024];
+            int read;
+            while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+            output.flush();
+        } finally {
+            if (input != null) try { input.close(); } catch (Exception ignored) {}
+            if (output != null) try { output.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    private static void restoreBackup(File backup, File destination) {
+        if (backup == null || !backup.exists() || destination.exists()) return;
+        if (backup.renameTo(destination)) return;
+        try {
+            copyFile(backup, destination);
+            if (destination.exists() && destination.length() > 0) backup.delete();
+        } catch (Exception error) {
+            Log.e(TAG, "Could not restore previous backup", error);
         }
     }
 

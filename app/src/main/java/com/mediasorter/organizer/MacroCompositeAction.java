@@ -1,6 +1,7 @@
 package com.mediasorter.organizer;
 
 import android.content.Context;
+import android.util.Log;
 import com.mediasorter.BatchRenameManager;
 import com.mediasorter.FileStatus;
 import com.mediasorter.MetadataWriter;
@@ -16,6 +17,7 @@ import java.util.Map;
 public class MacroCompositeAction extends Action {
     private final List<Action> actions;
     private int failedStepIndex = -1;
+    private boolean lastUndoPartial;
     private final Map<String, Snapshot> snapshots = new HashMap<String, Snapshot>();
 
     private static class Snapshot {
@@ -36,6 +38,7 @@ public class MacroCompositeAction extends Action {
 
     public List<Action> getActions() { return actions; }
     public int getFailedStepIndex() { return failedStepIndex; }
+    public boolean wasLastUndoPartial() { return lastUndoPartial; }
 
     @Override public String describe() {
         return "Composite macro of " + actions.size() + " steps";
@@ -83,12 +86,13 @@ public class MacroCompositeAction extends Action {
     public boolean undo(MediaFile file, Context context, TagManager tagManager,
                         BatchRenameManager renamer, FileStatus fileStatus) {
         if (file == null) return false;
+        lastUndoPartial = false;
         boolean okay = true;
         for (int i = actions.size() - 1; i >= 0; i--) {
             Action action = actions.get(i);
             if (action != null && !action.undo(file, context, tagManager, renamer, fileStatus)) {
-                // A child without an explicit inverse is still followed by
-                // the organizer snapshot restore; keep walking in reverse.
+                Log.w("MacroCompositeAction", "Undo failed for macro step " + i);
+                lastUndoPartial = true;
                 okay = false;
             }
         }
@@ -100,15 +104,19 @@ public class MacroCompositeAction extends Action {
                                 Context context, TagManager tagManager,
                                 BatchRenameManager renamer, FileStatus fileStatus) {
         Snapshot snapshot = snapshots.get(originalPath);
+        lastUndoPartial = false;
         MediaFile current = new MediaFile(
                 currentPath == null ? originalPath : currentPath, 0L);
         if (snapshot == null) return false;
         for (int i = actions.size() - 1; i >= 0; i--) {
             Action action = actions.get(i);
-            if (action != null) action.undo(current, context, tagManager, renamer, fileStatus);
+            if (action != null && !action.undo(current, context, tagManager, renamer, fileStatus)) {
+                Log.w("MacroCompositeAction", "Undo failed for macro step " + i);
+                lastUndoPartial = true;
+            }
         }
         restoreSnapshot(snapshot, current, context, fileStatus);
-        return true;
+        return !lastUndoPartial;
     }
 
     private void restoreSnapshot(Snapshot snapshot, MediaFile file,

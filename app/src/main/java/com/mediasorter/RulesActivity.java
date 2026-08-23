@@ -713,7 +713,10 @@ public class RulesActivity extends Activity {
                 @Override public void onClick(DialogInterface dialog, int which) {
                     int restored = organizer.undoLastRun();
                     Toast.makeText(RulesActivity.this,
-                            "Undone: " + restored + " operations", Toast.LENGTH_SHORT).show();
+                            organizer.wasLastUndoPartial()
+                                    ? "Undo partially complete"
+                                    : "Undone: " + restored + " operations",
+                            Toast.LENGTH_SHORT).show();
                 }
             })
             .setNegativeButton("Cancel", null)

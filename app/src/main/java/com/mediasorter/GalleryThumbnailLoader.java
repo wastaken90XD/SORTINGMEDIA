@@ -122,10 +122,14 @@ public class GalleryThumbnailLoader {
 
     public boolean isScrollSuspended() { return scrollSuspended; }
 
-    /** Suspend work during a fast fling and cancel work already queued. */
+    /** Change the decode gate without mutating bitmaps during the current draw. */
     public void setScrollSuspended(boolean suspended) {
         scrollSuspended = suspended;
-        if (suspended) cancelPendingDecodes();
+    }
+
+    /** Must be called from a posted RecyclerView callback after a frame. */
+    public void clearAfterScroll() {
+        cancelPendingDecodes();
     }
 
     public void cancelPendingDecodes() {
