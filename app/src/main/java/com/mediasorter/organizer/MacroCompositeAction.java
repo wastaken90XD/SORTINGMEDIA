@@ -76,7 +76,11 @@ public class MacroCompositeAction extends Action {
         for (int i = actions.size() - 1; i >= 0 && seen < completed; i--) {
             Action action = actions.get(i);
             if (action != null) {
-                action.undo(file, context, tagManager, renamer, fileStatus);
+                try {
+                    action.undo(file, context, tagManager, renamer, fileStatus);
+                } catch (Throwable error) {
+                    Log.w("MacroCompositeAction", "Rollback threw for macro step " + i, error);
+                }
                 seen++;
             }
         }
@@ -90,8 +94,15 @@ public class MacroCompositeAction extends Action {
         boolean okay = true;
         for (int i = actions.size() - 1; i >= 0; i--) {
             Action action = actions.get(i);
-            if (action != null && !action.undo(file, context, tagManager, renamer, fileStatus)) {
-                Log.w("MacroCompositeAction", "Undo failed for macro step " + i);
+            if (action == null) continue;
+            try {
+                if (!action.undo(file, context, tagManager, renamer, fileStatus)) {
+                    Log.w("MacroCompositeAction", "Undo failed for macro step " + i);
+                    lastUndoPartial = true;
+                    okay = false;
+                }
+            } catch (Throwable error) {
+                Log.w("MacroCompositeAction", "Undo threw for macro step " + i, error);
                 lastUndoPartial = true;
                 okay = false;
             }
@@ -110,8 +121,14 @@ public class MacroCompositeAction extends Action {
         if (snapshot == null) return false;
         for (int i = actions.size() - 1; i >= 0; i--) {
             Action action = actions.get(i);
-            if (action != null && !action.undo(current, context, tagManager, renamer, fileStatus)) {
-                Log.w("MacroCompositeAction", "Undo failed for macro step " + i);
+            if (action == null) continue;
+            try {
+                if (!action.undo(current, context, tagManager, renamer, fileStatus)) {
+                    Log.w("MacroCompositeAction", "Undo failed for macro step " + i);
+                    lastUndoPartial = true;
+                }
+            } catch (Throwable error) {
+                Log.w("MacroCompositeAction", "Undo threw for macro step " + i, error);
                 lastUndoPartial = true;
             }
         }
