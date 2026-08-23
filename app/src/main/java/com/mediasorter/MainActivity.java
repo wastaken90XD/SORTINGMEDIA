@@ -4612,7 +4612,6 @@ private Spinner makeSpinner(String[] options) {
 
     private void rebuildToolbarIfNeeded() {
         if (toolbarActionContainer == null) return;
-        String raw = galleryPrefs().getString("toolbar_slots", "");
         List<String> slots = getToolbarSlotIds();
         String signature = slots.toString();
         if (!signature.equals(toolbarSlotsSnapshot)) rebuildCustomToolbar();
