@@ -527,11 +527,6 @@ public class SettingsActivity extends Activity {
 
         // ── 4. Main window UI toggles ─────────────────────────────────────────
         root.addView(makeTitle("Main Window"));
-        root.addView(makeToggleRow("D-Pad control",
-            gestureSettings.isDpadEnabled(),
-            new ToggleHandler() {
-                @Override public void onToggle(boolean enabled) { gestureSettings.setDpadEnabled(enabled); }
-            }));
         root.addView(makeToggleRow("Tag menus & prompts",
             tagManager.isTagsEnabled(),
             new ToggleHandler() {

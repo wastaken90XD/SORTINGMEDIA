@@ -436,6 +436,7 @@ public class MainActivity extends Activity
         searchManager   = new SearchManager();
         groupManager    = new GroupManager();
         if (!folderManager.getFolders().isEmpty()) groupManager.setWatchedRoot(folderManager.getFolders().get(0));
+        loadManualGroupAssignments();
         cacheManager    = new CacheManager(this);
         thumbnailLoader = new ThumbnailLoader(this);
         sortManager     = new SortManager(this);
@@ -2763,6 +2764,50 @@ private Spinner makeSpinner(String[] options) {
         menu.show();
     }
 
+    private void loadManualGroupAssignments() {
+        String raw = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("manual_groups", "{}");
+        Map<String, String> values = new java.util.HashMap<String, String>();
+        try {
+            org.json.JSONObject object = new org.json.JSONObject(raw);
+            java.util.Iterator<String> keys = object.keys();
+            while (keys.hasNext()) {
+                String path = keys.next();
+                values.put(path, object.optString(path, ""));
+            }
+        } catch (Exception ignored) {}
+        groupManager.setManualAssignments(values);
+    }
+
+    private void saveManualGroupAssignments() {
+        org.json.JSONObject object = new org.json.JSONObject();
+        try {
+            for (Map.Entry<String, String> entry : groupManager.getManualAssignments().entrySet()) {
+                object.put(entry.getKey(), entry.getValue());
+            }
+        } catch (Exception ignored) {}
+        getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
+                .putString("manual_groups", object.toString()).apply();
+    }
+
+    private void showManualGroupDialog(final List<MediaFile> files) {
+        if (files == null || files.isEmpty()) return;
+        final EditText input = new EditText(this);
+        input.setHint("Group name");
+        new AlertDialog.Builder(this).setTitle("Assign manual group")
+                .setMessage("Assign " + files.size() + " files to a group.")
+                .setView(input)
+                .setPositiveButton("Assign", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        String name = input.getText().toString().trim();
+                        if (name.isEmpty()) return;
+                        for (MediaFile file : files) groupManager.assignManualGroup(file.getPath(), name);
+                        saveManualGroupAssignments();
+                        scheduleRefresh();
+                    }
+                }).setNegativeButton("Cancel", null).show();
+    }
+
     private void showGroupMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
         menu.getMenu().add("By File Type");
@@ -2791,7 +2836,10 @@ private Spinner makeSpinner(String[] options) {
                         groupManager.setGroupBy(Group.GroupBy.COLOR_PROFILE);
                         break;
                     case "By Directory Depth": groupManager.setGroupBy(Group.GroupBy.DIRECTORY_DEPTH); break;
-                    case "By Manual Group": groupManager.setGroupBy(Group.GroupBy.MANUAL_GROUP); break;
+                    case "By Manual Group":
+                        groupManager.setGroupBy(Group.GroupBy.MANUAL_GROUP);
+                        if (!getActiveSelectedFiles().isEmpty()) showManualGroupDialog(getActiveSelectedFiles());
+                        break;
                 }
                 scheduleRefresh();
                 return true;
@@ -3027,7 +3075,8 @@ private Spinner makeSpinner(String[] options) {
                 }
             });
             content.addView(list, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+                    LinearLayout.LayoutParams.MATCH_PARENT, galleryDp(220)));
+
         }
         Button clear = new Button(this);
         clear.setText("Clear history");
@@ -4192,13 +4241,19 @@ private Spinner makeSpinner(String[] options) {
     public void onFileChanged(MediaFile file) {
         mainHandler.post(new Runnable() {
             @Override public void run() {
+                String oldCurrentPath = currentIndex >= 0 && currentIndex < fullList.size()
+                        ? fullList.get(currentIndex).getPath() : null;
                 for (int i = 0; i < fullList.size(); i++) {
                     if (fullList.get(i).getPath().equals(file.getPath())) {
                         fullList.set(i, file);
                         break;
                     }
                 }
+                currentIndex = findIndexByPath(fullList,
+                        oldCurrentPath != null && oldCurrentPath.equals(file.getPath())
+                                ? file.getPath() : oldCurrentPath);
                 mediaAdapter.updateFile(file);
+                mediaAdapter.notifyHighlightChanged();
                 if (galleryAdapter != null) galleryAdapter.setFiles(fullList);
             }
         });
@@ -4208,10 +4263,14 @@ private Spinner makeSpinner(String[] options) {
     public void onFileRemoved(String path) {
         mainHandler.post(new Runnable() {
             @Override public void run() {
+                String oldCurrentPath = currentIndex >= 0 && currentIndex < fullList.size()
+                        ? fullList.get(currentIndex).getPath() : null;
                 for (int i = fullList.size() - 1; i >= 0; i--) {
                     if (fullList.get(i).getPath().equals(path)) fullList.remove(i);
                 }
+                currentIndex = findIndexByPath(fullList, oldCurrentPath);
                 mediaAdapter.removeFile(path);
+                mediaAdapter.notifyHighlightChanged();
                 if (galleryAdapter != null) galleryAdapter.setFiles(fullList);
                 updateGalleryCount();
                 updateProgress();
@@ -4442,6 +4501,10 @@ private Spinner makeSpinner(String[] options) {
         final LinearLayout toolbar = (LinearLayout) toolbarView;
         for (int i = 0; i < toolbar.getChildCount(); i++) {
             toolbar.getChildAt(i).setVisibility(View.GONE);
+        }
+        if (searchBar != null) {
+            searchBar.setVisibility(getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                    .getBoolean("show_search_bar", true) ? View.VISIBLE : View.GONE);
         }
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
 
@@ -5052,6 +5115,9 @@ private Spinner makeSpinner(String[] options) {
             int high = Math.max(galleryDragFrom, galleryDragTo);
             for (int i = low; i <= high && i < reordered.size(); i++) {
                 affected.add(reordered.get(i));
+            }
+            if (groupManager.getCurrent() == Group.GroupBy.MANUAL_GROUP) {
+                showManualGroupDialog(affected);
             }
             renameGalleryManualRange(affected);
         }
