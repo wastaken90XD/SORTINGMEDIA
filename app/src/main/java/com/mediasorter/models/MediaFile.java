@@ -20,6 +20,11 @@ public class MediaFile implements Serializable {
     private int width;
     private int height;
     private int manualOrder = -1;
+    // Enriched by the last analysis/index pass. These fields stay in the
+    // model so sorting and grouping never need to touch the UI thread.
+    private String colorFamily = "";
+    private boolean duplicate;
+    private boolean metadataPresent;
 
     public MediaFile(String path, long size) {
         this.path    = path;
@@ -63,6 +68,9 @@ public class MediaFile implements Serializable {
     public int          getWidth()     { return width; }
     public int          getHeight()    { return height; }
     public int          getManualOrder() { return manualOrder; }
+    public String       getColorFamily() { return colorFamily == null ? "" : colorFamily; }
+    public boolean      isDuplicate()    { return duplicate; }
+    public boolean      hasMetadata()    { return metadataPresent; }
 
     // Setters
     public void setDateAdded(long d)      { dateAdded    = d; }
@@ -76,6 +84,9 @@ public class MediaFile implements Serializable {
     public void setWidth(int w)           { width        = w; }
     public void setHeight(int h)          { height       = h; }
     public void setManualOrder(int order) { manualOrder  = order; }
+    public void setColorFamily(String family) { colorFamily = family == null ? "" : family; }
+    public void setDuplicate(boolean value) { duplicate = value; }
+    public void setMetadataPresent(boolean value) { metadataPresent = value; }
 
     public void addTag(String tag) {
         String plain = TagText.plain(tag);

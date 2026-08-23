@@ -128,7 +128,7 @@ public class ActionBuilderHelper {
                 } else if (actionType == 1 && existingAction instanceof CopyAction) {
                     holder.destEdit.setText(((CopyAction) existingAction).destFolder);
                 }
-                container.addView(holder.destEdit);
+                container.addView(withVariables(holder.destEdit));
 
                 container.addView(makeLabel("Conflict resolution:"));
                 String[] conflicts = {"Skip if exists", "Overwrite", "Auto-rename"};
@@ -149,7 +149,7 @@ public class ActionBuilderHelper {
                 if (existingAction instanceof DeleteAction) {
                     holder.trashEdit.setText(((DeleteAction) existingAction).trashFolder);
                 }
-                container.addView(holder.trashEdit);
+                container.addView(withVariables(holder.trashEdit));
                 break;
 
             case 3: // Delete (permanent)
@@ -173,7 +173,7 @@ public class ActionBuilderHelper {
                     }
                     holder.tagsToAddEdit.setText(sb.toString());
                 }
-                container.addView(holder.tagsToAddEdit);
+                container.addView(withVariables(holder.tagsToAddEdit));
 
                 container.addView(makeLabel("Tags to remove (comma-separated):"));
                 holder.tagsToRemoveEdit = new EditText(context);
@@ -188,7 +188,7 @@ public class ActionBuilderHelper {
                     }
                     holder.tagsToRemoveEdit.setText(sb.toString());
                 }
-                container.addView(holder.tagsToRemoveEdit);
+                container.addView(withVariables(holder.tagsToRemoveEdit));
                 break;
 
             case 5: // Status
@@ -225,7 +225,7 @@ public class ActionBuilderHelper {
                 if (existingAction instanceof RenameAction) {
                     holder.patternEdit.setText(((RenameAction) existingAction).pattern);
                 }
-                container.addView(holder.patternEdit);
+                container.addView(withVariables(holder.patternEdit));
 
                 TextView hint = new TextView(context);
                 hint.setText("Placeholders: {ORIGINAL}, {TAGS}, {EXT}, {DATE}, {COUNTER}, {PREFIX}, {SUFFIX}");
@@ -268,7 +268,7 @@ public class ActionBuilderHelper {
                 if (existingAction instanceof ChangeExtensionAction) {
                     holder.extensionEdit.setText(((ChangeExtensionAction) existingAction).newExtension);
                 }
-                container.addView(holder.extensionEdit);
+                container.addView(withVariables(holder.extensionEdit));
                 break;
 
             case 9: // Add Prefix/Suffix
@@ -288,7 +288,7 @@ public class ActionBuilderHelper {
                 if (existingAction instanceof AffixAction) {
                     holder.affixTextEdit.setText(((AffixAction) existingAction).text);
                 }
-                container.addView(holder.affixTextEdit);
+                container.addView(withVariables(holder.affixTextEdit));
                 break;
 
             case 10: // Strip Metadata
@@ -393,6 +393,53 @@ public class ActionBuilderHelper {
             if (!trimmed.isEmpty()) result.add(trimmed);
         }
         return result;
+    }
+
+    private View withVariables(final EditText input) {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        input.setLayoutParams(new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(input);
+        TextView variables = new TextView(context);
+        variables.setText("Variables");
+        variables.setTextColor(0xFFE94560);
+        variables.setGravity(Gravity.CENTER);
+        variables.setPadding(8, 8, 8, 8);
+        variables.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { showVariablePicker(input); }
+        });
+        row.addView(variables, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        return row;
+    }
+
+    private void showVariablePicker(final EditText target) {
+        final String[] values = {
+                "{filename} — name without extension",
+                "{ext} — file extension",
+                "{date} — modification date yyyyMMdd",
+                "{year} — modification year",
+                "{month} — modification month",
+                "{day} — modification day",
+                "{size} — file size in bytes",
+                "{tag:N} — Nth tag (zero based)",
+                "{seq} — next sequence label",
+                "{random} — random syllable tag",
+                "{index} — active list index"
+        };
+        new AlertDialog.Builder(context).setTitle("Variables").setItems(values,
+                new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        String row = values[which];
+                        int space = row.indexOf(" ");
+                        String token = space > 0 ? row.substring(0, space) : row;
+                        int cursor = Math.max(0, target.getSelectionStart());
+                        target.getText().insert(cursor, token);
+                    }
+                }).setNegativeButton("Cancel", null).show();
     }
 
     private TextView makeLabel(String text) {

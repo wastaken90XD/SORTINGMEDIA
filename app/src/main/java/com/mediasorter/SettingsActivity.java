@@ -127,6 +127,295 @@ public class SettingsActivity extends Activity {
         if (view.getVisibility() != visibility) view.setVisibility(visibility);
     }
 
+    private void addUiCustomizationSection(LinearLayout root) {
+        root.addView(makeTitle("UI Customization"));
+        root.addView(makeCheckBoxRow("Show stats bar", settingsPrefs.getBoolean("show_stats_bar", true),
+                new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean checked) { saveBoolean("show_stats_bar", checked); }
+                }));
+        root.addView(makeCheckBoxRow("Show tag bar", settingsPrefs.getBoolean("show_tag_bar", true),
+                new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean checked) { saveBoolean("show_tag_bar", checked); }
+                }));
+        root.addView(makeCheckBoxRow("Show search bar", settingsPrefs.getBoolean("show_search_bar", true),
+                new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean checked) { saveBoolean("show_search_bar", checked); }
+                }));
+        root.addView(makeCheckBoxRow("Show preview panel", settingsPrefs.getBoolean("show_preview", true),
+                new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean checked) { saveBoolean("show_preview", checked); }
+                }));
+        root.addView(makeNumericInputRow("Explorer width when preview is visible (20-80%):",
+                settingsPrefs.getInt("explorer_width_percent", 40), 20, 80,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("explorer_width_percent", value); }
+                }));
+    }
+
+    private void addToolbarSection(LinearLayout root) {
+        root.addView(makeTitle("Toolbar"));
+        root.addView(makeLabel("Choose up to five visible action slots. Everything else remains in the overflow menu."));
+        root.addView(makeLabel("Available actions:"));
+        final List<String> ids = GestureConstants.getToolbarActionIds();
+        final String[] labels = new String[ids.size()];
+        for (int i = 0; i < ids.size(); i++) labels[i] = GestureConstants.label(ids.get(i));
+        List<String> saved = loadToolbarSlots();
+        final List<Spinner> spinners = new ArrayList<Spinner>();
+        for (int slot = 0; slot < 5; slot++) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            TextView label = makeLabel("Slot " + (slot + 1));
+            label.setLayoutParams(new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            row.addView(label);
+            Spinner spinner = new Spinner(this);
+            ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
+                    android.R.layout.simple_spinner_item, labels);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            spinner.setAdapter(adapter);
+            String selected = slot < saved.size() ? saved.get(slot) : GestureConstants.ACTION_NOTHING;
+            int selectedPosition = ids.indexOf(selected);
+            if (selectedPosition < 0) selectedPosition = 0;
+            spinner.setSelection(selectedPosition);
+            final Spinner currentSpinner = spinner;
+            spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                    if (!isInitializing) saveToolbarSlots(spinners, ids);
+                }
+                @Override public void onNothingSelected(AdapterView<?> parent) {}
+            });
+            row.addView(spinner);
+            spinners.add(currentSpinner);
+            root.addView(row);
+        }
+    }
+
+    private List<String> loadToolbarSlots() {
+        List<String> result = new ArrayList<String>();
+        String raw = settingsPrefs.getString("toolbar_slots", "[]");
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(raw);
+            for (int i = 0; i < array.length() && result.size() < 5; i++) {
+                String id = array.optString(i, "");
+                if (GestureConstants.isKnownAction(id) && !GestureConstants.ACTION_DONE.equals(id)
+                        && !GestureConstants.ACTION_NOTHING.equals(id)) result.add(id);
+            }
+        } catch (Exception ignored) {}
+        if (result.isEmpty()) {
+            result.add(GestureConstants.ACTION_FLAG);
+            result.add(GestureConstants.ACTION_QUICK_TAGS);
+            result.add(GestureConstants.ACTION_SURPRISE_ME);
+            result.add(GestureConstants.ACTION_UNDO);
+            result.add(GestureConstants.ACTION_SORT_PICKER);
+        }
+        return result;
+    }
+
+    private void saveToolbarSlots(List<Spinner> spinners, List<String> ids) {
+        org.json.JSONArray array = new org.json.JSONArray();
+        for (Spinner spinner : spinners) {
+            int position = spinner.getSelectedItemPosition();
+            if (position < 0 || position >= ids.size()) continue;
+            String id = ids.get(position);
+            if (GestureConstants.ACTION_NOTHING.equals(id) || GestureConstants.ACTION_DONE.equals(id)) continue;
+            boolean duplicate = false;
+            for (int i = 0; i < array.length(); i++) if (id.equals(array.optString(i))) duplicate = true;
+            if (!duplicate && array.length() < 5) array.put(id);
+        }
+        saveString("toolbar_slots", array.toString());
+    }
+
+    private void addGestureSettingsSection(LinearLayout root) {
+        root.addView(makeTitle("Gestures"));
+        root.addView(makeLabel("Inputs are grouped by category. Edit opens a searchable action picker."));
+        addGestureInputGroup(root, "D-Pad", new String[]{
+                GestureConstants.INPUT_DPAD_UP, GestureConstants.INPUT_DPAD_DOWN,
+                GestureConstants.INPUT_DPAD_LEFT, GestureConstants.INPUT_DPAD_RIGHT,
+                GestureConstants.INPUT_DPAD_CENTER});
+        addGestureInputGroup(root, "Swipes", new String[]{
+                GestureConstants.INPUT_SWIPE_LEFT, GestureConstants.INPUT_SWIPE_RIGHT,
+                GestureConstants.INPUT_SWIPE_UP, GestureConstants.INPUT_SWIPE_DOWN});
+        addGestureInputGroup(root, "Taps", new String[]{
+                GestureConstants.INPUT_TAP_SINGLE, GestureConstants.INPUT_TAP_DOUBLE,
+                GestureConstants.INPUT_TAP_LONG});
+        addGestureInputGroup(root, "Volume", new String[]{
+                GestureConstants.INPUT_VOLUME_UP, GestureConstants.INPUT_VOLUME_DOWN,
+                GestureConstants.INPUT_VOLUME_UP_LONG, GestureConstants.INPUT_VOLUME_DOWN_LONG});
+        addGestureInputGroup(root, "Hardware", new String[]{
+                GestureConstants.INPUT_HARDWARE_BACK, GestureConstants.INPUT_HARDWARE_MENU});
+        Button reset = makeButton("Reset gestures to defaults");
+        reset.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                gestureSettings.resetToDefaults();
+                Toast.makeText(SettingsActivity.this, "Gesture defaults restored", Toast.LENGTH_SHORT).show();
+                // The next open re-reads every row; no recreate is needed here.
+            }
+        });
+        root.addView(reset);
+    }
+
+    private void addGestureInputGroup(LinearLayout root, String title, String[] inputIds) {
+        root.addView(makeTitle(title));
+        for (String inputId : inputIds) {
+            final String id = inputId;
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            TextView input = makeLabel(GestureConstants.inputLabel(id));
+            input.setLayoutParams(new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f));
+            row.addView(input);
+            final TextView assignment = makeLabel(gestureAssignmentLabel(id));
+            assignment.setLayoutParams(new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1.5f));
+            row.addView(assignment);
+            Button edit = makeSmallButton("Edit");
+            edit.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View view) {
+                    showGestureActionPicker(id, assignment);
+                }
+            });
+            row.addView(edit);
+            root.addView(row);
+        }
+    }
+
+    private String gestureAssignmentLabel(String inputId) {
+        List<GestureSettings.GestureStep> steps = gestureSettings.getSteps(inputId);
+        String summary = gestureSettings.getSummary(steps);
+        return summary == null || summary.isEmpty() ? "None" : summary;
+    }
+
+    private void showGestureActionPicker(final String inputId, final TextView assignment) {
+        final String currentAction = firstGestureAction(inputId);
+        final EditText search = new EditText(this);
+        search.setHint("Search actions…");
+        search.setSingleLine(true);
+        search.setTextColor(0xFFFFFFFF);
+        final ListView list = new ListView(this);
+        final List<String> allRows = buildGesturePickerRows(currentAction, "");
+        final ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_list_item_1, allRows);
+        list.setAdapter(adapter);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.addView(search);
+        content.addView(list, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Choose action")
+                .setView(content)
+                .setNegativeButton("Cancel", null)
+                .create();
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                List<String> filtered = buildGesturePickerRows(currentAction, s.toString());
+                adapter.clear();
+                adapter.addAll(filtered);
+                adapter.notifyDataSetChanged();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        list.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                String row = String.valueOf(parent.getItemAtPosition(position));
+                if (row.startsWith("[")) return;
+                if (row.startsWith("✓ ")) row = row.substring(2);
+                GestureSettings.GestureAction action = gestureSettings.fromLabel(row);
+                if (action == GestureSettings.GestureAction.MACRO) {
+                    showMacroAssignmentPicker(inputId, assignment, dialog);
+                    return;
+                }
+                List<GestureSettings.GestureStep> steps = new ArrayList<GestureSettings.GestureStep>();
+                steps.add(new GestureSettings.GestureStep(action, ""));
+                gestureSettings.setSteps(inputId, steps);
+                assignment.setText(gestureSettings.getSummary(steps));
+                dialog.dismiss();
+            }
+        });
+        dialog.show();
+    }
+
+    private List<String> buildGesturePickerRows(String currentAction, String query) {
+        List<String> rows = new ArrayList<String>();
+        rows.add(GestureConstants.label(GestureConstants.ACTION_NOTHING));
+        String lower = query == null ? "" : query.trim().toLowerCase();
+        for (GestureConstants.Category category : GestureConstants.Category.values()) {
+            List<String> ids = GestureConstants.getActionIds(category);
+            boolean headerAdded = false;
+            for (String id : ids) {
+                if (GestureConstants.ACTION_DONE.equals(id)) continue;
+                String label = GestureConstants.label(id);
+                if (!lower.isEmpty() && !label.toLowerCase().contains(lower)) continue;
+                if (!headerAdded) {
+                    rows.add("[" + GestureConstants.categoryLabel(category) + "]");
+                    headerAdded = true;
+                }
+                rows.add(id.equals(currentAction) ? "✓ " + label : label);
+            }
+        }
+        return rows;
+    }
+
+    private String firstGestureAction(String inputId) {
+        List<GestureSettings.GestureStep> steps = gestureSettings.getSteps(inputId);
+        if (steps == null || steps.isEmpty() || steps.get(0).action == null) return GestureConstants.ACTION_NOTHING;
+        return steps.get(0).action.name();
+    }
+
+    private void showMacroAssignmentPicker(final String inputId, final TextView assignment,
+                                           final AlertDialog parentDialog) {
+        final List<GestureSettings.GestureMacro> macros = gestureSettings.getUsableMacros();
+        if (macros.isEmpty()) {
+            Toast.makeText(this, "No steps", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] names = new String[macros.size()];
+        for (int i = 0; i < macros.size(); i++) names[i] = macros.get(i).name;
+        new AlertDialog.Builder(this).setTitle("Choose macro").setItems(names,
+                new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        GestureSettings.GestureMacro macro = macros.get(which);
+                        List<GestureSettings.GestureStep> steps = new ArrayList<GestureSettings.GestureStep>();
+                        steps.add(new GestureSettings.GestureStep(
+                                GestureSettings.GestureAction.MACRO, macro.id));
+                        gestureSettings.setSteps(inputId, steps);
+                        assignment.setText(macro.name);
+                        parentDialog.dismiss();
+                    }
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void addRandomTagFormatSection(LinearLayout root) {
+        root.addView(makeTitle("Random Tag Format"));
+        final String[] formats = {"Syllable triplet", "Hex placeholder", "Custom pattern", "Random pattern"};
+        String saved = settingsPrefs.getString("random_tag_format", "syllable");
+        int selected = "hex".equalsIgnoreCase(saved) ? 1
+                : "custom".equalsIgnoreCase(saved) ? 2
+                : "random".equalsIgnoreCase(saved) ? 3 : 0;
+        root.addView(makeSpinnerRow("Format:", formats, selected,
+                new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) {
+                        String id = position == 1 ? "hex" : position == 2 ? "custom"
+                                : position == 3 ? "random" : "syllable";
+                        saveString("random_tag_format", id);
+                    }
+                }));
+        root.addView(makeTextInputRow("Custom pattern ({syl}, {hex}, {seq}, {date}):",
+                settingsPrefs.getString("random_tag_custom_pattern", "{syl}-{date}"),
+                new OnTextChangeListener() {
+                    @Override public void onChange(String text) {
+                        saveString("random_tag_custom_pattern",
+                                text.isEmpty() ? "{syl}-{date}" : text);
+                    }
+                }));
+        root.addView(makeLabel("Example: {syl}-{date} → ka-mi-ra-" +
+                new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+                        .format(new java.util.Date())));
+    }
+
     private void buildSettings() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -134,6 +423,11 @@ public class SettingsActivity extends Activity {
         root.setPadding(32, 32, 32, 32);
 
         root.addView(makeTitle("Settings"));
+
+        // UI controls are kept together at the top. MainActivity applies them
+        // when this Activity closes, avoiding an initialization/recreate loop.
+        addUiCustomizationSection(root);
+        addToolbarSection(root);
 
         // ── 1. Cache ──────────────────────────────────────────────────────────
         root.addView(makeTitle("Cache"));
@@ -243,47 +537,8 @@ public class SettingsActivity extends Activity {
                 @Override public void onToggle(boolean enabled) { tagManager.setTagsEnabled(enabled); }
             }));
 
-        // ── 5. Swipe gestures ─────────────────────────────────────────────────
-        root.addView(makeTitle("Swipe Gestures"));
-        root.addView(makeMultiGestureRow("Swipe Left",
-            gestureSettings.getLeft(), new MultiGestureCallback() {
-                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setLeft(steps); }
-            }));
-        root.addView(makeMultiGestureRow("Swipe Right",
-            gestureSettings.getRight(), new MultiGestureCallback() {
-                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setRight(steps); }
-            }));
-        root.addView(makeMultiGestureRow("Swipe Up",
-            gestureSettings.getUp(), new MultiGestureCallback() {
-                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setUp(steps); }
-            }));
-        root.addView(makeMultiGestureRow("Swipe Down",
-            gestureSettings.getDown(), new MultiGestureCallback() {
-                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setDown(steps); }
-            }));
-
-        // ── 6. D-pad gestures ─────────────────────────────────────────────────
-        root.addView(makeTitle("D-Pad Gestures"));
-        root.addView(makeMultiGestureRow("D-Pad Up",
-            gestureSettings.getDpadUp(), new MultiGestureCallback() {
-                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setDpadUp(steps); }
-            }));
-        root.addView(makeMultiGestureRow("D-Pad Down",
-            gestureSettings.getDpadDown(), new MultiGestureCallback() {
-                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setDpadDown(steps); }
-            }));
-        root.addView(makeMultiGestureRow("D-Pad Left",
-            gestureSettings.getDpadLeft(), new MultiGestureCallback() {
-                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setDpadLeft(steps); }
-            }));
-        root.addView(makeMultiGestureRow("D-Pad Right",
-            gestureSettings.getDpadRight(), new MultiGestureCallback() {
-                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setDpadRight(steps); }
-            }));
-        root.addView(makeMultiGestureRow("D-Pad Center",
-            gestureSettings.getDpadCenter(), new MultiGestureCallback() {
-                @Override public void set(List<GestureSettings.GestureStep> steps) { gestureSettings.setDpadCenter(steps); }
-            }));
+        // ── 5. Gesture settings ───────────────────────────────────────────────
+        addGestureSettingsSection(root);
 
         // ── Macros ────────────────────────────────────────────────────────────
         root.addView(makeTitle("Gesture Macros"));
@@ -651,23 +906,32 @@ public class SettingsActivity extends Activity {
                                         if (res.rulesSkipped > 0) {
                                             summary += "\n" + res.rulesSkipped + " rules skipped (unreadable).";
                                         }
+                                        if (res.failedKeys > 0) {
+                                            summary += "\n" + res.failedKeys + " settings could not be verified and were skipped.";
+                                        }
 
+                                        final String importSummary = summary;
                                         new AlertDialog.Builder(SettingsActivity.this)
                                                 .setTitle("Import Successful")
-                                                .setMessage(summary)
+                                                .setMessage(importSummary)
                                                 .setPositiveButton("OK", new DialogInterface.OnClickListener() {
                                                     @Override
                                                     public void onClick(DialogInterface d3, int w3) {
-                                                        recreate();
+                                                        // MainActivity applies the imported values in place from
+                                                        // onResume; do not recreate this screen or start a loop.
+                                                        setResult(RESULT_OK);
+                                                        finish();
                                                     }
                                                 })
                                                 .show();
                                     } else {
-                                        new AlertDialog.Builder(SettingsActivity.this)
-                                                .setTitle("Import Failed")
-                                                .setMessage(res.errorMessage != null ? res.errorMessage : "Import failed.")
-                                                .setPositiveButton("OK", null)
-                                                .show();
+                                        String message = res.errorMessage != null
+                                                ? res.errorMessage
+                                                : "Import failed — settings reset to defaults.";
+                                        Toast.makeText(SettingsActivity.this, message,
+                                                Toast.LENGTH_LONG).show();
+                                        setResult(RESULT_CANCELED);
+                                        finish();
                                     }
                                 }
                             };
@@ -833,23 +1097,6 @@ public class SettingsActivity extends Activity {
         // ── 13. Sorting Behavior ──────────────────────────────────────────────
         root.addView(makeTitle("Sorting Behavior"));
 
-        String[] swipeOptions = {"Next", "Skip", "Flag", "Trash", "Add last tag"};
-        int leftIdx = settingsPrefs.getInt("swipe_left_default", 0);
-        root.addView(makeSpinnerRow("Swipe left default:", swipeOptions, leftIdx, new OnSpinnerSelectedListener() {
-            @Override public void onSelected(String value, int pos) {
-                saveInt("swipe_left_default", pos);
-                updateSwipeGesture(true, pos);
-            }
-        }));
-
-        int rightIdx = settingsPrefs.getInt("swipe_right_default", 0);
-        root.addView(makeSpinnerRow("Swipe right default:", swipeOptions, rightIdx, new OnSpinnerSelectedListener() {
-            @Override public void onSelected(String value, int pos) {
-                saveInt("swipe_right_default", pos);
-                updateSwipeGesture(false, pos);
-            }
-        }));
-
         root.addView(makeCheckBoxRow("Auto-advance after tag", settingsPrefs.getBoolean("auto_advance_tag", false), new OnCheckedChangeListener() {
             @Override public void onChecked(boolean checked) { saveBoolean("auto_advance_tag", checked); }
         }));
@@ -1010,6 +1257,8 @@ public class SettingsActivity extends Activity {
             @Override public void onChecked(boolean checked) { saveBoolean("show_tag_count", checked); }
         }));
 
+        addRandomTagFormatSection(root);
+
         // ── Back Button ───────────────────────────────────────────────────────
         Button btnBack = makeButton("← Back");
         btnBack.setOnClickListener(new View.OnClickListener() {
@@ -1053,24 +1302,6 @@ public class SettingsActivity extends Activity {
         boolean skipI = settingsPrefs.getBoolean("skip_images", false);
         if (skipV && skipI) {
             Toast.makeText(this, "Warning: Both skip videos and skip images are enabled", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private void updateSwipeGesture(boolean isLeft, int optionPos) {
-        GestureSettings.GestureAction action;
-        switch (optionPos) {
-            case 1:  action = GestureSettings.GestureAction.SKIP;      break;
-            case 2:  action = GestureSettings.GestureAction.FLAG;      break;
-            case 3:  action = GestureSettings.GestureAction.DONE;      break;
-            case 4:  action = GestureSettings.GestureAction.APPLY_TAG; break;
-            default: action = GestureSettings.GestureAction.NEXT_FILE; break;
-        }
-        List<GestureSettings.GestureStep> steps = new ArrayList<>();
-        steps.add(new GestureSettings.GestureStep(action, ""));
-        if (isLeft) {
-            gestureSettings.setLeft(steps);
-        } else {
-            gestureSettings.setRight(steps);
         }
     }
 
@@ -1893,7 +2124,8 @@ public class SettingsActivity extends Activity {
             });
             header.addView(nameEdit);
 
-            TextView stepCount = makeLabel("Steps: " + m.actions.size());
+            TextView stepCount = makeLabel(m.actions.isEmpty()
+                    ? "No steps" : "Steps: " + m.actions.size());
             stepCount.setPadding(8, 0, 8, 0);
             header.addView(stepCount);
 

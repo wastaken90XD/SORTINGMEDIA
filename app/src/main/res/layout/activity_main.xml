@@ -133,6 +133,60 @@
 
     </LinearLayout>
 
+    <TextView
+        android:id="@+id/statsBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:text="Total: 0  Filtered: 0  Tagged: 0  Completed: 0  Flagged: 0"
+        android:textColor="#CCCCCC"
+        android:textSize="11sp" />
+
+    <LinearLayout
+        android:id="@+id/tagBarContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#161626">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <EditText
+                android:id="@+id/tagBarSearch"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_weight="1"
+                android:hint="Search tags…"
+                android:textColorHint="#666666"
+                android:textColor="#FFFFFF"
+                android:singleLine="true"
+                android:inputType="text"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp" />
+
+            <Button
+                android:id="@+id/tagBarSort"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:text="Usage"
+                android:textSize="10sp"
+                android:textAllCaps="false" />
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/tagBarList"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:overScrollMode="never" />
+    </LinearLayout>
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"

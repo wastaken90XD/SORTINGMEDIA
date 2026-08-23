@@ -562,6 +562,9 @@ public class MediaIndexer {
         try {
             List<String> existingTags = XmpReader.readTags(f.getAbsolutePath());
             for (String tag : existingTags) mf.addTag(tag);
+            mf.setMetadataPresent(XmpReader.hasMetadata(f.getAbsolutePath()));
+            String rememberedColor = ColorAnalyzer.getLastColorFamily(mf.getPath());
+            if (rememberedColor != null) mf.setColorFamily(rememberedColor);
         } catch (Exception ignored) {}
         readDimensions(mf);
         return mf;

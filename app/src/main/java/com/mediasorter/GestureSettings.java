@@ -14,11 +14,44 @@ public class GestureSettings {
         QUICK_TAGS,
         SKIP,
         FLAG,
+        // Kept for rules/macros and old imported mappings. It is deliberately
+        // omitted from the gesture picker and from all gesture defaults.
         DONE,
         FILTER_CYCLE,
         APPLY_TAG,
         MACRO,
         REPEAT_LAST_MACRO,
+        OPEN_GALLERY,
+        OPEN_DASHBOARD,
+        OPEN_RULES,
+        OPEN_COLOR_ANALYZER,
+        OPEN_DUPLICATE_FINDER,
+        OPEN_SETTINGS,
+        EXPORT_SETTINGS,
+        TRIGGER_RESCAN,
+        QUICK_RANDOM_TAG,
+        SURPRISE_ME,
+        CYCLE_TAG_PRESETS,
+        NEXT_PAGE,
+        PREVIOUS_PAGE,
+        JUMP_FIRST,
+        JUMP_LAST,
+        TOGGLE_STATS_BAR,
+        TOGGLE_INFO_OVERLAY,
+        TOGGLE_SELECTION_CURRENT,
+        SWEEP_SELECT_FORWARD,
+        SWEEP_SELECT_BACKWARD,
+        SELECT_ALL,
+        DESELECT_ALL,
+        TOGGLE_GALLERY,
+        SORT_PICKER,
+        FILTER_PICKER,
+        GROUP_PICKER,
+        UNDO,
+        DELETE,
+        SCAN,
+        TOGGLE_TAG_PANEL,
+        CYCLE_TAG_BAR_SORT,
         NOTHING
     }
 
@@ -26,18 +59,23 @@ public class GestureSettings {
     // Serialized as comma-separated strings in SharedPreferences
     // Format: "APPLY_TAG|Nature,APPLY_TAG|Outdoor,NEXT_FILE|"
 
-    private static final String PREFS            = "gesture_prefs";
-    private static final String KEY_SWIPE_LEFT   = "swipe_left_v2";
-    private static final String KEY_SWIPE_RIGHT  = "swipe_right_v2";
-    private static final String KEY_SWIPE_UP     = "swipe_up_v2";
-    private static final String KEY_SWIPE_DOWN   = "swipe_down_v2";
-    private static final String KEY_DPAD_UP      = "dpad_up_v2";
-    private static final String KEY_DPAD_DOWN    = "dpad_down_v2";
-    private static final String KEY_DPAD_LEFT    = "dpad_left_v2";
-    private static final String KEY_DPAD_RIGHT   = "dpad_right_v2";
-    private static final String KEY_DPAD_CENTER  = "dpad_center_v2";
+    private static final String PREFS            = GestureConstants.PREFS;
+    private static final String KEY_SWIPE_LEFT   = GestureConstants.INPUT_SWIPE_LEFT;
+    private static final String KEY_SWIPE_RIGHT  = GestureConstants.INPUT_SWIPE_RIGHT;
+    private static final String KEY_SWIPE_UP     = GestureConstants.INPUT_SWIPE_UP;
+    private static final String KEY_SWIPE_DOWN   = GestureConstants.INPUT_SWIPE_DOWN;
+    private static final String KEY_DPAD_UP      = GestureConstants.INPUT_DPAD_UP;
+    private static final String KEY_DPAD_DOWN    = GestureConstants.INPUT_DPAD_DOWN;
+    private static final String KEY_DPAD_LEFT    = GestureConstants.INPUT_DPAD_LEFT;
+    private static final String KEY_DPAD_RIGHT   = GestureConstants.INPUT_DPAD_RIGHT;
+    private static final String KEY_DPAD_CENTER  = GestureConstants.INPUT_DPAD_CENTER;
+    private static final String KEY_VOLUME_UP    = GestureConstants.INPUT_VOLUME_UP;
+    private static final String KEY_VOLUME_DOWN  = GestureConstants.INPUT_VOLUME_DOWN;
+    private static final String KEY_VOLUME_UP_LONG   = GestureConstants.INPUT_VOLUME_UP_LONG;
+    private static final String KEY_VOLUME_DOWN_LONG = GestureConstants.INPUT_VOLUME_DOWN_LONG;
     private static final String KEY_DPAD_ENABLED = "dpad_enabled";
     private static final String KEY_TAGS_PROMPT = "tags_prompt_enabled";
+    public static final String KEY_LAST_MACRO = "last_macro_id";
 
     private final SharedPreferences prefs;
 
@@ -101,6 +139,19 @@ public class GestureSettings {
             if (id.equals(m.id)) return m;
         }
         return null;
+    }
+
+    public boolean macroHasSteps(String id) {
+        GestureMacro macro = getMacro(id);
+        return macro != null && macro.actions != null && !macro.actions.isEmpty();
+    }
+
+    public List<GestureMacro> getUsableMacros() {
+        List<GestureMacro> result = new ArrayList<>();
+        for (GestureMacro macro : loadMacros()) {
+            if (macro != null && macro.actions != null && !macro.actions.isEmpty()) result.add(macro);
+        }
+        return result;
     }
 
     // ── Action list model ─────────────────────────────────────────────────────
@@ -201,6 +252,57 @@ public class GestureSettings {
             GestureAction.APPLY_TAG.name());
     }
 
+    // ── Volume, tap and hardware mappings ─────────────────────────────────────
+
+    public List<GestureStep> getVolumeUp() {
+        return deserialize(prefs.getString(KEY_VOLUME_UP, ""),
+                GestureAction.NEXT_FILE.name());
+    }
+
+    public List<GestureStep> getVolumeDown() {
+        return deserialize(prefs.getString(KEY_VOLUME_DOWN, ""),
+                GestureAction.PREV_FILE.name());
+    }
+
+    public List<GestureStep> getVolumeUpLong() {
+        return deserialize(prefs.getString(KEY_VOLUME_UP_LONG, ""),
+                GestureAction.NOTHING.name());
+    }
+
+    public List<GestureStep> getVolumeDownLong() {
+        return deserialize(prefs.getString(KEY_VOLUME_DOWN_LONG, ""),
+                GestureAction.NOTHING.name());
+    }
+
+    /** Return a defensive copy of the mapping for any registered input id. */
+    public List<GestureStep> getSteps(String inputId) {
+        if (GestureConstants.INPUT_SWIPE_LEFT.equals(inputId)) return getLeft();
+        if (GestureConstants.INPUT_SWIPE_RIGHT.equals(inputId)) return getRight();
+        if (GestureConstants.INPUT_SWIPE_UP.equals(inputId)) return getUp();
+        if (GestureConstants.INPUT_SWIPE_DOWN.equals(inputId)) return getDown();
+        if (GestureConstants.INPUT_DPAD_UP.equals(inputId)) return getDpadUp();
+        if (GestureConstants.INPUT_DPAD_DOWN.equals(inputId)) return getDpadDown();
+        if (GestureConstants.INPUT_DPAD_LEFT.equals(inputId)) return getDpadLeft();
+        if (GestureConstants.INPUT_DPAD_RIGHT.equals(inputId)) return getDpadRight();
+        if (GestureConstants.INPUT_DPAD_CENTER.equals(inputId)) return getDpadCenter();
+        if (GestureConstants.INPUT_VOLUME_UP.equals(inputId)) return getVolumeUp();
+        if (GestureConstants.INPUT_VOLUME_DOWN.equals(inputId)) return getVolumeDown();
+        if (GestureConstants.INPUT_VOLUME_UP_LONG.equals(inputId)) return getVolumeUpLong();
+        if (GestureConstants.INPUT_VOLUME_DOWN_LONG.equals(inputId)) return getVolumeDownLong();
+        return deserialize(prefs.getString(inputId, ""), GestureAction.NOTHING.name());
+    }
+
+    public void setSteps(String inputId, List<GestureStep> steps) {
+        if (inputId == null || !GestureConstants.getInputIds().contains(inputId)) return;
+        prefs.edit().putString(inputId, serialize(steps == null
+                ? new ArrayList<GestureStep>() : steps)).apply();
+    }
+
+    public void setVolumeUp(List<GestureStep> steps) { setSteps(KEY_VOLUME_UP, steps); }
+    public void setVolumeDown(List<GestureStep> steps) { setSteps(KEY_VOLUME_DOWN, steps); }
+    public void setVolumeUpLong(List<GestureStep> steps) { setSteps(KEY_VOLUME_UP_LONG, steps); }
+    public void setVolumeDownLong(List<GestureStep> steps) { setSteps(KEY_VOLUME_DOWN_LONG, steps); }
+
     // ── Swipe setters ─────────────────────────────────────────────────────────
 
     public void setLeft(List<GestureStep> steps) {
@@ -244,44 +346,28 @@ public class GestureSettings {
     // ── Labels ────────────────────────────────────────────────────────────────
 
     public String getLabel(GestureAction action) {
-        switch (action) {
-            case NEXT_FILE:    return "Next File";
-            case PREV_FILE:    return "Prev File";
-            case QUICK_TAGS:   return "Quick Tags";
-            case SKIP:         return "Skip";
-            case FLAG:         return "Flag";
-            case DONE:         return "Done";
-            case FILTER_CYCLE: return "Filter Cycle";
-            case APPLY_TAG:    return "Apply Tag";
-            case MACRO:        return "Macro";
-            case REPEAT_LAST_MACRO: return "Repeat Last Macro";
-            case NOTHING:      return "Nothing";
-            default:           return "Nothing";
-        }
+        if (action == null) return "None";
+        return GestureConstants.label(action.name());
     }
 
+    /** Labels used by the legacy multi-step editor; DONE is not exposed. */
     public String[] getAllLabels() {
-        return new String[]{
-            "Next File", "Prev File", "Quick Tags",
-            "Skip", "Flag", "Done",
-            "Filter Cycle", "Apply Tag", "Repeat Last Macro", "Nothing"
-        };
+        List<String> ids = GestureConstants.getPickerActionIds();
+        String[] labels = new String[ids.size()];
+        for (int i = 0; i < ids.size(); i++) labels[i] = GestureConstants.label(ids.get(i));
+        return labels;
     }
 
     public GestureAction fromLabel(String label) {
-        switch (label) {
-            case "Next File":    return GestureAction.NEXT_FILE;
-            case "Prev File":    return GestureAction.PREV_FILE;
-            case "Quick Tags":   return GestureAction.QUICK_TAGS;
-            case "Skip":         return GestureAction.SKIP;
-            case "Flag":         return GestureAction.FLAG;
-            case "Done":         return GestureAction.DONE;
-            case "Filter Cycle": return GestureAction.FILTER_CYCLE;
-            case "Apply Tag":    return GestureAction.APPLY_TAG;
-            case "Repeat Last Macro": return GestureAction.REPEAT_LAST_MACRO;
-            case "Macro":        return GestureAction.MACRO;
-            default:             return GestureAction.NOTHING;
+        if (label == null) return GestureAction.NOTHING;
+        List<String> ids = GestureConstants.getAllActionIds();
+        for (String id : ids) {
+            if (GestureConstants.label(id).equals(label)) {
+                try { return GestureAction.valueOf(id); }
+                catch (Exception ignored) { return GestureAction.NOTHING; }
+            }
         }
+        return GestureAction.NOTHING;
     }
 
     // ── Summary label for a step list ─────────────────────────────────────────
@@ -323,5 +409,25 @@ public class GestureSettings {
 
     public void setTagsPromptEnabled(boolean enabled) {
         prefs.edit().putBoolean(KEY_TAGS_PROMPT, enabled).apply();
+    }
+
+    public void setLastRunMacroId(String id) {
+        prefs.edit().putString(KEY_LAST_MACRO, id == null ? "" : id).apply();
+    }
+
+    public String getLastRunMacroId() {
+        return prefs.getString(KEY_LAST_MACRO, "");
+    }
+
+    /** Restore all input mappings to the defaults in GestureConstants. */
+    public void resetToDefaults() {
+        SharedPreferences.Editor editor = prefs.edit();
+        for (String input : GestureConstants.getInputIds()) {
+            String action = GestureConstants.defaultActionForInput(input);
+            editor.putString(input, action + "|");
+        }
+        editor.putBoolean(KEY_DPAD_ENABLED, true);
+        editor.putBoolean(KEY_TAGS_PROMPT, true);
+        editor.apply();
     }
 }

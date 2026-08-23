@@ -19,6 +19,26 @@ public class XmpReader {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
+    /** Returns true when the file contains an XMP packet, even if it has no tags. */
+    public static boolean hasMetadata(String filePath) {
+        if (filePath == null || filePath.isEmpty()) return false;
+        try {
+            File file = new File(filePath);
+            int readSize = (int) Math.min(file.length(), 524288);
+            if (readSize <= 0) return false;
+            byte[] data = new byte[readSize];
+            RandomAccessFile raf = new RandomAccessFile(filePath, "r");
+            raf.readFully(data);
+            raf.close();
+            String content = new String(data, StandardCharsets.ISO_8859_1);
+            return content.indexOf("<?xpacket") >= 0
+                    || content.indexOf("<x:xmpmeta") >= 0
+                    || content.indexOf("<dc:subject>") >= 0;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     public static List<String> readTags(String filePath) {
         if (filePath == null || filePath.isEmpty()) return new ArrayList<>();
         try {

@@ -15,6 +15,13 @@ public abstract class Action {
     public abstract boolean execute(MediaFile file, Context context,
             TagManager tagManager, BatchRenameManager renamer, FileStatus fileStatus);
 
+    /** Optional inverse used by composite actions; simple actions use the
+     * organizer snapshot fallback when they do not provide one. */
+    public boolean undo(MediaFile file, Context context, TagManager tagManager,
+                        BatchRenameManager renamer, FileStatus fileStatus) {
+        return false;
+    }
+
     public List<String> getLog() { return log; }
     public void clearLog() { log.clear(); }
 

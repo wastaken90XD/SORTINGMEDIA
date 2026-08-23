@@ -91,6 +91,13 @@ public class ColorAnalyzer {
      *  conversions per dominant colour per file. Computing once saves ~90% of
      *  the naming cost on large selections. */
     private static volatile float[][] sPaletteLab = null;
+    private static final Map<String, String> LAST_COLOR_FAMILIES =
+            new java.util.concurrent.ConcurrentHashMap<String, String>();
+
+    /** Color profile from the most recent completed analysis in this process. */
+    public static String getLastColorFamily(String path) {
+        return path == null ? null : LAST_COLOR_FAMILIES.get(path);
+    }
 
     private static float[][] paletteLab() {
         float[][] cached = sPaletteLab;
@@ -235,6 +242,13 @@ public class ColorAnalyzer {
             Result r    = results.get(i);
             MediaFile f = files.get(i);
             if (!r.success) continue;
+            if (!r.colors.isEmpty()) {
+                f.setColorFamily(r.colors.get(0));
+                LAST_COLOR_FAMILIES.put(f.getPath(), r.colors.get(0));
+            } else if (r.signatureColor != null) {
+                f.setColorFamily(r.signatureColor);
+                LAST_COLOR_FAMILIES.put(f.getPath(), r.signatureColor);
+            }
 
             if (wantSignature) {
                 // Signature modes apply ONLY the golden ticket (plus rename for

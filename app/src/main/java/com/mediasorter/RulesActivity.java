@@ -499,7 +499,18 @@ public class RulesActivity extends Activity {
         ce.paramEdit = new EditText(this);
         ce.paramEdit.setTextColor(0xFFFFFFFF);
         ce.paramEdit.setHint("parameter");
-        row.addView(ce.paramEdit);
+        LinearLayout parameterRow = new LinearLayout(this);
+        parameterRow.setOrientation(LinearLayout.HORIZONTAL);
+        ce.paramEdit.setLayoutParams(new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        parameterRow.addView(ce.paramEdit);
+        Button variableButton = makeButton("Variables");
+        variableButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { showVariablePicker(ce.paramEdit); }
+        });
+        parameterRow.addView(variableButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        row.addView(parameterRow);
 
         // Negate
         ce.negateCheck = new CheckBox(this);
@@ -727,6 +738,32 @@ public class RulesActivity extends Activity {
     }
 
     // ── UI helpers ──────────────────────────────────────────────────────
+
+    private void showVariablePicker(final EditText target) {
+        final String[] values = {
+                "{filename} — name without extension",
+                "{ext} — file extension",
+                "{date} — modification date yyyyMMdd",
+                "{year} — modification year",
+                "{month} — modification month",
+                "{day} — modification day",
+                "{size} — file size in bytes",
+                "{tag:N} — Nth tag (zero based)",
+                "{seq} — next sequence label",
+                "{random} — random syllable tag",
+                "{index} — active list index"
+        };
+        new AlertDialog.Builder(this).setTitle("Variables").setItems(values,
+                new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        String row = values[which];
+                        int space = row.indexOf(" ");
+                        String token = space > 0 ? row.substring(0, space) : row;
+                        int cursor = Math.max(0, target.getSelectionStart());
+                        target.getText().insert(cursor, token);
+                    }
+                }).setNegativeButton("Cancel", null).show();
+    }
 
     private TextView makeLabel(String text) {
         return makeLabel(this, text);

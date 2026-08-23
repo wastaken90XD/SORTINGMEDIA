@@ -3,6 +3,12 @@ package com.mediasorter.features;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import android.content.Context;
+import android.content.SharedPreferences;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.HashSet;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -137,6 +143,65 @@ public final class RandomGenerator {
         String p2 = SYLLABLES[RAND.nextInt(SYLLABLES.length)];
         String p3 = SYLLABLES[RAND.nextInt(SYLLABLES.length)];
         return p1 + "-" + p2 + "-" + p3;
+    }
+
+    /**
+     * Generate the tag requested by SettingsActivity. The method is kept
+     * context-aware instead of caching a Context so it is safe to call from a
+     * dialog, a gesture, or a background action without leaking an Activity.
+     */
+    public static String randomTag(Context context, Set<String> existingTags) {
+        String format = "syllable";
+        String custom = "{syl}-{date}";
+        if (context != null) {
+            SharedPreferences prefs = context.getSharedPreferences(
+                    "settings_prefs", Context.MODE_PRIVATE);
+            format = prefs.getString("random_tag_format", "syllable");
+            custom = prefs.getString("random_tag_custom_pattern", custom);
+        }
+        String base;
+        if ("hex".equalsIgnoreCase(format)) {
+            base = randomPlaceholderTag();
+        } else if ("custom".equalsIgnoreCase(format)) {
+            base = resolveCustomPattern(custom, existingTags);
+        } else if ("random".equalsIgnoreCase(format)) {
+            int choice = RAND.nextInt(3);
+            if (choice == 0) base = randomSyllableTag();
+            else if (choice == 1) base = randomPlaceholderTag();
+            else base = resolveCustomPattern(custom, existingTags);
+        } else {
+            base = randomSyllableTag();
+        }
+        if (existingTags == null || !existingTags.contains(base)) return base;
+        return uniqueSuffixTag(base, existingTags);
+    }
+
+    private static String resolveCustomPattern(String pattern, Set<String> existingTags) {
+        String value = pattern == null || pattern.trim().isEmpty()
+                ? "{syl}-{date}" : pattern;
+        value = value.replace("{syl}", randomSyllableTag());
+        value = value.replace("{hex}", randomHex(6));
+        value = value.replace("{seq}", nextCustomSequence(existingTags));
+        value = value.replace("{date}", new SimpleDateFormat(
+                "yyyyMMdd", Locale.US).format(Calendar.getInstance().getTime()));
+        return value.trim();
+    }
+
+    private static String randomHex(int count) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            builder.append(Integer.toHexString(RAND.nextInt(16)).toUpperCase(Locale.US));
+        }
+        return builder.toString();
+    }
+
+    private static String nextCustomSequence(Set<String> existingTags) {
+        int next = 0;
+        if (existingTags != null) {
+            String prefix = "seq";
+            next = nextSequenceIndex(prefix, existingTags);
+        }
+        return sequenceLabel(next);
     }
 
     /** Fisher-Yates shuffle for callers that need the app's shared random source. */

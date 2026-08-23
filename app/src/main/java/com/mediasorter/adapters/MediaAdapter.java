@@ -1,5 +1,6 @@
 package com.mediasorter.adapters;
 
+import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -11,6 +12,7 @@ import android.util.TypedValue;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 import com.mediasorter.R;
+import com.mediasorter.FileStatus;
 import com.mediasorter.TagText;
 import com.mediasorter.ThumbnailLoader;
 import com.mediasorter.models.MediaFile;
@@ -34,18 +36,46 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         void onSelectionChanged(int count);
     }
 
+    /** MainActivity owns the highlighted absolute index. The adapter only asks
+     * this provider while binding and never stores a second current index. */
+    public interface HighlightProvider {
+        boolean isHighlighted(MediaFile file);
+    }
+
     private List<MediaFile>            files     = new ArrayList<>();
     private OnFileClickListener        listener;
     private OnFileLongClickListener    longClickListener;
     private OnSelectionChangedListener selectionListener;
     private ThumbnailLoader            loader;
-    private String                     selectedPath = null;
+    private FileStatus                 fileStatus;
+    private HighlightProvider           highlightProvider;
     private boolean                    selectMode   = false;
     private final LinkedHashSet<String> selected     = new LinkedHashSet<>();
 
     public MediaAdapter(ThumbnailLoader loader, OnFileClickListener listener) {
         this.loader   = loader;
         this.listener = listener;
+    }
+
+    public void setFileStatus(FileStatus status) { this.fileStatus = status; }
+    public void setHighlightProvider(HighlightProvider provider) {
+        this.highlightProvider = provider;
+    }
+
+    /** Rebind only the current-row visual state after navigation. */
+    public void notifyHighlightChanged() {
+        if (!files.isEmpty()) notifyItemRangeChanged(0, files.size(), "highlight");
+    }
+
+    /** Rebind one row immediately after a status toggle. */
+    public void updateFileStatus(MediaFile file) {
+        if (file == null) return;
+        for (int i = 0; i < files.size(); i++) {
+            if (file.getPath().equals(files.get(i).getPath())) {
+                notifyItemChanged(i, "status");
+                return;
+            }
+        }
     }
 
     @Override
@@ -130,19 +160,36 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         updateFileTags(f);
     }
 
+    /**
+     * Compatibility hook for older callers. Highlight state is owned by
+     * MainActivity; this method deliberately does not store the path.
+     */
     public void setSelected(String path) {
-        String old   = selectedPath;
-        selectedPath = path;
-        for (int i = 0; i < files.size(); i++) {
-            String p = files.get(i).getPath();
-            // Payload keeps the thumbnail from being re-decoded for a
-            // pure highlight change.
-            if (p.equals(old) || p.equals(path)) notifyItemChanged(i, "selection");
-        }
+        notifyHighlightChanged();
     }
 
     public String getSelectedPath() {
-        return selectedPath == null ? "" : selectedPath;
+        if (highlightProvider == null) return "";
+        for (MediaFile file : files) {
+            if (highlightProvider.isHighlighted(file)) return file.getPath();
+        }
+        return "";
+    }
+
+    public void togglePath(String path) {
+        if (path == null) return;
+        if (selected.contains(path)) selected.remove(path);
+        else selected.add(path);
+        notifySelectionChangedVisually();
+        if (selectionListener != null) selectionListener.onSelectionChanged(selected.size());
+    }
+
+    public void selectPath(String path) {
+        if (path == null) return;
+        if (selected.add(path)) {
+            notifySelectionChangedVisually();
+            if (selectionListener != null) selectionListener.onSelectionChanged(selected.size());
+        }
     }
 
     // ── Multi-select ──────────────────────────────────────────────────────────
@@ -151,6 +198,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         selectMode = true;
         selected.clear();
         notifyDataSetChanged();
+        if (selectionListener != null) selectionListener.onSelectionChanged(0);
     }
 
     public void exitSelectMode() {
@@ -247,8 +295,12 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
                 if ("tags".equals(p)) {
                     bindTags(holder, file);
                     handled = true;
-                } else if ("selection".equals(p)) {
+                } else if ("selection".equals(p) || "highlight".equals(p)) {
                     bindSelectionVisual(holder, file);
+                    handled = true;
+                } else if ("status".equals(p)) {
+                    bindSelectionVisual(holder, file);
+                    bindFlagIndicator(holder, file);
                     handled = true;
                 }
             }
@@ -269,6 +321,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
 
         bindTags(holder, file);
         bindSelectionVisual(holder, file);
+        bindFlagIndicator(holder, file);
 
         loader.load(file, holder.thumbnail);
 
@@ -277,7 +330,6 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
                 if (selectMode) {
                     toggleSelection(file.getPath(), holder);
                 } else {
-                    setSelected(file.getPath());
                     if (listener != null) listener.onFileClick(file);
                 }
             }
@@ -345,8 +397,28 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         } else {
             holder.checkBox.setVisibility(View.GONE);
             holder.selectionOrder.setVisibility(View.GONE);
-            holder.itemView.setBackgroundColor(
-                file.getPath().equals(selectedPath) ? 0xFF1A1A4E : 0x00000000);
+            boolean highlighted = highlightProvider != null
+                    && highlightProvider.isHighlighted(file);
+            holder.itemView.setBackgroundColor(highlighted ? 0xFF1A1A4E : 0x00000000);
+        }
+    }
+
+    /** Accent-tinted row makes a flagged file visible without an icon. */
+    private void bindFlagIndicator(ViewHolder holder, MediaFile file) {
+        boolean flagged = fileStatus != null && fileStatus.isFlagged(file.getPath());
+        boolean highlighted = highlightProvider != null && highlightProvider.isHighlighted(file);
+        boolean selectedFile = selectMode && selected.contains(file.getPath());
+        if (flagged) {
+            int alpha = selectedFile || highlighted ? 150 : 85;
+            int tint = Color.argb(alpha, Color.red(colorAccent),
+                    Color.green(colorAccent), Color.blue(colorAccent));
+            holder.itemView.setBackgroundColor(tint);
+        } else if (selectedFile) {
+            holder.itemView.setBackgroundColor(0xFF2A2A6E);
+        } else if (highlighted) {
+            holder.itemView.setBackgroundColor(0xFF1A1A4E);
+        } else {
+            holder.itemView.setBackgroundColor(0x00000000);
         }
     }
 

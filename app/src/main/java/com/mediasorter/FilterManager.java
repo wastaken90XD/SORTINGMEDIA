@@ -19,6 +19,7 @@ public class FilterManager {
     private final Set<Filter> activeFilters = new LinkedHashSet<>();
     private final Set<String> duplicatePaths = new HashSet<>();
     private String selectedTag = "";
+    private final Set<String> selectedTags = new LinkedHashSet<>();
 
     public FilterManager(FileStatus fileStatus) {
         this.fileStatus = fileStatus;
@@ -28,9 +29,15 @@ public class FilterManager {
     /** Existing single-filter API remains single-filter for the old menu. */
     public synchronized void setFilter(Filter f) {
         current = f == null ? Filter.ALL : f;
-        if (current != Filter.BY_TAG) selectedTag = "";
         activeFilters.clear();
         activeFilters.add(current);
+        // Tag-bar chips are session state and must survive ordinary filter,
+        // sort, and search changes. Re-add the AND tag criterion after the
+        // single filter selected by the legacy filter menu.
+        if (!selectedTags.isEmpty()) {
+            activeFilters.remove(Filter.ALL);
+            activeFilters.add(Filter.BY_TAG);
+        }
     }
 
     public synchronized Filter getCurrent() { return current; }
@@ -41,7 +48,7 @@ public class FilterManager {
         if (f == Filter.ALL) {
             activeFilters.clear();
             activeFilters.add(Filter.ALL);
-            current = Filter.ALL;
+            rebuildTagFilterState();
             return;
         }
         activeFilters.remove(Filter.ALL);
@@ -57,6 +64,7 @@ public class FilterManager {
         activeFilters.add(Filter.ALL);
         current = Filter.ALL;
         selectedTag = "";
+        selectedTags.clear();
     }
 
     public synchronized boolean isActive(Filter f) {
@@ -69,19 +77,51 @@ public class FilterManager {
     }
 
     public synchronized void setTagFilter(String tag) {
-        selectedTag = tag == null ? "" : tag;
-        if (selectedTag.isEmpty()) {
-            activeFilters.remove(Filter.BY_TAG);
-        } else {
-            activeFilters.remove(Filter.ALL);
-            activeFilters.add(Filter.BY_TAG);
+        selectedTags.clear();
+        String clean = tag == null ? "" : tag.trim();
+        if (!clean.isEmpty()) selectedTags.add(clean);
+        selectedTag = clean;
+        rebuildTagFilterState();
+    }
+
+    /** Toggle one tag chip without disturbing other active chips. */
+    public synchronized void toggleTagFilter(String tag) {
+        String clean = tag == null ? "" : tag.trim();
+        if (clean.isEmpty()) return;
+        if (selectedTags.contains(clean)) selectedTags.remove(clean);
+        else selectedTags.add(clean);
+        selectedTag = selectedTags.isEmpty() ? "" : selectedTags.iterator().next();
+        rebuildTagFilterState();
+    }
+
+    public synchronized void setTagFilters(Set<String> tags) {
+        selectedTags.clear();
+        if (tags != null) {
+            for (String tag : tags) {
+                if (tag != null && !tag.trim().isEmpty()) selectedTags.add(tag.trim());
+            }
         }
-        if (activeFilters.isEmpty()) activeFilters.add(Filter.ALL);
-        current = activeFilters.size() == 1
-                ? activeFilters.iterator().next() : Filter.ALL;
+        selectedTag = selectedTags.isEmpty() ? "" : selectedTags.iterator().next();
+        rebuildTagFilterState();
+    }
+
+    public synchronized Set<String> getTagFilters() {
+        return new LinkedHashSet<>(selectedTags);
     }
 
     public synchronized String getTagFilter() { return selectedTag; }
+
+    private void rebuildTagFilterState() {
+        activeFilters.remove(Filter.BY_TAG);
+        if (!selectedTags.isEmpty()) {
+            activeFilters.remove(Filter.ALL);
+            activeFilters.add(Filter.BY_TAG);
+        } else if (activeFilters.isEmpty()) {
+            activeFilters.add(Filter.ALL);
+        }
+        current = activeFilters.size() == 1
+                ? activeFilters.iterator().next() : Filter.ALL;
+    }
 
     public synchronized void setDuplicatePaths(Set<String> paths) {
         duplicatePaths.clear();
@@ -132,7 +172,13 @@ public class FilterManager {
             case IMAGES:      return file.getType() == MediaFile.Type.IMAGE;
             case VIDEOS:      return file.getType() == MediaFile.Type.VIDEO;
             case DUPLICATES:  return duplicates.contains(file.getPath());
-            case BY_TAG:      return !tag.isEmpty() && file.hasTag(tag);
+            case BY_TAG:
+                Set<String> required = getTagFilters();
+                if (required.isEmpty()) return true;
+                for (String requiredTag : required) {
+                    if (!file.hasTag(requiredTag)) return false;
+                }
+                return true;
             case ALL:
             default:          return true;
         }

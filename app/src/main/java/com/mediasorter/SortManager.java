@@ -42,6 +42,13 @@ public class SortManager {
     public static final String DONE = "DONE";
     public static final String MANUAL_ORDER = "MANUAL_ORDER";
     public static final String RANDOM = "RANDOM";
+    public static final String PATH_DEPTH = "PATH_DEPTH";
+    public static final String COLOR_FAMILY = "COLOR_FAMILY";
+    public static final String SEQUENCE_GROUP = "SEQUENCE_GROUP";
+    public static final String RANDOM_WITHIN_GROUP = "RANDOM_WITHIN_GROUP";
+    public static final String DUPLICATE_STATUS = "DUPLICATE_STATUS";
+    public static final String METADATA_PRESENCE = "METADATA_PRESENCE";
+    public static final String WORD_COUNT = "WORD_COUNT";
 
     public static class SortCriterion {
         public String id;
@@ -231,6 +238,13 @@ public class SortManager {
         if (DONE.equals(id)) return "Done status";
         if (MANUAL_ORDER.equals(id)) return "Manual order";
         if (RANDOM.equals(id)) return "Random shuffle";
+        if (PATH_DEPTH.equals(id)) return "Path depth";
+        if (COLOR_FAMILY.equals(id)) return "Color family";
+        if (SEQUENCE_GROUP.equals(id)) return "Sequence group";
+        if (RANDOM_WITHIN_GROUP.equals(id)) return "Random within group";
+        if (DUPLICATE_STATUS.equals(id)) return "Duplicate status";
+        if (METADATA_PRESENCE.equals(id)) return "Metadata presence";
+        if (WORD_COUNT.equals(id)) return "Filename word count";
         return "Name";
     }
 
@@ -245,6 +259,11 @@ public class SortManager {
         if (SKIPPED.equals(id)) return desc ? "Skipped first" : "Unskipped first";
         if (DONE.equals(id)) return desc ? "Done first" : "Undone first";
         if (MANUAL_ORDER.equals(id)) return desc ? "Descending" : "Ascending";
+        if (PATH_DEPTH.equals(id)) return desc ? "Deeper first" : "Shallower first";
+        if (RANDOM_WITHIN_GROUP.equals(id)) return "Within groups";
+        if (DUPLICATE_STATUS.equals(id)) return desc ? "Duplicates first" : "Unique first";
+        if (METADATA_PRESENCE.equals(id)) return desc ? "Metadata first" : "No metadata first";
+        if (WORD_COUNT.equals(id)) return desc ? "More words" : "Fewer words";
         return desc ? "Z-A" : "A-Z";
     }
 
@@ -255,7 +274,9 @@ public class SortManager {
 
     public static String defaultDirection(String id) {
         if (DATE.equals(id) || SIZE.equals(id) || TAG_COUNT.equals(id)
-                || FLAGGED.equals(id) || SKIPPED.equals(id) || DONE.equals(id)) {
+                || FLAGGED.equals(id) || SKIPPED.equals(id) || DONE.equals(id)
+                || PATH_DEPTH.equals(id) || DUPLICATE_STATUS.equals(id)
+                || METADATA_PRESENCE.equals(id) || WORD_COUNT.equals(id)) {
             return "DESC";
         }
         return "ASC";
@@ -265,7 +286,11 @@ public class SortManager {
         return NAME.equals(id) || DATE.equals(id) || SIZE.equals(id)
                 || TYPE.equals(id) || TAG_COUNT.equals(id) || FIRST_TAG.equals(id)
                 || TAG_RULE_MATCH.equals(id) || FLAGGED.equals(id) || SKIPPED.equals(id)
-                || DONE.equals(id) || MANUAL_ORDER.equals(id) || RANDOM.equals(id);
+                || DONE.equals(id) || MANUAL_ORDER.equals(id) || RANDOM.equals(id)
+                || PATH_DEPTH.equals(id) || COLOR_FAMILY.equals(id)
+                || SEQUENCE_GROUP.equals(id) || RANDOM_WITHIN_GROUP.equals(id)
+                || DUPLICATE_STATUS.equals(id) || METADATA_PRESENCE.equals(id)
+                || WORD_COUNT.equals(id);
     }
 
     private String normalizeDirection(String direction) {
@@ -278,11 +303,16 @@ public class SortManager {
         final List<String> tagRules = getTagRules();
         Comparator<MediaFile> chain = null;
         boolean random = false;
+        boolean randomWithinGroup = false;
 
         for (SortCriterion criterion : sequence) {
             if (criterion == null || !isCriterionId(criterion.id)) continue;
             if (RANDOM.equals(criterion.id)) {
                 random = true;
+                continue;
+            }
+            if (RANDOM_WITHIN_GROUP.equals(criterion.id)) {
+                randomWithinGroup = true;
                 continue;
             }
             final String id = criterion.id;
@@ -312,7 +342,31 @@ public class SortManager {
         }
 
         Collections.sort(files, chain);
+        if (randomWithinGroup) shuffleWithinGroups(files);
         if (random) RandomGenerator.shuffle(files);
+    }
+
+    /** Shuffle each contiguous group without moving files between groups. */
+    private void shuffleWithinGroups(List<MediaFile> files) {
+        int start = 0;
+        while (start < files.size()) {
+            String key = groupingKey(files.get(start));
+            int end = start + 1;
+            while (end < files.size() && key.equals(groupingKey(files.get(end)))) end++;
+            if (end - start > 1) {
+                List<MediaFile> chunk = new ArrayList<>(files.subList(start, end));
+                RandomGenerator.shuffle(chunk);
+                for (int i = 0; i < chunk.size(); i++) files.set(start + i, chunk.get(i));
+            }
+            start = end;
+        }
+    }
+
+    private String groupingKey(MediaFile file) {
+        String sequence = sequenceGroup(file);
+        if (!sequence.isEmpty()) return sequence;
+        String parent = new java.io.File(file.getPath()).getParent();
+        return parent == null ? "" : parent;
     }
 
     private Comparator<MediaFile> append(final Comparator<MediaFile> first,
@@ -342,6 +396,12 @@ public class SortManager {
                 fileStatus != null && fileStatus.isSkipped(right.getPath()));
         if (DONE.equals(id)) return Boolean.compare(fileStatus != null && fileStatus.isDone(left.getPath()),
                 fileStatus != null && fileStatus.isDone(right.getPath()));
+        if (PATH_DEPTH.equals(id)) return Integer.compare(pathDepth(left), pathDepth(right));
+        if (COLOR_FAMILY.equals(id)) return left.getColorFamily().compareToIgnoreCase(right.getColorFamily());
+        if (SEQUENCE_GROUP.equals(id)) return sequenceGroup(left).compareToIgnoreCase(sequenceGroup(right));
+        if (DUPLICATE_STATUS.equals(id)) return Boolean.compare(left.isDuplicate(), right.isDuplicate());
+        if (METADATA_PRESENCE.equals(id)) return Boolean.compare(left.hasMetadata(), right.hasMetadata());
+        if (WORD_COUNT.equals(id)) return Integer.compare(wordCount(left.getName()), wordCount(right.getName()));
         if (MANUAL_ORDER.equals(id)) return compareManualOrder(left, right);
         return compareNames(left, right);
     }
@@ -359,6 +419,36 @@ public class SortManager {
             if (file.hasTag(rules.get(i))) return i;
         }
         return rules.size();
+    }
+
+    private int pathDepth(MediaFile file) {
+        if (file == null || file.getPath() == null) return 0;
+        String path = file.getPath().replace('\\', '/');
+        int depth = 0;
+        for (int i = 0; i < path.length(); i++) if (path.charAt(i) == '/') depth++;
+        return depth;
+    }
+
+    private String sequenceGroup(MediaFile file) {
+        if (file == null || file.getTags() == null) return "";
+        for (String tag : file.getTags()) {
+            if (tag == null) continue;
+            String plain = tag.trim();
+            if (plain.startsWith("link_")) return plain.substring(5);
+            if (plain.startsWith("link-")) return plain.substring(5);
+        }
+        return "";
+    }
+
+    private int wordCount(String name) {
+        if (name == null || name.trim().isEmpty()) return 0;
+        String stem = name;
+        int dot = stem.lastIndexOf('.');
+        if (dot > 0) stem = stem.substring(0, dot);
+        String[] words = stem.split("[\\s_\\-.]+");
+        int count = 0;
+        for (String word : words) if (!word.isEmpty()) count++;
+        return count;
     }
 
     private int compareManualOrder(MediaFile left, MediaFile right) {

@@ -6,7 +6,10 @@ import java.util.List;
 
 public class Group {
 
-    public enum GroupBy { TAG, DATE, FILE_TYPE, FOLDER, RATING }
+    public enum GroupBy {
+        TAG, DATE, FILE_TYPE, FOLDER, RATING,
+        TAG_PREFIX, SEQUENCE_GROUP, COLOR_PROFILE, DIRECTORY_DEPTH, MANUAL_GROUP
+    }
 
     private String          label;
     private List<MediaFile> files;

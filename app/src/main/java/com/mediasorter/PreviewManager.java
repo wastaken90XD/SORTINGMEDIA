@@ -34,7 +34,6 @@ public class PreviewManager {
     public interface ActionListener {
         void onSkip();
         void onFlag();
-        void onDone();
         void onNext();
         void onPrev();
         void onDpadUp();
@@ -58,9 +57,9 @@ public class PreviewManager {
     private TextView     detailMeta;
     private TextView     unsupportedText;
     private TextView     positionCounter;
+    private TextView     flagState;
     private Button       btnSkip;
     private Button       btnFlag;
-    private Button       btnDone;
     private Button       btnPrev;
     private Button       btnNext;
     private Button       btnTogglePanel;
@@ -147,11 +146,11 @@ public class PreviewManager {
         unsupportedPreview = root.findViewById(R.id.unsupportedPreview);
         detailFileName     = root.findViewById(R.id.detailFileName);
         detailMeta         = root.findViewById(R.id.detailMeta);
+        flagState           = root.findViewById(R.id.flagState);
         unsupportedText    = root.findViewById(R.id.unsupportedText);
         positionCounter    = root.findViewById(R.id.positionCounter);
         btnSkip            = root.findViewById(R.id.btnSkip);
         btnFlag            = root.findViewById(R.id.btnFlag);
-        btnDone            = root.findViewById(R.id.btnDone);
         btnPrev            = root.findViewById(R.id.btnPrev);
         btnNext            = root.findViewById(R.id.btnNext);
         btnTogglePanel     = root.findViewById(R.id.btnTogglePanel);
@@ -299,9 +298,6 @@ public class PreviewManager {
         });
         btnFlag.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { if (actionListener != null) actionListener.onFlag(); }
-        });
-        btnDone.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { if (actionListener != null) actionListener.onDone(); }
         });
         btnPrev.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { if (actionListener != null) actionListener.onPrev(); }
@@ -704,6 +700,16 @@ public class PreviewManager {
             file.getFormattedSize()
             + "  •  " + file.getType().name().toLowerCase()
             + "  •  " + file.getTags().size() + " tags");
+        updateStatusIndicator(file);
+    }
+
+    /** Refresh the visible flag indicator without reloading media or layout. */
+    public void updateStatusIndicator(MediaFile file) {
+        if (file == null || flagState == null || fileStatus == null) return;
+        boolean flagged = fileStatus.isFlagged(file.getPath());
+        flagState.setText(flagged ? "FLAGGED" : "Not flagged");
+        flagState.setVisibility(View.VISIBLE);
+        flagState.setTextColor(flagged ? 0xFFFFAA00 : 0xFFAAAAAA);
     }
 
     private void updateButtonStates(MediaFile file) {
@@ -715,9 +721,7 @@ public class PreviewManager {
         btnFlag.setBackgroundTintList(
             android.content.res.ColorStateList.valueOf(
                 fileStatus.isFlagged(path) ? 0xFFFFAA00 : 0xFFAA6600));
-        btnDone.setBackgroundTintList(
-            android.content.res.ColorStateList.valueOf(
-                fileStatus.isDone(path) ? 0xFF44AA44 : 0xFF226622));
+        updateStatusIndicator(file);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
