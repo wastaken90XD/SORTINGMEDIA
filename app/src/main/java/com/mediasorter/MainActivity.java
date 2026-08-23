@@ -2210,6 +2210,23 @@ private Spinner makeSpinner(String[] options) {
     return sp;
 }
 
+    private Button makeSmallButton(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setTextSize(11f);
+        button.setAllCaps(false);
+        return button;
+    }
+
+    private void cycleTagBarSort() {
+        if (tagBarSortMode == TagBarSort.USAGE) tagBarSortMode = TagBarSort.ALPHABETICAL;
+        else if (tagBarSortMode == TagBarSort.ALPHABETICAL) tagBarSortMode = TagBarSort.RECENT;
+        else tagBarSortMode = TagBarSort.USAGE;
+        if (tagBarSort != null) tagBarSort.setText(tagBarSortMode == TagBarSort.USAGE
+                ? "Usage" : tagBarSortMode == TagBarSort.ALPHABETICAL ? "A-Z" : "Recent");
+        refreshTagBar();
+    }
+
     private BatchRenameManager.Separator sepFromPos(int pos) {
         switch (pos) {
             case 1:  return BatchRenameManager.Separator.DASH;
