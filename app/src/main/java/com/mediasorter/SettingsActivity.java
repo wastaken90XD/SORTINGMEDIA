@@ -1105,15 +1105,7 @@ public class SettingsActivity extends Activity {
         // ── 12. Browsing ──────────────────────────────────────────────────────
         root.addView(makeTitle("Browsing"));
 
-        int currentWindowSize = getSharedPreferences("window_prefs", MODE_PRIVATE).getInt("window_size", 20);
-        int currentPageSize = settingsPrefs.getInt("page_size", currentWindowSize);
-        root.addView(makeNumericInputRow("Page size (10-500):", currentPageSize, 10, 500, new OnNumericChangeListener() {
-            @Override public void onChange(int val) {
-                saveInt("page_size", val);
-                getSharedPreferences("window_prefs", MODE_PRIVATE).edit().putInt("window_size", val).apply();
-            }
-        }));
-
+        // Window size is the single canonical page/window setting.
         root.addView(makeCheckBoxRow("Info overlay default", settingsPrefs.getBoolean("info_overlay_default", false), new OnCheckedChangeListener() {
             @Override public void onChecked(boolean checked) { saveBoolean("info_overlay_default", checked); }
         }));

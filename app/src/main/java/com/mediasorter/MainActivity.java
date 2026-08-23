@@ -617,6 +617,7 @@ public class MainActivity extends Activity
         filterManager   = new FilterManager(fileStatus);
         gestureSettings = new GestureSettings(this);
         lastRunMacroId = gestureSettings.getLastRunMacroId();
+        migrateDuplicateWindowSetting();
         windowManager   = new WindowManager(getWindowSize());
         autoOrganizer = new AutoOrganizer(this, tagManager, batchRenameManager, fileStatus);
         searchHistory  = new SearchHistory(this);
@@ -662,6 +663,23 @@ public class MainActivity extends Activity
     private int getWindowSize() {
         return getSharedPreferences("window_prefs", MODE_PRIVATE)
                 .getInt("window_size", 20);
+    }
+
+    private void migrateDuplicateWindowSetting() {
+        android.content.SharedPreferences settings = getSharedPreferences(
+                "settings_prefs", MODE_PRIVATE);
+        if (!settings.contains("page_size")) return;
+        android.content.SharedPreferences windows = getSharedPreferences(
+                "window_prefs", MODE_PRIVATE);
+        if (!windows.contains("window_size")) {
+            try {
+                int value = settings.getInt("page_size", 20);
+                windows.edit().putInt("window_size", value).commit();
+            } catch (Exception error) {
+                android.util.Log.w("MainActivity", "Invalid legacy page_size", error);
+            }
+        }
+        settings.edit().remove("page_size").commit();
     }
 
     private void initAdapters() {
@@ -1717,8 +1735,7 @@ public class MainActivity extends Activity
 
     private void navigateByPage(int direction) {
         if (fullList.isEmpty()) return;
-        int page = getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                .getInt("page_size", getWindowSize());
+        int page = getWindowSize();
         int next = Math.max(0, Math.min(fullList.size() - 1,
                 currentIndex + (direction * Math.max(1, page))));
         loadFileAtIndex(next);
