@@ -179,6 +179,7 @@ public class MainActivity extends Activity
     private Runnable volumeLongPressDownRunnable;
     private int lastSweepSelectedIndex = RecyclerView.NO_POSITION;
     private boolean sweepTouchActive;
+    private boolean sweepMoved;
     private android.widget.PopupWindow searchHistoryPopup;
     private android.view.ViewTreeObserver.OnGlobalLayoutListener explorerWidthLayoutListener;
 
@@ -4653,6 +4654,7 @@ private Spinner makeSpinner(String[] options) {
                     if (action == MotionEvent.ACTION_DOWN) {
                         dismissGalleryInfoPopup();
                         sweepTouchActive = galleryAdapter != null && galleryAdapter.isSelectMode();
+                        sweepMoved = false;
                         lastSweepSelectedIndex = RecyclerView.NO_POSITION;
                     } else if (action == MotionEvent.ACTION_MOVE && sweepTouchActive
                             && galleryAdapter != null && galleryAdapter.isSelectMode()) {
@@ -4663,6 +4665,7 @@ private Spinner makeSpinner(String[] options) {
                                     && position != lastSweepSelectedIndex
                                     && position < galleryAdapter.getItemCount()) {
                                 lastSweepSelectedIndex = position;
+                                sweepMoved = true;
                                 MediaFile file = galleryAdapter.getFile(position);
                                 if (file != null) galleryAdapter.selectPath(file.getPath());
                             }
@@ -4671,10 +4674,13 @@ private Spinner makeSpinner(String[] options) {
                             || action == MotionEvent.ACTION_CANCEL) {
                         // Do not select the release location. The last move
                         // event is the complete sweep selection.
+                        boolean consumeRelease = sweepMoved;
                         sweepTouchActive = false;
+                        sweepMoved = false;
                         lastSweepSelectedIndex = RecyclerView.NO_POSITION;
+                        return consumeRelease;
                     }
-                    return false;
+                    return sweepTouchActive && sweepMoved;
                 }
             });
 
@@ -5409,6 +5415,11 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void finishGalleryDrag(GalleryAdapter.ViewHolder holder) {
+        if (galleryAdapter != null && (galleryDragTo < 0
+                || galleryDragTo >= galleryAdapter.getItemCount())) {
+            endGalleryDragOutOfBounds();
+            return;
+        }
         boolean moved = galleryDragFrom >= 0 && galleryDragTo >= 0
                 && galleryDragFrom != galleryDragTo;
         if (!moved && holder != null) {

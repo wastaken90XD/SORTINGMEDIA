@@ -277,10 +277,13 @@ public class TagManager {
         synchronized (tagMap) {
             removed = tagMap.remove(plain);
         }
-        if (removed == null) return;
         notifyTagsChanged();
         executor.submit(new Runnable() {
-            @Override public void run() { db.tagDao().delete(removed); }
+            @Override public void run() {
+                Tag stored = removed != null ? removed : db.tagDao().getByName(plain);
+                if (stored != null) db.tagDao().delete(stored);
+                notifyTagsChanged();
+            }
         });
     }
 
