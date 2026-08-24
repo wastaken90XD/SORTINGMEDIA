@@ -269,8 +269,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
 
     /** Gallery section model. Headers are full-width divider rows in MainActivity's grid. */
     public void setGroupedGroups(List<Group> groups) {
-        Set<String> previousSelectedPaths = selectedActualPaths();
-        Set<String> previousSelectedAppearances = new LinkedHashSet<String>(selected);
+        Set<String> previousSelected = selectedActualPaths();
         groupedMode = true;
         groupedGroups = groups == null ? new ArrayList<Group>() : new ArrayList<>(groups);
         displayItems.clear();
@@ -286,21 +285,8 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
                 }
             }
         }
-        Set<String> availableAppearances = new HashSet<String>();
-        for (DisplayItem item : displayItems) {
-            if (!item.header && item.file != null) availableAppearances.add(appearanceKey(item));
-        }
         selected.clear();
-        for (String key : previousSelectedAppearances) {
-            if (availableAppearances.contains(key)) selected.add(key);
-        }
-        Set<String> selectedPathsAfterPreserving = selectedActualPaths();
-        for (String path : previousSelectedPaths) {
-            if (!selectedPathsAfterPreserving.contains(path)) {
-                String key = firstAppearanceKey(path);
-                if (availableAppearances.contains(key)) selected.add(key);
-            }
-        }
+        for (String path : previousSelected) selected.add(firstAppearanceKey(path));
         notifyDataSetChanged();
     }
 

@@ -164,27 +164,13 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
 
     /** Explorer model with one independent appearance for each group member. */
     public void setGroupedGroups(List<Group> groups) {
-        Set<String> previousSelectedPaths = selectedActualPaths();
-        Set<String> previousSelectedAppearances = new LinkedHashSet<String>(selected);
+        Set<String> previousSelected = selectedActualPaths();
         groupedMode = true;
         groupedGroups = groups == null ? new ArrayList<Group>() : new ArrayList<>(groups);
         collapsedGroups.clear();
         rebuildGroupedDisplay();
-        Set<String> availableAppearances = new HashSet<String>();
-        for (DisplayItem item : displayItems) {
-            if (!item.header && item.file != null) availableAppearances.add(appearanceKey(item));
-        }
         selected.clear();
-        for (String key : previousSelectedAppearances) {
-            if (availableAppearances.contains(key)) selected.add(key);
-        }
-        Set<String> selectedPathsAfterPreserving = selectedActualPaths();
-        for (String path : previousSelectedPaths) {
-            if (!selectedPathsAfterPreserving.contains(path)) {
-                String key = appearanceKeyForPath(path);
-                if (availableAppearances.contains(key)) selected.add(key);
-            }
-        }
+        for (String path : previousSelected) selected.add(appearanceKeyForPath(path));
         notifyDataSetChanged();
     }
 
