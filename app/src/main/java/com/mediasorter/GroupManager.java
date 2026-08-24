@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -107,11 +108,12 @@ public class GroupManager {
         for (MediaFile file : files) {
             if (file == null) continue;
             boolean added = false;
+            Set<String> addedTags = new HashSet<String>();
             List<String> tags = file.getTags();
             if (tags != null) {
                 for (String rawTag : tags) {
                     String tag = TagText.plain(rawTag);
-                    if (tag.isEmpty()) continue;
+                    if (tag.isEmpty() || !addedTags.add(tag)) continue;
                     add(map, tag, Group.GroupBy.TAG, file);
                     added = true;
                 }
