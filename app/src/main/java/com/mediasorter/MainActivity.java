@@ -116,6 +116,13 @@ public class MainActivity extends Activity
     private static List<Tag>       sLatestTagList  = new ArrayList<>();
     private int             currentIndex = -1;
 
+    // Tag grouping is a virtual display: a real MediaFile may occur in more
+    // than one group, while currentFiles/fullList retain those appearances.
+    private List<Group> displayedTagGroups = new ArrayList<Group>();
+    private boolean tagGroupingActive;
+    private int tagGroupPage;
+    private int tagGroupPageSize;
+
     private boolean refreshPending = false;
 
     private EditText searchBar;
@@ -663,6 +670,14 @@ public class MainActivity extends Activity
     private int getWindowSize() {
         return getSharedPreferences("window_prefs", MODE_PRIVATE)
                 .getInt("window_size", 20);
+    }
+
+    private int getTagGroupPageSize() {
+        android.content.SharedPreferences settings = getSharedPreferences(
+                "settings_prefs", MODE_PRIVATE);
+        int fallback = getWindowSize();
+        int value = settings.getInt("page_size", fallback);
+        return Math.max(1, Math.min(500, value));
     }
 
     private void migrateDuplicateWindowSetting() {
@@ -1435,6 +1450,72 @@ public class MainActivity extends Activity
         }, delay);
     }
 
+    private static class TagGroupPage {
+        final List<Group> groups;
+        final int page;
+        TagGroupPage(List<Group> values, int pageValue) {
+            groups = values;
+            page = pageValue;
+        }
+    }
+
+    private TagGroupPage paginateTagGroups(List<Group> groups, int requestedPage,
+                                           int pageSize) {
+        List<Group> pageGroups = new ArrayList<Group>();
+        if (groups == null || groups.isEmpty()) return new TagGroupPage(pageGroups, 0);
+        int safePageSize = Math.max(1, pageSize);
+        int maxPages = 1;
+        for (Group group : groups) {
+            if (group != null && group.getCount() > 0) {
+                maxPages = Math.max(maxPages,
+                        (group.getCount() + safePageSize - 1) / safePageSize);
+            }
+        }
+        int page = Math.max(0, Math.min(requestedPage, maxPages - 1));
+        for (Group group : groups) {
+            if (group == null || group.getCount() == 0) continue;
+            List<MediaFile> ordered = new ArrayList<MediaFile>(group.getFiles());
+            // Sorting stays on refreshExecutor; never sort a group on the UI.
+            sortManager.sort(ordered);
+            int start = page * safePageSize;
+            if (start >= ordered.size()) continue;
+            int end = Math.min(ordered.size(), start + safePageSize);
+            Group pageGroup = new Group(group.getLabel(), Group.GroupBy.TAG);
+            pageGroup.setTotalCount(group.getCount());
+            for (int i = start; i < end; i++) pageGroup.addFile(ordered.get(i));
+            pageGroups.add(pageGroup);
+        }
+        return new TagGroupPage(pageGroups, page);
+    }
+
+    private List<MediaFile> flattenGroups(List<Group> groups) {
+        List<MediaFile> result = new ArrayList<MediaFile>();
+        if (groups == null) return result;
+        for (Group group : groups) {
+            if (group != null) result.addAll(group.getFiles());
+        }
+        return result;
+    }
+
+    private List<Group> tagGroupsForCurrentWindow() {
+        List<Group> visible = new ArrayList<Group>();
+        if (!tagGroupingActive || displayedTagGroups == null) return visible;
+        int start = windowManager.getWindowStart();
+        int end = start + getCurrentFilesSnapshot().size();
+        int cursor = 0;
+        for (Group fullGroup : displayedTagGroups) {
+            if (fullGroup == null) continue;
+            Group windowGroup = new Group(fullGroup.getLabel(), Group.GroupBy.TAG);
+            windowGroup.setTotalCount(fullGroup.getTotalCount());
+            for (MediaFile file : fullGroup.getFiles()) {
+                if (cursor >= start && cursor < end) windowGroup.addFile(file);
+                cursor++;
+            }
+            if (windowGroup.getCount() > 0) visible.add(windowGroup);
+        }
+        return visible;
+    }
+
     private void executeRefresh() {
         refreshPending = false;
 
@@ -1446,7 +1527,13 @@ public class MainActivity extends Activity
                 && fullList.get(currentIndex) != null
                 ? fullList.get(currentIndex).getPath() : null;
 
-        final List<MediaFile> initialBase = indexer.getIndex();
+        final boolean groupingByTag = groupManager.getCurrent() == Group.GroupBy.TAG;
+        // Tag grouping must always start from MediaIndexer.getFullIndex();
+        // WindowManager contains only the current display window.
+        final List<MediaFile> initialBase = groupingByTag
+                ? indexer.getFullIndex() : indexer.getIndex();
+        final int requestedTagPage = tagGroupPage;
+        final int requestedPageSize = getTagGroupPageSize();
         final long sequence = ++refreshSequence;
         refreshExecutor.submit(new Runnable() {
             @Override public void run() {
@@ -1458,27 +1545,57 @@ public class MainActivity extends Activity
                 }
 
                 List<MediaFile> flattened = new ArrayList<>();
+                List<Group> pageGroups = new ArrayList<Group>();
+                int appliedTagPage = requestedTagPage;
                 try {
-                    List<Group> groups = groupManager.group(base);
-                    if (groups != null) {
-                        for (Group group : groups) {
-                            if (group != null && group.getFiles() != null) {
-                                flattened.addAll(group.getFiles());
+                    if (groupingByTag) {
+                        // Filter actual files before grouping so each group
+                        // count describes the active view, while membership is
+                        // still evaluated against every sanitized tag.
+                        List<MediaFile> filteredBase = filterManager.apply(base);
+                        List<Group> groups = groupManager.group(filteredBase);
+                        TagGroupPage page = paginateTagGroups(groups,
+                                requestedTagPage, requestedPageSize);
+                        pageGroups = page.groups;
+                        appliedTagPage = page.page;
+                        flattened = flattenGroups(pageGroups);
+                    } else {
+                        List<Group> groups = groupManager.group(base);
+                        if (groups != null) {
+                            for (Group group : groups) {
+                                if (group != null && group.getFiles() != null) {
+                                    flattened.addAll(group.getFiles());
+                                }
                             }
                         }
+                        flattened = filterManager.apply(flattened);
+                        sortManager.sort(flattened);
                     }
                 } catch (Exception e) {
                     flattened = new ArrayList<>(base);
+                    pageGroups = new ArrayList<Group>();
                 }
 
-                flattened = filterManager.apply(flattened);
-                sortManager.sort(flattened);
                 final List<MediaFile> result = flattened;
+                final List<Group> resultPageGroups = pageGroups;
+                final int resultTagPage = appliedTagPage;
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
                         if (sequence != refreshSequence || isFinishing()) return;
                         synchronized (fullListLock) {
                             fullList = result;
+                        }
+                        tagGroupingActive = groupingByTag;
+                        if (groupingByTag) {
+                            displayedTagGroups = resultPageGroups;
+                            tagGroupPage = resultTagPage;
+                            tagGroupPageSize = requestedPageSize;
+                            windowManager.setWindowSize(requestedPageSize);
+                        } else {
+                            displayedTagGroups = new ArrayList<Group>();
+                            tagGroupPage = 0;
+                            tagGroupPageSize = 0;
+                            windowManager.setWindowSize(getWindowSize());
                         }
                         // Recalculate the highlight by path after every filter,
                         // search, and sort. A numeric index from the old list is
@@ -1520,7 +1637,8 @@ public class MainActivity extends Activity
         thumbnailLoader.evictOutsideWindow(windowPaths);
 
         mediaAdapter.setAbsoluteWindowStart(windowManager.toAbsolute(0));
-        mediaAdapter.setFiles(safeCurrentFiles);
+        if (tagGroupingActive) mediaAdapter.setGroupedGroups(tagGroupsForCurrentWindow());
+        else mediaAdapter.setFiles(safeCurrentFiles);
 
         // If we have a current preview file, re-select it in the (new) window
         if (currentIndex >= 0 && currentIndex < fullList.size()) {
@@ -1734,6 +1852,11 @@ public class MainActivity extends Activity
     }
 
     private void navigateByPage(int direction) {
+        if (tagGroupingActive) {
+            tagGroupPage = Math.max(0, tagGroupPage + (direction > 0 ? 1 : -1));
+            scheduleRefresh();
+            return;
+        }
         if (fullList.isEmpty()) return;
         int page = getWindowSize();
         int next = Math.max(0, Math.min(fullList.size() - 1,
@@ -1977,7 +2100,11 @@ public class MainActivity extends Activity
         refreshSidePanel();
 
         if (galleryModeActive && galleryBrowser != null) {
-            galleryBrowser.scrollToPosition(absoluteIndex);
+            int galleryPosition = tagGroupingActive
+                    ? galleryAdapter.getDisplayPositionForFile(file) : absoluteIndex;
+            if (galleryPosition != RecyclerView.NO_POSITION) {
+                galleryBrowser.scrollToPosition(galleryPosition);
+            }
             updateGalleryMemoryWindow();
         }
     }
@@ -2014,8 +2141,10 @@ public class MainActivity extends Activity
         final List<MediaFile> windowCopy = getCurrentFilesSnapshot();
         if (windowCopy.isEmpty()) return;
         final String targetPath = fullList.get(absoluteIndex).getPath();
-        final int windowPos = findIndexByPath(windowCopy, targetPath);
-        if (windowPos < 0) return;
+        final int windowPos = tagGroupingActive
+                ? absoluteIndex - windowManager.getWindowStart()
+                : findIndexByPath(windowCopy, targetPath);
+        if (windowPos < 0 || windowPos >= windowCopy.size()) return;
 
         fileBrowser.post(new Runnable() {
             @Override public void run() {
@@ -3083,7 +3212,10 @@ private Spinner makeSpinner(String[] options) {
             @Override public boolean onMenuItemClick(android.view.MenuItem item) {
                 switch (item.getTitle().toString()) {
                     case "By File Type": groupManager.setGroupBy(Group.GroupBy.FILE_TYPE); break;
-                    case "By Tag":       groupManager.setGroupBy(Group.GroupBy.TAG);       break;
+                    case "By Tag":
+                        if (groupManager.getCurrent() != Group.GroupBy.TAG) tagGroupPage = 0;
+                        groupManager.setGroupBy(Group.GroupBy.TAG);
+                        break;
                     case "By Date":      groupManager.setGroupBy(Group.GroupBy.DATE);      break;
                     case "By Folder":    groupManager.setGroupBy(Group.GroupBy.FOLDER);    break;
                     case "By Tag Prefix": groupManager.setGroupBy(Group.GroupBy.TAG_PREFIX); break;
@@ -4514,7 +4646,10 @@ private Spinner makeSpinner(String[] options) {
                                 ? file.getPath() : oldCurrentPath);
                 mediaAdapter.updateFile(file);
                 mediaAdapter.notifyHighlightChanged();
-                if (galleryAdapter != null) galleryAdapter.setFiles(fullList);
+                if (galleryAdapter != null) {
+                    if (tagGroupingActive) scheduleRefresh();
+                    else galleryAdapter.setFiles(fullList);
+                }
                 refreshTagBar();
                 updateProgress();
                 updateStatsBarAsync();
@@ -4534,7 +4669,10 @@ private Spinner makeSpinner(String[] options) {
                 currentIndex = findIndexByPath(fullList, oldCurrentPath);
                 mediaAdapter.removeFile(path);
                 mediaAdapter.notifyHighlightChanged();
-                if (galleryAdapter != null) galleryAdapter.setFiles(fullList);
+                if (galleryAdapter != null) {
+                    if (tagGroupingActive) scheduleRefresh();
+                    else galleryAdapter.setFiles(fullList);
+                }
                 refreshTagBar();
                 updateGalleryCount();
                 updateProgress();
@@ -4606,6 +4744,12 @@ private Spinner makeSpinner(String[] options) {
             galleryBrowser.setClipToPadding(false);
             galleryBrowser.setPadding(galleryDp(2), galleryDp(2), galleryDp(2), galleryDp(2));
             galleryLayoutManager = new GridLayoutManager(this, galleryColumns());
+            galleryLayoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+                @Override public int getSpanSize(int position) {
+                    return galleryAdapter != null && galleryAdapter.isGroupHeaderPosition(position)
+                            ? galleryLayoutManager.getSpanCount() : 1;
+                }
+            });
             galleryBrowser.setLayoutManager(galleryLayoutManager);
             galleryBrowser.setAdapter(galleryAdapter);
             galleryBrowser.setHasFixedSize(false);
@@ -4713,6 +4857,8 @@ private Spinner makeSpinner(String[] options) {
                             || !(target instanceof GalleryAdapter.ViewHolder)) return false;
                     int from = source.getAdapterPosition();
                     int to = target.getAdapterPosition();
+                    if (tagGroupingActive || galleryAdapter.isGroupHeaderPosition(from)
+                            || galleryAdapter.isGroupHeaderPosition(to)) return false;
                     if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION
                             || to >= galleryAdapter.getItemCount()) {
                         endGalleryDragOutOfBounds();
@@ -5100,7 +5246,8 @@ private Spinner makeSpinner(String[] options) {
                     }
                     galleryAdapter.setSelectedPaths(selectedPaths);
                 }
-                galleryAdapter.setFiles(fullList);
+                if (tagGroupingActive) galleryAdapter.setGroupedGroups(displayedTagGroups);
+                else galleryAdapter.setFiles(fullList);
                 galleryAdapter.setColumns(galleryColumns());
                 galleryAdapter.setSpacingDp(gallerySpacing());
             }
@@ -5136,7 +5283,10 @@ private Spinner makeSpinner(String[] options) {
 
     private void updateGalleryData() {
         if (galleryCountLabel != null) updateGalleryCount();
-        if (galleryAdapter != null) galleryAdapter.setFiles(fullList);
+        if (galleryAdapter != null) {
+            if (tagGroupingActive) galleryAdapter.setGroupedGroups(displayedTagGroups);
+            else galleryAdapter.setFiles(fullList);
+        }
         if (galleryModeActive) {
             refreshGalleryFilterChips();
             updateGalleryMemoryWindow();
@@ -5407,7 +5557,7 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void beginGalleryDrag(GalleryAdapter.ViewHolder holder) {
-        if (!galleryScrollSettled || galleryFastScrolling) return;
+        if (tagGroupingActive || !galleryScrollSettled || galleryFastScrolling) return;
         if (galleryItemTouchHelper == null || holder == null) return;
         galleryDragging = true;
         galleryDragFrom = holder.getAdapterPosition();

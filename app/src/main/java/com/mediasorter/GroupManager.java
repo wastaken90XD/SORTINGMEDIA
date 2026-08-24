@@ -1,10 +1,13 @@
 package com.mediasorter;
 
 import com.mediasorter.models.Group;
+import com.mediasorter.TagText;
 import com.mediasorter.models.MediaFile;
 import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -103,11 +106,27 @@ public class GroupManager {
         Group untagged = new Group("Untagged", Group.GroupBy.TAG);
         for (MediaFile file : files) {
             if (file == null) continue;
+            boolean added = false;
             List<String> tags = file.getTags();
-            if (tags == null || tags.isEmpty()) untagged.addFile(file);
-            else for (String tag : tags) add(map, tag, Group.GroupBy.TAG, file);
+            if (tags != null) {
+                for (String rawTag : tags) {
+                    String tag = TagText.plain(rawTag);
+                    if (tag.isEmpty()) continue;
+                    add(map, tag, Group.GroupBy.TAG, file);
+                    added = true;
+                }
+            }
+            if (!added) untagged.addFile(file);
         }
         List<Group> result = new ArrayList<Group>(map.values());
+        Collections.sort(result, new Comparator<Group>() {
+            @Override public int compare(Group left, Group right) {
+                int count = Integer.compare(right.getCount(), left.getCount());
+                return count != 0 ? count : left.getLabel().compareToIgnoreCase(right.getLabel());
+            }
+        });
+        // Untagged is intentionally appended after all tag groups, regardless
+        // of its count.
         if (untagged.getCount() > 0) result.add(untagged);
         return result;
     }

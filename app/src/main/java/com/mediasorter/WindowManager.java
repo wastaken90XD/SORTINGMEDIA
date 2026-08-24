@@ -30,6 +30,10 @@ public class WindowManager {
         synchronized (lock) { return windowSize; }
     }
 
+    public int getWindowStart() {
+        synchronized (lock) { return windowStart; }
+    }
+
     public void setFullIndex(List<MediaFile> index) {
         synchronized (lock) {
             this.fullIndex   = index;

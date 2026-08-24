@@ -695,4 +695,14 @@ public class MediaIndexer {
     public List<MediaFile> getIndex() {
         synchronized (index) { return new ArrayList<>(index); }
     }
+
+    /**
+     * Snapshot of the complete unfiltered index. This intentionally bypasses
+     * WindowManager: that class owns only the current display window.
+     */
+    public synchronized List<MediaFile> getFullIndex() {
+        synchronized (index) {
+            return new ArrayList<MediaFile>(index);
+        }
+    }
 }

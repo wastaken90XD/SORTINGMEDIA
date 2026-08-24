@@ -19,6 +19,7 @@ import com.mediasorter.FileStatus;
 import com.mediasorter.GalleryThumbnailLoader;
 import com.mediasorter.R;
 import com.mediasorter.TagText;
+import com.mediasorter.models.Group;
 import com.mediasorter.models.MediaFile;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -45,10 +46,20 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         public final TextView statusBadge;
         public final TextView sequenceBadge;
         public final CheckBox checkBox;
+        public final TextView groupHeader;
+        public final boolean groupHeaderView;
 
         ViewHolder(FrameLayout cell, ImageView thumbnail, TextView filename,
                    TextView tagBadge, TextView statusBadge,
                    TextView sequenceBadge, CheckBox checkBox) {
+            this(cell, thumbnail, filename, tagBadge, statusBadge,
+                    sequenceBadge, checkBox, null, false);
+        }
+
+        ViewHolder(FrameLayout cell, ImageView thumbnail, TextView filename,
+                   TextView tagBadge, TextView statusBadge,
+                   TextView sequenceBadge, CheckBox checkBox,
+                   TextView header, boolean isHeader) {
             super(cell);
             this.cell = cell;
             this.thumbnail = thumbnail;
@@ -57,6 +68,8 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
             this.statusBadge = statusBadge;
             this.sequenceBadge = sequenceBadge;
             this.checkBox = checkBox;
+            this.groupHeader = header;
+            this.groupHeaderView = isHeader;
         }
     }
 
@@ -81,6 +94,23 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     private boolean showSequenceBadge = true;
     private int spacingDp = 4;
     private int columns = 3;
+
+    private static final int TYPE_FILE = 0;
+    private static final int TYPE_GROUP_HEADER = 1;
+    private static class DisplayItem {
+        Group group;
+        MediaFile file;
+        boolean header;
+        DisplayItem(Group value) { group = value; header = true; }
+        DisplayItem(Group value, MediaFile valueFile) {
+            group = value;
+            file = valueFile;
+            header = false;
+        }
+    }
+    private final List<DisplayItem> displayItems = new ArrayList<>();
+    private List<Group> groupedGroups = new ArrayList<>();
+    private boolean groupedMode;
 
     public GalleryAdapter(Context context, GalleryThumbnailLoader loader,
                           FileStatus fileStatus, Listener listener,
@@ -128,11 +158,13 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
             RecyclerView.ViewHolder raw = recyclerView.getChildViewHolder(child);
             if (!(raw instanceof ViewHolder)) continue;
             ViewHolder holder = (ViewHolder) raw;
+            if (holder.groupHeaderView) continue;
             int width = Math.max(1, holder.thumbnail.getWidth());
             int height = Math.max(1, holder.thumbnail.getHeight());
             int position = holder.getAdapterPosition();
-            if (position != RecyclerView.NO_POSITION && position < files.size()) {
-                MediaFile file = files.get(position);
+            if (position != RecyclerView.NO_POSITION && position < getItemCount()) {
+                MediaFile file = getFile(position);
+                if (file == null) continue;
                 boolean alreadyLoaded = holder.thumbnail.getDrawable() != null
                         && file.getPath().equals(holder.thumbnail.getTag());
                 if (alreadyLoaded) continue;
@@ -149,6 +181,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     public void updateDragThumbnailWindow(RecyclerView recyclerView,
                                            List<String> paths,
                                            String draggedPath) {
+        if (groupedMode) return;
         dragThumbnailActive = true;
         draggedThumbnailPath = draggedPath;
         dragThumbnailPaths.clear();
@@ -162,6 +195,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
             RecyclerView.ViewHolder raw = recyclerView.getChildViewHolder(child);
             if (!(raw instanceof ViewHolder)) continue;
             ViewHolder holder = (ViewHolder) raw;
+            if (holder.groupHeaderView) continue;
             Object tag = holder.thumbnail.getTag();
             String path = tag == null ? null : tag.toString();
             if (path != null) attachedPaths.add(path);
@@ -221,18 +255,86 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     }
 
     public void setFiles(List<MediaFile> value) {
+        if (groupedMode) {
+            List<String> groupedSelections = new ArrayList<String>();
+            for (String key : selected) if (key.contains("#gallery-group#")) groupedSelections.add(key);
+            selected.removeAll(groupedSelections);
+        }
+        groupedMode = false;
+        groupedGroups = new ArrayList<Group>();
+        displayItems.clear();
         files = value == null ? new ArrayList<MediaFile>() : new ArrayList<>(value);
         notifyDataSetChanged();
+    }
+
+    /** Gallery section model. Headers are full-width divider rows in MainActivity's grid. */
+    public void setGroupedGroups(List<Group> groups) {
+        Set<String> previousSelected = selectedActualPaths();
+        groupedMode = true;
+        groupedGroups = groups == null ? new ArrayList<Group>() : new ArrayList<>(groups);
+        displayItems.clear();
+        files = new ArrayList<MediaFile>();
+        if (groupedGroups != null) {
+            for (Group group : groupedGroups) {
+                if (group == null || group.getCount() == 0) continue;
+                displayItems.add(new DisplayItem(group));
+                for (MediaFile file : group.getFiles()) {
+                    if (file == null) continue;
+                    displayItems.add(new DisplayItem(group, file));
+                    files.add(file);
+                }
+            }
+        }
+        selected.clear();
+        for (String path : previousSelected) selected.add(firstAppearanceKey(path));
+        notifyDataSetChanged();
+    }
+
+    public boolean isGroupedMode() { return groupedMode; }
+
+    public boolean isGroupHeaderPosition(int position) {
+        DisplayItem item = displayItem(position);
+        return groupedMode && item != null && item.header;
+    }
+
+    private DisplayItem displayItem(int position) {
+        if (!groupedMode || position < 0 || position >= displayItems.size()) return null;
+        return displayItems.get(position);
+    }
+
+    private String appearanceKey(DisplayItem item) {
+        if (item == null || item.file == null) return "";
+        if (!groupedMode || item.group == null) return item.file.getPath();
+        return item.group.getLabel() + "#gallery-group#" + item.file.getPath();
     }
 
     public List<MediaFile> getFiles() { return new ArrayList<>(files); }
 
     public MediaFile getFile(int position) {
+        DisplayItem item = displayItem(position);
+        if (groupedMode) return item == null || item.header ? null : item.file;
         if (position < 0 || position >= files.size()) return null;
         return files.get(position);
     }
 
+    public int getDisplayPositionForFile(MediaFile target) {
+        if (target == null) return RecyclerView.NO_POSITION;
+        if (!groupedMode) {
+            for (int i = 0; i < files.size(); i++) {
+                if (target.getPath().equals(files.get(i).getPath())) return i;
+            }
+            return RecyclerView.NO_POSITION;
+        }
+        for (int i = 0; i < displayItems.size(); i++) {
+            DisplayItem item = displayItems.get(i);
+            if (!item.header && item.file != null
+                    && target.getPath().equals(item.file.getPath())) return i;
+        }
+        return RecyclerView.NO_POSITION;
+    }
+
     public void moveItem(int from, int to) {
+        if (groupedMode) return;
         if (from < 0 || to < 0 || from >= files.size() || to >= files.size()
                 || from == to) return;
         MediaFile file = files.remove(from);
@@ -255,21 +357,50 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     }
 
     public boolean isSelectMode() { return selectMode; }
-    public int getSelectedCount() { return selected.size(); }
+
+    private String firstAppearanceKey(String path) {
+        if (!groupedMode) return path;
+        for (DisplayItem item : displayItems) {
+            if (!item.header && item.file != null && path.equals(item.file.getPath())) {
+                return appearanceKey(item);
+            }
+        }
+        return path;
+    }
+
+    private Set<String> selectedActualPaths() {
+        Set<String> paths = new LinkedHashSet<String>();
+        if (!groupedMode) {
+            paths.addAll(selected);
+            return paths;
+        }
+        for (String key : selected) {
+            String markerText = "#gallery-group#";
+            int marker = key.indexOf(markerText);
+            paths.add(marker >= 0 ? key.substring(marker + markerText.length()) : key);
+        }
+        return paths;
+    }
+
+    public int getSelectedCount() { return selectedActualPaths().size(); }
 
     public void setSelectedPaths(List<String> paths) {
         selected.clear();
-        if (paths != null) selected.addAll(paths);
+        if (paths != null) {
+            for (String path : paths) {
+                if (path != null) selected.add(firstAppearanceKey(path));
+            }
+        }
         selectMode = !selected.isEmpty();
         notifyDataSetChanged();
         notifySelectionChanged();
     }
 
     public List<MediaFile> getSelectedFiles() {
-        List<MediaFile> result = new ArrayList<>();
-        for (String path : selected) {
+        List<MediaFile> result = new ArrayList<MediaFile>();
+        for (String path : selectedActualPaths()) {
             for (MediaFile file : files) {
-                if (path.equals(file.getPath())) {
+                if (file != null && path.equals(file.getPath())) {
                     result.add(file);
                     break;
                 }
@@ -279,34 +410,46 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     }
 
     public List<String> getSelectedPaths() {
-        return new ArrayList<>(selected);
+        return new ArrayList<String>(selectedActualPaths());
     }
 
     public boolean isSelected(String path) {
-        return path != null && selected.contains(path);
+        if (path == null) return false;
+        return selectedActualPaths().contains(path);
     }
 
     public void selectPath(String path) {
         if (path == null) return;
         selectMode = true;
-        if (selected.add(path)) {
+        if (selected.add(firstAppearanceKey(path))) {
             notifyDataSetChanged();
             notifySelectionChanged();
         }
     }
 
-    public void toggleSelection(MediaFile file) {
+    private void toggleSelection(MediaFile file, String selectionKey) {
         if (file == null) return;
         selectMode = true;
-        if (selected.contains(file.getPath())) selected.remove(file.getPath());
-        else selected.add(file.getPath());
+        if (selected.contains(selectionKey)) selected.remove(selectionKey);
+        else selected.add(selectionKey);
         notifyDataSetChanged();
         notifySelectionChanged();
     }
 
+    public void toggleSelection(MediaFile file) {
+        if (file == null) return;
+        toggleSelection(file, firstAppearanceKey(file.getPath()));
+    }
+
     public void selectAll() {
         selectMode = true;
-        for (MediaFile file : files) selected.add(file.getPath());
+        if (groupedMode) {
+            for (DisplayItem item : displayItems) {
+                if (!item.header && item.file != null) selected.add(appearanceKey(item));
+            }
+        } else {
+            for (MediaFile file : files) selected.add(file.getPath());
+        }
         notifyDataSetChanged();
         notifySelectionChanged();
     }
@@ -319,9 +462,18 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
 
     public void invertSelection() {
         selectMode = true;
-        for (MediaFile file : files) {
-            if (selected.contains(file.getPath())) selected.remove(file.getPath());
-            else selected.add(file.getPath());
+        if (groupedMode) {
+            for (DisplayItem item : displayItems) {
+                if (item.header || item.file == null) continue;
+                String key = appearanceKey(item);
+                if (selected.contains(key)) selected.remove(key);
+                else selected.add(key);
+            }
+        } else {
+            for (MediaFile file : files) {
+                if (selected.contains(file.getPath())) selected.remove(file.getPath());
+                else selected.add(file.getPath());
+            }
         }
         notifyDataSetChanged();
         notifySelectionChanged();
@@ -330,21 +482,43 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     public void selectMatching(List<MediaFile> matches) {
         selectMode = true;
         if (matches != null) {
-            for (MediaFile file : matches) selected.add(file.getPath());
+            for (MediaFile file : matches) {
+                if (file != null) selected.add(firstAppearanceKey(file.getPath()));
+            }
         }
         notifyDataSetChanged();
         notifySelectionChanged();
     }
 
     private void notifySelectionChanged() {
-        if (listener != null) listener.onGallerySelectionChanged(selected.size());
+        if (listener != null) listener.onGallerySelectionChanged(getSelectedCount());
     }
 
     // ── RecyclerView ──────────────────────────────────────────────────────────
 
+    @Override
+    public int getItemViewType(int position) {
+        DisplayItem item = displayItem(position);
+        return groupedMode && item != null && item.header
+                ? TYPE_GROUP_HEADER : TYPE_FILE;
+    }
+
     @NonNull
     @Override
     public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        if (viewType == TYPE_GROUP_HEADER) {
+            FrameLayout headerCell = new FrameLayout(context);
+            headerCell.setBackgroundColor(0xFF1A1A2E);
+            TextView header = new TextView(context);
+            header.setTextColor(accentColor);
+            header.setTextSize(12f);
+            header.setGravity(Gravity.CENTER_VERTICAL);
+            header.setPadding(dp(10), dp(4), dp(10), dp(4));
+            headerCell.addView(header, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, dp(40)));
+            return new ViewHolder(headerCell, null, null, null, null, null,
+                    null, header, true);
+        }
         FrameLayout cell = new FrameLayout(context);
         cell.setFocusable(true);
         cell.setClickable(true);
@@ -415,11 +589,17 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position,
                                  @NonNull List<Object> payloads) {
+        DisplayItem item = displayItem(position);
+        if (groupedMode && item != null && item.header) {
+            bindGroupHeader(holder, item);
+            return;
+        }
         if (!payloads.isEmpty()) {
             for (Object payload : payloads) {
                 if ("gallery_scroll".equals(payload)) {
-                    MediaFile file = files.get(position);
-                    if (holder.thumbnail.isAttachedToWindow()) {
+                    MediaFile file = getFile(position);
+                    if (file == null) return;
+                    if (holder.thumbnail != null && holder.thumbnail.isAttachedToWindow()) {
                         holder.thumbnail.setImageDrawable(null);
                     }
                     holder.thumbnail.setAlpha(1.0f);
@@ -431,9 +611,21 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         onBindViewHolder(holder, position);
     }
 
+    private void bindGroupHeader(ViewHolder holder, DisplayItem item) {
+        if (holder.groupHeader == null || item == null || item.group == null) return;
+        holder.groupHeader.setText(item.group.getLabel() + " ("
+                + item.group.getTotalCount() + ")");
+    }
+
     @Override
     public void onBindViewHolder(@NonNull final ViewHolder holder, int position) {
-        final MediaFile file = files.get(position);
+        DisplayItem item = displayItem(position);
+        if (groupedMode && item != null && item.header) {
+            bindGroupHeader(holder, item);
+            return;
+        }
+        final MediaFile file = item == null ? files.get(position) : item.file;
+        final String selectionKey = item == null ? file.getPath() : appearanceKey(item);
         Object previousTag = holder.thumbnail.getTag();
         boolean alreadyLoaded = holder.thumbnail.getDrawable() != null
                 && file.getPath().equals(previousTag);
@@ -456,31 +648,25 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         holder.thumbnail.setLayoutParams(imageLp);
 
         bindBadges(holder, file);
-        bindSelection(holder, file);
+        bindSelection(holder, file, selectionKey);
         applySpacing(holder);
         applyGroupBorder(holder, file);
 
         holder.itemView.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                if (selectMode) {
-                    toggleSelection(file);
-                } else if (listener != null) {
-                    listener.onGalleryFileClick(file);
-                }
+            @Override public void onClick(View view) {
+                if (selectMode) toggleSelection(file, selectionKey);
+                else if (listener != null) listener.onGalleryFileClick(file);
             }
         });
         holder.itemView.setOnLongClickListener(new View.OnLongClickListener() {
-            @Override
-            public boolean onLongClick(View view) {
+            @Override public boolean onLongClick(View view) {
                 if (listener != null) listener.onGalleryLongPress(holder);
                 return true;
             }
         });
         holder.checkBox.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                toggleSelection(file);
+            @Override public void onClick(View view) {
+                toggleSelection(file, selectionKey);
             }
         });
     }
@@ -526,8 +712,8 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         return "";
     }
 
-    private void bindSelection(ViewHolder holder, MediaFile file) {
-        boolean checked = selected.contains(file.getPath());
+    private void bindSelection(ViewHolder holder, MediaFile file, String selectionKey) {
+        boolean checked = selected.contains(selectionKey);
         holder.checkBox.setVisibility(selectMode ? View.VISIBLE : View.GONE);
         holder.checkBox.setChecked(checked);
         if (checked) {
@@ -575,14 +761,15 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     }
 
     public void setDragging(ViewHolder holder, boolean dragging) {
-        if (holder == null) return;
+        if (holder == null || holder.groupHeaderView) return;
         if (!dragging) {
             holder.cell.setScaleX(1.0f);
             holder.cell.setScaleY(1.0f);
             int position = holder.getAdapterPosition();
             if (position != RecyclerView.NO_POSITION && position < files.size()) {
-                applyGroupBorder(holder, files.get(position));
-                bindSelection(holder, files.get(position));
+                MediaFile file = files.get(position);
+                applyGroupBorder(holder, file);
+                bindSelection(holder, file, file.getPath());
             }
             return;
         }
@@ -621,12 +808,14 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     @Override
     public void onViewAttachedToWindow(@NonNull final ViewHolder holder) {
         super.onViewAttachedToWindow(holder);
+        if (holder.groupHeaderView) return;
         holder.itemView.post(new Runnable() {
             @Override
             public void run() {
                 int position = holder.getAdapterPosition();
-                if (position == RecyclerView.NO_POSITION || position >= files.size()) return;
-                MediaFile file = files.get(position);
+                if (position == RecyclerView.NO_POSITION || position >= getItemCount()) return;
+                MediaFile file = getFile(position);
+                if (file == null) return;
                 boolean keepDragBitmap = dragThumbnailActive
                         && file.getPath().equals(draggedThumbnailPath);
                 if ((!keepDragBitmap && fastScrolling) || !holder.itemView.isShown()) return;
@@ -653,6 +842,10 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
 
     @Override
     public void onViewDetachedFromWindow(@NonNull ViewHolder holder) {
+        if (holder.groupHeaderView) {
+            super.onViewDetachedFromWindow(holder);
+            return;
+        }
         Object tag = holder.thumbnail.getTag();
         String path = tag == null ? null : tag.toString();
         boolean keepDragged = dragThumbnailActive && path != null
@@ -668,6 +861,10 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
 
     @Override
     public void onViewRecycled(@NonNull ViewHolder holder) {
+        if (holder.groupHeaderView) {
+            super.onViewRecycled(holder);
+            return;
+        }
         Object tag = holder.thumbnail.getTag();
         String path = tag == null ? null : tag.toString();
         boolean keepDragged = dragThumbnailActive && path != null
@@ -682,7 +879,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     }
 
     @Override
-    public int getItemCount() { return files.size(); }
+    public int getItemCount() { return groupedMode ? displayItems.size() : files.size(); }
 
     private int dp(int value) {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
