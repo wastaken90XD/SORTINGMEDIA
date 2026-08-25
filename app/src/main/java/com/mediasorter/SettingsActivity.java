@@ -53,7 +53,6 @@ public class SettingsActivity extends Activity {
     private boolean refreshingResumeViews;
     private boolean isInitializing = true;
     private EditText randomPatternInput;
-    private String originalTheme;
     private LinearLayout tagListsContainer;
     private LinearLayout foldersContainer;
 
@@ -70,7 +69,6 @@ public class SettingsActivity extends Activity {
         tagManager      = new TagManager(this);
         indexer         = new MediaIndexer();
         settingsPrefs   = getSharedPreferences("settings_prefs", MODE_PRIVATE);
-        originalTheme   = "AppTheme";
 
         buildSettings();
         isInitializing = false;
@@ -1293,18 +1291,6 @@ public class SettingsActivity extends Activity {
 
         // ── 19. Appearance ────────────────────────────────────────────────────
         root.addView(makeTitle("Appearance"));
-
-        String[] themeOptions = {"AppTheme"};
-        final boolean[] themeSpinnerReady = {false};
-        View themeSpinnerRow = makeSpinnerRow("App theme:", themeOptions, 0,
-                new OnSpinnerSelectedListener() {
-                    @Override public void onSelected(String value, int pos) {
-                        if (isInitializing) return;
-                        if (themeSpinnerReady[0] && !value.equals(originalTheme)) recreate();
-                    }
-                });
-        root.addView(themeSpinnerRow);
-        themeSpinnerReady[0] = true;
 
         root.addView(makeCheckBoxRow("Show selection order badges", settingsPrefs.getBoolean("show_seq_labels", true), new OnCheckedChangeListener() {
             @Override public void onChecked(boolean checked) { saveBoolean("show_seq_labels", checked); }
