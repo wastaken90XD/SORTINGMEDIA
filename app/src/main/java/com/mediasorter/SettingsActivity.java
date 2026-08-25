@@ -53,6 +53,9 @@ public class SettingsActivity extends Activity {
     private boolean refreshingResumeViews;
     private boolean isInitializing = true;
     private EditText randomPatternInput;
+    private String originalTheme;
+    private LinearLayout tagListsContainer;
+    private LinearLayout foldersContainer;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,6 +70,7 @@ public class SettingsActivity extends Activity {
         tagManager      = new TagManager(this);
         indexer         = new MediaIndexer();
         settingsPrefs   = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        originalTheme   = "AppTheme";
 
         buildSettings();
         isInitializing = false;
@@ -472,6 +476,95 @@ public class SettingsActivity extends Activity {
                         .format(new java.util.Date())));
     }
 
+    private void refreshTagLists() {
+        if (tagListsContainer == null) return;
+        tagListsContainer.removeAllViews();
+        List<TagList> allLists = tagListManager.getAllLists();
+        for (int i = 0; i < allLists.size(); i++) {
+            tagListsContainer.addView(makeTagListRow(allLists.get(i), i));
+        }
+    }
+
+    private View makeTagListRow(final TagList list, final int index) {
+        LinearLayout listRow = new LinearLayout(this);
+        listRow.setOrientation(LinearLayout.VERTICAL);
+        listRow.setBackgroundColor(0xFF1A1A2E);
+        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        listLp.bottomMargin = 8;
+        listRow.setLayoutParams(listLp);
+        listRow.setPadding(8, 8, 8, 8);
+
+        LinearLayout nameRow = new LinearLayout(this);
+        nameRow.setOrientation(LinearLayout.HORIZONTAL);
+        nameRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView listName = makeLabel(list.getName()
+            + (list.isDefault() ? " (Default)" : "")
+            + "  —  " + list.size() + " tags");
+        listName.setLayoutParams(new LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        nameRow.addView(listName);
+
+        Button btnEdit = makeSmallButton("Edit");
+        btnEdit.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showEditListDialog(index); }
+        });
+        nameRow.addView(btnEdit);
+
+        if (!list.isDefault()) {
+            Button btnDel = makeSmallButton("Delete");
+            btnDel.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    tagListManager.deleteList(index);
+                    refreshTagLists();
+                }
+            });
+            nameRow.addView(btnDel);
+        }
+
+        listRow.addView(nameRow);
+
+        if (!list.getTags().isEmpty()) {
+            TextView tagsPreview = makeLabel(joinTags(list.getTags()));
+            tagsPreview.setTextColor(0xFF888888);
+            tagsPreview.setTextSize(10f);
+            listRow.addView(tagsPreview);
+        }
+        return listRow;
+    }
+
+    private void refreshFolders() {
+        if (foldersContainer == null) return;
+        foldersContainer.removeAllViews();
+        List<String> folders = folderManager.getFolders();
+        if (folders.isEmpty()) {
+            foldersContainer.addView(makeLabel("No folders added"));
+            return;
+        }
+        for (final String folder : folders) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+
+            TextView lbl = makeLabel(folder);
+            lbl.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            row.addView(lbl);
+
+            Button rm = makeButton("Remove");
+            rm.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    folderManager.removeFolder(folder);
+                    refreshFolders();
+                }
+            });
+            row.addView(rm);
+            foldersContainer.addView(row);
+        }
+    }
+
     private void buildSettings() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -629,60 +722,10 @@ public class SettingsActivity extends Activity {
         // ── Tag lists ─────────────────────────────────────────────────────────
         root.addView(makeTitle("Tag Lists"));
 
-        List<TagList> allLists = tagListManager.getAllLists();
-        for (int i = 0; i < allLists.size(); i++) {
-            TagList list = allLists.get(i);
-            final int idx = i;
-
-            LinearLayout listRow = new LinearLayout(this);
-            listRow.setOrientation(LinearLayout.VERTICAL);
-            listRow.setBackgroundColor(0xFF1A1A2E);
-            LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-            listLp.bottomMargin = 8;
-            listRow.setLayoutParams(listLp);
-            listRow.setPadding(8, 8, 8, 8);
-
-            LinearLayout nameRow = new LinearLayout(this);
-            nameRow.setOrientation(LinearLayout.HORIZONTAL);
-            nameRow.setGravity(Gravity.CENTER_VERTICAL);
-
-            TextView listName = makeLabel(list.getName()
-                + (list.isDefault() ? " (Default)" : "")
-                + "  —  " + list.size() + " tags");
-            listName.setLayoutParams(new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-            nameRow.addView(listName);
-
-            Button btnEdit = makeSmallButton("Edit");
-            btnEdit.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) { showEditListDialog(idx); }
-            });
-            nameRow.addView(btnEdit);
-
-            if (!list.isDefault()) {
-                Button btnDel = makeSmallButton("Delete");
-                btnDel.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View v) {
-                        tagListManager.deleteList(idx);
-                        if (!isInitializing) recreate();
-                    }
-                });
-                nameRow.addView(btnDel);
-            }
-
-            listRow.addView(nameRow);
-
-            if (!list.getTags().isEmpty()) {
-                TextView tagsPreview = makeLabel(joinTags(list.getTags()));
-                tagsPreview.setTextColor(0xFF888888);
-                tagsPreview.setTextSize(10f);
-                listRow.addView(tagsPreview);
-            }
-
-            root.addView(listRow);
-        }
+        tagListsContainer = new LinearLayout(this);
+        tagListsContainer.setOrientation(LinearLayout.VERTICAL);
+        root.addView(tagListsContainer);
+        refreshTagLists();
 
         Button btnNewList = makeButton("+ New Tag List");
         btnNewList.setOnClickListener(new View.OnClickListener() {
@@ -700,7 +743,7 @@ public class SettingsActivity extends Activity {
                 Toast.makeText(SettingsActivity.this,
                     added + " tags added to " + tagListManager.getActiveList().getName(),
                     Toast.LENGTH_SHORT).show();
-                if (!isInitializing) recreate();
+                refreshTagLists();
             }
         });
         root.addView(btnBulkActive);
@@ -718,31 +761,10 @@ public class SettingsActivity extends Activity {
         // ── 8. Watched Folders ────────────────────────────────────────────────
         root.addView(makeTitle("Watched Folders"));
 
-        List<String> folders = folderManager.getFolders();
-        if (folders.isEmpty()) {
-            root.addView(makeLabel("No folders added"));
-        } else {
-            for (final String folder : folders) {
-                final LinearLayout row = new LinearLayout(this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(Gravity.CENTER_VERTICAL);
-
-                TextView lbl = makeLabel(folder);
-                lbl.setLayoutParams(new LinearLayout.LayoutParams(
-                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-                row.addView(lbl);
-
-                Button rm = makeButton("Remove");
-                rm.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View v) {
-                        folderManager.removeFolder(folder);
-                        root.removeView(row);
-                    }
-                });
-                row.addView(rm);
-                root.addView(row);
-            }
-        }
+        foldersContainer = new LinearLayout(this);
+        foldersContainer.setOrientation(LinearLayout.VERTICAL);
+        root.addView(foldersContainer);
+        refreshFolders();
 
         Button btnAdd = makeButton("+ Add Folder");
         btnAdd.setOnClickListener(new View.OnClickListener() {
@@ -1278,7 +1300,7 @@ public class SettingsActivity extends Activity {
                 new OnSpinnerSelectedListener() {
                     @Override public void onSelected(String value, int pos) {
                         if (isInitializing) return;
-                        if (themeSpinnerReady[0]) recreate();
+                        if (themeSpinnerReady[0] && !value.equals(originalTheme)) recreate();
                     }
                 });
         root.addView(themeSpinnerRow);
@@ -1811,7 +1833,7 @@ public class SettingsActivity extends Activity {
                     String name = input.getText().toString().trim();
                     if (!name.isEmpty()) {
                         tagListManager.createList(name);
-                        if (!isInitializing) recreate();
+                        refreshTagLists();
                     }
                 }
             })
@@ -1938,8 +1960,10 @@ public class SettingsActivity extends Activity {
                 @Override
                 public void onClick(DialogInterface d, int w) {
                     String newName = nameInput.getText().toString().trim();
-                    if (!newName.isEmpty()) tagListManager.renameList(listIndex, newName);
-                    recreate();
+                    if (!newName.isEmpty()) {
+                        tagListManager.renameList(listIndex, newName);
+                        refreshTagLists();
+                    }
                 }
             })
             .setNegativeButton("Cancel", null)
@@ -1960,8 +1984,8 @@ public class SettingsActivity extends Activity {
                     String path = input.getText().toString().trim();
                     if (!path.isEmpty()) {
                         folderManager.addFolder(path);
+                        refreshFolders();
                         Toast.makeText(SettingsActivity.this, "Folder added", Toast.LENGTH_SHORT).show();
-                        if (!isInitializing) recreate();
                     }
                 }
             })
