@@ -166,14 +166,8 @@ public class MainActivity extends Activity
             java.util.concurrent.Executors.newSingleThreadExecutor();
     private long refreshSequence;
     private long statsSequence;
-    private long volumeDownTime;
-    private long volumeUpTime;
     private boolean infoOverlayVisible;
     private boolean isGestureExecuting;
-    private boolean volumeLongHandledUp;
-    private boolean volumeLongHandledDown;
-    private Runnable volumeLongPressUpRunnable;
-    private Runnable volumeLongPressDownRunnable;
     private int lastSweepSelectedIndex = RecyclerView.NO_POSITION;
     private boolean sweepTouchActive;
     private boolean sweepMoved;
@@ -333,8 +327,6 @@ public class MainActivity extends Activity
         thumbnailLoader.shutdown();
         if (galleryThumbnailLoader != null) galleryThumbnailLoader.shutdown();
         if (searchHistoryPopup != null) searchHistoryPopup.dismiss();
-        cancelVolumeLongPress(android.view.KeyEvent.KEYCODE_VOLUME_UP);
-        cancelVolumeLongPress(android.view.KeyEvent.KEYCODE_VOLUME_DOWN);
         if (explorerWidthLayoutListener != null && fileBrowser != null
                 && fileBrowser.getViewTreeObserver().isAlive()) {
             fileBrowser.getViewTreeObserver().removeOnGlobalLayoutListener(explorerWidthLayoutListener);
@@ -380,6 +372,13 @@ public class MainActivity extends Activity
 
     @Override
     public boolean onKeyDown(int keyCode, android.view.KeyEvent event) {
+        if (isVolumeKey(keyCode)) {
+            if (isTextInputFocused()) return super.onKeyDown(keyCode, event);
+            android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+            if (!sp.getBoolean("volume_keys_enabled", true)) return super.onKeyDown(keyCode, event);
+            executeVolumeMapping(keyCode);
+            return true;
+        }
         if (isGestureInputKey(keyCode) && isGestureExecuting) return true;
         if (keyCode == android.view.KeyEvent.KEYCODE_MENU && gestureSettings != null) {
             List<GestureSettings.GestureStep> hardware = gestureSettings.getSteps(
@@ -416,77 +415,28 @@ public class MainActivity extends Activity
             return true;
         }
 
-        if (isVolumeKey(keyCode)) {
-            if (isTextInputFocused()) return super.onKeyDown(keyCode, event);
-            android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
-            if (!sp.getBoolean("volume_keys_enabled", true)) return super.onKeyDown(keyCode, event);
-            long now = event == null ? System.currentTimeMillis() : event.getEventTime();
-            if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) volumeUpTime = now;
-            else volumeDownTime = now;
-            if (event == null || event.getRepeatCount() == 0) {
-                if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) volumeLongHandledUp = false;
-                else volumeLongHandledDown = false;
-                scheduleVolumeLongPress(keyCode);
-            }
-            List<GestureSettings.GestureStep> steps = getVolumeSteps(keyCode, false);
-            if (previewManager != null) previewManager.showHintLabel(gestureSettings.getSummary(steps));
-            return true;
-        }
-
         return super.onKeyDown(keyCode, event);
-    }
-
-    private void scheduleVolumeLongPress(final int keyCode) {
-        cancelVolumeLongPress(keyCode);
-        Runnable runnable = new Runnable() {
-            @Override public void run() {
-                if (isTextInputFocused()) return;
-                if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) volumeLongHandledUp = true;
-                else volumeLongHandledDown = true;
-                if (previewManager != null) previewManager.hideHintLabel();
-                executeGestureSteps(getVolumeSteps(keyCode, true));
-            }
-        };
-        long delay = getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                .getInt("long_press_duration", 500);
-        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
-            volumeLongPressUpRunnable = runnable;
-        } else {
-            volumeLongPressDownRunnable = runnable;
-        }
-        mainHandler.postDelayed(runnable, Math.max(1, delay));
-    }
-
-    private void cancelVolumeLongPress(int keyCode) {
-        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
-            if (volumeLongPressUpRunnable != null) mainHandler.removeCallbacks(volumeLongPressUpRunnable);
-            volumeLongPressUpRunnable = null;
-        } else {
-            if (volumeLongPressDownRunnable != null) mainHandler.removeCallbacks(volumeLongPressDownRunnable);
-            volumeLongPressDownRunnable = null;
-        }
     }
 
     @Override
     public boolean onKeyLongPress(int keyCode, android.view.KeyEvent event) {
-        if (!isVolumeKey(keyCode) || isTextInputFocused()) {
-            return super.onKeyLongPress(keyCode, event);
+        if (isVolumeKey(keyCode)) {
+            if (isTextInputFocused()) return super.onKeyLongPress(keyCode, event);
+            android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+            if (!sp.getBoolean("volume_keys_enabled", true)) return super.onKeyLongPress(keyCode, event);
+            return true;
         }
-        android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
-        if (!sp.getBoolean("volume_keys_enabled", true)) return super.onKeyLongPress(keyCode, event);
-        boolean alreadyHandled = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
-                ? volumeLongHandledUp : volumeLongHandledDown;
-        if (alreadyHandled) return true;
-        cancelVolumeLongPress(keyCode);
-        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) volumeLongHandledUp = true;
-        else volumeLongHandledDown = true;
-        if (previewManager != null) previewManager.hideHintLabel();
-        executeGestureSteps(getVolumeSteps(keyCode, true));
-        return true;
+        return super.onKeyLongPress(keyCode, event);
     }
 
     @Override
     public boolean onKeyUp(int keyCode, android.view.KeyEvent event) {
+        if (isVolumeKey(keyCode)) {
+            if (isTextInputFocused()) return super.onKeyUp(keyCode, event);
+            android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+            if (!sp.getBoolean("volume_keys_enabled", true)) return super.onKeyUp(keyCode, event);
+            return true;
+        }
         if (isGestureInputKey(keyCode) && isGestureExecuting) {
             isGestureExecuting = false;
             return true;
@@ -499,30 +449,6 @@ public class MainActivity extends Activity
             if (previewManager != null) previewManager.hideHintLabel();
             List<GestureSettings.GestureStep> steps = getDpadStepsForKey(keyCode);
             executeDpad(steps);
-            return true;
-        }
-
-        if (isVolumeKey(keyCode)) {
-            if (isTextInputFocused()) return super.onKeyUp(keyCode, event);
-            boolean longHandled = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
-                    ? volumeLongHandledUp : volumeLongHandledDown;
-            cancelVolumeLongPress(keyCode);
-            if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) volumeLongHandledUp = false;
-            else volumeLongHandledDown = false;
-            if (longHandled) {
-                if (previewManager != null) previewManager.hideHintLabel();
-                return true;
-            }
-            android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
-            if (!sp.getBoolean("volume_keys_enabled", true)) return super.onKeyUp(keyCode, event);
-            long now = event == null ? System.currentTimeMillis() : event.getEventTime();
-            long down = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
-                    ? volumeUpTime : volumeDownTime;
-            long duration = down <= 0 ? 0 : now - down;
-            int threshold = sp.getInt("long_press_duration", 500);
-            List<GestureSettings.GestureStep> steps = getVolumeSteps(keyCode, duration >= threshold);
-            if (previewManager != null) previewManager.hideHintLabel();
-            executeGestureSteps(steps);
             return true;
         }
 
@@ -567,6 +493,31 @@ public class MainActivity extends Activity
             return longPress ? gestureSettings.getVolumeUpLong() : gestureSettings.getVolumeUp();
         }
         return longPress ? gestureSettings.getVolumeDownLong() : gestureSettings.getVolumeDown();
+    }
+
+    private void executeVolumeMapping(int keyCode) {
+        List<GestureSettings.GestureStep> steps = getVolumeSteps(keyCode, false);
+        if (steps == null || steps.isEmpty()) {
+            if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) navigateNext();
+            else navigatePrev();
+            return;
+        }
+        for (GestureSettings.GestureStep step : steps) {
+            if (step == null || step.action == null) continue;
+            if (step.action == GestureSettings.GestureAction.NEXT_FILE) {
+                navigateNext();
+            } else if (step.action == GestureSettings.GestureAction.PREV_FILE) {
+                navigatePrev();
+            } else if (step.action == GestureSettings.GestureAction.APPLY_TAG) {
+                if (step.tag != null && !step.tag.isEmpty()) applyQuickTagToCurrent(step.tag);
+            } else if (step.action == GestureSettings.GestureAction.MACRO) {
+                executeMacro(step.tag);
+            } else if (step.action == GestureSettings.GestureAction.REPEAT_LAST_MACRO) {
+                executeRepeatLastMacro();
+            } else {
+                executeAction(step.action);
+            }
+        }
     }
 
     private boolean isTextInputFocused() {
