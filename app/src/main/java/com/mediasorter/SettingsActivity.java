@@ -69,6 +69,7 @@ public class SettingsActivity extends Activity {
         settingsPrefs   = getSharedPreferences("settings_prefs", MODE_PRIVATE);
 
         buildSettings();
+        isInitializing = false;
     }
 
     @Override
