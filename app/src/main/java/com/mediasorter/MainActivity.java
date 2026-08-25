@@ -57,24 +57,14 @@ public class MainActivity extends Activity
 
     private static final Object IMPORT_RECREATE_LOCK = new Object();
     private static java.lang.ref.WeakReference<MainActivity> activeInstance;
-    private static boolean importRecreateScheduled;
 
-    /** Recreate the main screen once, after the import commits have flushed. */
+    /** Recreate the main screen once the import dialog has been dismissed. */
     public static void requestRecreateAfterImport() {
+        MainActivity activity = null;
         synchronized (IMPORT_RECREATE_LOCK) {
-            if (importRecreateScheduled) return;
-            importRecreateScheduled = true;
+            if (activeInstance != null) activity = activeInstance.get();
         }
-        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
-            @Override public void run() {
-                MainActivity activity = null;
-                synchronized (IMPORT_RECREATE_LOCK) {
-                    if (activeInstance != null) activity = activeInstance.get();
-                    importRecreateScheduled = false;
-                }
-                if (activity != null && !activity.isFinishing()) activity.recreate();
-            }
-        }, 200L);
+        if (activity != null && !activity.isFinishing()) activity.recreate();
     }
 
     private BatchRenameManager batchRenameManager = new BatchRenameManager();

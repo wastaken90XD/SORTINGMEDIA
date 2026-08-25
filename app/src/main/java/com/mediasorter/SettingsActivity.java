@@ -975,10 +975,6 @@ public class SettingsActivity extends Activity {
                                             summary += "\n" + res.failedKeys + " settings could not be verified and were skipped.";
                                         }
 
-                                        // All writes and verification are complete; delay
-                                        // the one MainActivity recreation to let slow API 21
-                                        // storage finish flushing.
-                                        MainActivity.requestRecreateAfterImport();
                                         final String importSummary = summary;
                                         new AlertDialog.Builder(SettingsActivity.this)
                                                 .setTitle("Import Successful")
@@ -986,10 +982,12 @@ public class SettingsActivity extends Activity {
                                                 .setPositiveButton("OK", new DialogInterface.OnClickListener() {
                                                     @Override
                                                     public void onClick(DialogInterface d3, int w3) {
-                                                        // MainActivity applies the imported values in place from
-                                                        // onResume; do not recreate this screen or start a loop.
+                                                        // Dismiss first so MainActivity cannot recreate while this
+                                                        // success dialog is still visible.
+                                                        d3.dismiss();
                                                         setResult(RESULT_OK);
                                                         finish();
+                                                        MainActivity.requestRecreateAfterImport();
                                                     }
                                                 })
                                                 .show();

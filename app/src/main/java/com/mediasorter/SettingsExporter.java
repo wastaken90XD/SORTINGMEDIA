@@ -72,6 +72,9 @@ public final class SettingsExporter {
     private static final Set<String> FILE_STATUS_KEYS = new HashSet<String>(Arrays.asList(
             "skipped", "flagged", "done"));
 
+    private static final Set<String> DIRECT_IMPORT_PREFS = new HashSet<String>(Arrays.asList(
+            "gesture_prefs"));
+
     public static class ApplyResult {
         public int preferencesCount;
         public int foldersCount;
@@ -317,7 +320,8 @@ public final class SettingsExporter {
             Iterator<String> preferenceNames = preferences.keys();
             while (preferenceNames.hasNext()) {
                 String prefsName = preferenceNames.next();
-                if (!isKnownPrefsFile(prefsName) || isStructuredPrefs(prefsName)) continue;
+                if (!isKnownPrefsFile(prefsName) || isStructuredPrefs(prefsName)
+                        || DIRECT_IMPORT_PREFS.contains(prefsName)) continue;
                 JSONObject values = preferences.optJSONObject(prefsName);
                 if (values == null) continue;
                 applyPreferenceObject(context, prefsName, values, result);
@@ -391,10 +395,11 @@ public final class SettingsExporter {
                     recordFailure(result, "gesture_prefs." + key, error);
                 }
             }
-            // Preserve additional known gesture values from the preferences
-            // object (dpad toggle, last macro id, etc.).
+            // gesture_prefs is handled above and excluded from the preferences
+            // overlay to avoid writing it a second time.
             JSONObject gesturePrefsObject = preferences.optJSONObject("gesture_prefs");
-            if (gesturePrefsObject != null) {
+            if (gesturePrefsObject != null
+                    && !DIRECT_IMPORT_PREFS.contains("gesture_prefs")) {
                 applyPreferenceObjectWithoutClear(context, "gesture_prefs", gesturePrefsObject, result);
             }
 
