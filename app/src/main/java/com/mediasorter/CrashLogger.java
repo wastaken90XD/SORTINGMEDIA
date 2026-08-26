@@ -23,38 +23,50 @@ public class CrashLogger implements Thread.UncaughtExceptionHandler {
 
     private static final String TAG = "CrashLogger";
     private static final String LOG_FILE = "crash_log.txt";
-    private static final File CRASH_DIRECTORY =
-            new File("/sdcard/SortingMedia/crash_logs");
     private static final Object WRITE_LOCK = new Object();
     private static volatile boolean installed = false;
+    private static volatile Context applicationContext;
 
     private final Context context;
     private final Thread.UncaughtExceptionHandler defaultHandler;
 
     private CrashLogger(Context context) {
-        this.context = context.getApplicationContext();
+        Context appContext = context == null ? null : context.getApplicationContext();
+        this.context = appContext == null ? context : appContext;
         this.defaultHandler = Thread.getDefaultUncaughtExceptionHandler();
     }
 
     public static void init(Context context) {
+        Context appContext = context == null ? null : context.getApplicationContext();
+        if (appContext == null) appContext = context;
         synchronized (WRITE_LOCK) {
             if (installed) return;
+            applicationContext = appContext;
             installed = true;
-            Thread.setDefaultUncaughtExceptionHandler(new CrashLogger(context));
+            Thread.setDefaultUncaughtExceptionHandler(new CrashLogger(appContext));
         }
     }
 
+    public static File getCrashLogDirectory(Context context) {
+        if (context == null) return null;
+        File external = context.getExternalFilesDir(null);
+        File base = external != null ? external : context.getFilesDir();
+        return new File(base, "crash_logs");
+    }
+
     public static File getCrashLogDirectory() {
-        return CRASH_DIRECTORY;
+        return getCrashLogDirectory(applicationContext);
     }
 
     @Override
     public void uncaughtException(Thread thread, Throwable throwable) {
         try {
             long timestamp = System.currentTimeMillis();
-            File directory = getCrashLogDirectory();
-            if ((!directory.exists() && !directory.mkdirs()) || !directory.isDirectory()) {
-                Log.e(TAG, "Could not create crash log directory: " + directory.getAbsolutePath());
+            File directory = getCrashLogDirectory(context);
+            if (directory == null
+                    || ((!directory.exists() && !directory.mkdirs()) || !directory.isDirectory())) {
+                String directoryPath = directory == null ? "null" : directory.getAbsolutePath();
+                Log.e(TAG, "Could not create crash log directory: " + directoryPath);
             } else {
                 File logFile = new File(directory, "crash_" + timestamp + ".txt");
                 StringWriter stackWriter = new StringWriter();
@@ -108,7 +120,7 @@ public class CrashLogger implements Thread.UncaughtExceptionHandler {
 
     public static File[] listCrashLogs() {
         File directory = getCrashLogDirectory();
-        if (!directory.exists() || !directory.isDirectory()) return new File[0];
+        if (directory == null || !directory.exists() || !directory.isDirectory()) return new File[0];
         File[] files = directory.listFiles(new FilenameFilter() {
             @Override public boolean accept(File dir, String name) {
                 return name != null && name.startsWith("crash_") && name.endsWith(".txt");
@@ -143,7 +155,7 @@ public class CrashLogger implements Thread.UncaughtExceptionHandler {
     public static boolean deleteCrashLog(File file) {
         if (file == null || !file.isFile()) return false;
         File directory = getCrashLogDirectory();
-        if (file.getParentFile() == null
+        if (directory == null || file.getParentFile() == null
                 || !directory.getAbsolutePath().equals(file.getParentFile().getAbsolutePath())) {
             return false;
         }
