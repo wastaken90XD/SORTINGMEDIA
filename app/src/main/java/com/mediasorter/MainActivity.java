@@ -197,6 +197,12 @@ public class MainActivity extends Activity
             activeInstance = new java.lang.ref.WeakReference<MainActivity>(this);
         }
         setContentView(R.layout.activity_main);
+        View activityContent = findViewById(android.R.id.content);
+        if (activityContent != null) {
+            activityContent.setFocusable(true);
+            activityContent.setFocusableInTouchMode(true);
+            activityContent.requestFocus();
+        }
         initManagers();  // ← must be first
         initAdapters();  // ← depends on thumbnailLoader from initManagers
         initViews();
