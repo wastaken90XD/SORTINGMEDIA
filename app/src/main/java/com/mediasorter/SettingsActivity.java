@@ -13,6 +13,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
+import android.util.Log;
 import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.Gravity;
@@ -39,8 +40,11 @@ import com.mediasorter.models.MediaFile;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public class SettingsActivity extends Activity {
+
+    private static final String LOG_TAG = "SettingsActivity";
 
     private CacheManager    cacheManager;
     private FolderManager   folderManager;
@@ -83,8 +87,9 @@ public class SettingsActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        isInitializing = true;
-        super.onCreate(savedInstanceState);
+        try {
+            isInitializing = true;
+            super.onCreate(savedInstanceState);
         cacheManager    = new CacheManager(this);
         folderManager   = new FolderManager(this);
         thumbnailLoader = new ThumbnailLoader(this);
@@ -99,8 +104,12 @@ public class SettingsActivity extends Activity {
         indexer         = new MediaIndexer();
         settingsPrefs   = getSharedPreferences("settings_prefs", MODE_PRIVATE);
 
-        buildSettings();
-        isInitializing = false;
+            buildSettings();
+            isInitializing = false;
+        } catch (Throwable error) {
+            logInitializationFailure("onCreate", error);
+            rethrowInitializationFailure(error);
+        }
     }
 
     @Override
@@ -376,6 +385,39 @@ public class SettingsActivity extends Activity {
         } finally {
             refreshingResumeViews = false;
         }
+    }
+
+    private void logInitializationFailure(String stage, Throwable error) {
+        Log.e(LOG_TAG, stage + " failed", error);
+        String message = error == null ? "Unknown error" : error.getMessage();
+        if (message == null || message.isEmpty()) message = String.valueOf(error);
+        try {
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        } catch (Throwable toastError) {
+            Log.e(LOG_TAG, "Could not show initialization failure Toast", toastError);
+        }
+    }
+
+    private void rethrowInitializationFailure(Throwable error) {
+        if (error instanceof Error) throw (Error) error;
+        if (error instanceof RuntimeException) throw (RuntimeException) error;
+        throw new RuntimeException(error);
+    }
+
+    private void logImportedPreferenceValues() {
+        logPreferenceValues("settings_prefs");
+        logPreferenceValues("gesture_prefs");
+        logPreferenceValues("organizer_prefs");
+    }
+
+    private void logPreferenceValues(String prefsName) {
+        SharedPreferences prefs = getSharedPreferences(prefsName, MODE_PRIVATE);
+        Log.e(LOG_TAG, "Imported values begin: " + prefsName);
+        for (Map.Entry<String, ?> entry : prefs.getAll().entrySet()) {
+            Log.e(LOG_TAG, prefsName + "[" + entry.getKey() + "]="
+                    + String.valueOf(entry.getValue()));
+        }
+        Log.e(LOG_TAG, "Imported values end: " + prefsName);
     }
 
     private void setVisibilityIfChanged(View view, int visibility) {
@@ -1207,7 +1249,8 @@ public class SettingsActivity extends Activity {
     }
 
     private void buildSettings() {
-        LinearLayout root = new LinearLayout(this);
+        try {
+            LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(0xFF121212);
         root.setPadding(32, 32, 32, 32);
@@ -1629,6 +1672,7 @@ public class SettingsActivity extends Activity {
                                                         // Dismiss first so MainActivity cannot recreate while this
                                                         // success dialog is still visible.
                                                         d3.dismiss();
+                                                        logImportedPreferenceValues();
                                                         setResult(RESULT_OK);
                                                         finish();
                                                         MainActivity.requestRecreateAfterImport();
@@ -1958,8 +2002,12 @@ public class SettingsActivity extends Activity {
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
-        setContentView(scroll);
-        isInitializing = false;
+            setContentView(scroll);
+            isInitializing = false;
+        } catch (Throwable error) {
+            logInitializationFailure("buildSettings", error);
+            rethrowInitializationFailure(error);
+        }
     }
 
     // ── Helper methods for Expanded Settings ──────────────────────────────────
