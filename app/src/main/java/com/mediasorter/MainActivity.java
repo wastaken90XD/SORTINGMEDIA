@@ -44,6 +44,7 @@ import com.mediasorter.models.Group;
 import com.mediasorter.models.MediaFile;
 import com.mediasorter.models.TagList;
 import com.mediasorter.models.Tag;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -5532,6 +5533,7 @@ private Spinner makeSpinner(String[] options) {
         addOverflowHeader(menu, "App");
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_OPEN_SETTINGS);
         addOverflowAction(menu, actionByTitle, visible, GestureConstants.ACTION_EXPORT_SETTINGS);
+        addOverflowCustom(menu, actionByTitle, "View Crash Logs", "VIEW_CRASH_LOGS");
         android.view.MenuItem about = menu.add("About");
         actionByTitle.put("About", "ABOUT");
 
@@ -5563,12 +5565,62 @@ private Spinner makeSpinner(String[] options) {
                 if ("ABOUT".equals(id)) showAboutFromOverflow();
                 else if ("GALLERY_SETTINGS".equals(id)) showGallerySettings();
                 else if ("RUN_RULES".equals(id)) openRules();
+                else if ("VIEW_CRASH_LOGS".equals(id)) showCrashLogsDialog();
                 else if (id != null) performToolbarAction(id);
                 else return false;
                 return true;
             }
         });
         popup.show();
+    }
+
+    private void showCrashLogsDialog() {
+        final File[] logs = CrashLogger.listCrashLogs();
+        if (logs.length == 0) {
+            Toast.makeText(this, "No crash logs found", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] names = new String[logs.length];
+        for (int i = 0; i < logs.length; i++) names[i] = logs[i].getName();
+        new AlertDialog.Builder(this)
+                .setTitle("Crash Logs")
+                .setItems(names, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        showCrashLogContents(logs[which]);
+                    }
+                })
+                .setNegativeButton("Close", null)
+                .show();
+    }
+
+    private void showCrashLogContents(final File file) {
+        if (file == null || !file.exists()) {
+            Toast.makeText(this, "Crash log is unavailable", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        TextView contents = new TextView(this);
+        contents.setText(CrashLogger.readCrashLog(file));
+        contents.setTextColor(0xFFCCCCCC);
+        contents.setTextSize(11f);
+        contents.setTextIsSelectable(true);
+        contents.setPadding(16, 16, 16, 16);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(contents);
+        new AlertDialog.Builder(this)
+                .setTitle(file.getName())
+                .setView(scroll)
+                .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        if (CrashLogger.deleteCrashLog(file)) {
+                            Toast.makeText(MainActivity.this, "Crash log deleted", Toast.LENGTH_SHORT).show();
+                        } else {
+                            Toast.makeText(MainActivity.this, "Could not delete crash log", Toast.LENGTH_SHORT).show();
+                        }
+                        showCrashLogsDialog();
+                    }
+                })
+                .setNegativeButton("Close", null)
+                .show();
     }
 
     private void addOverflowCustom(android.view.Menu menu, Map<String, String> actionByTitle,
