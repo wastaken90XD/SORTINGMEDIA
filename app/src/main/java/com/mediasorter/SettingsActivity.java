@@ -10,11 +10,16 @@ import android.content.SharedPreferences;
 import com.mediasorter.features.RandomGenerator;
 import org.json.JSONObject;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -54,6 +59,26 @@ public class SettingsActivity extends Activity {
     private boolean isInitializing = true;
     private EditText randomPatternInput;
     private LinearLayout tagListsContainer;
+    private LinearLayout combosContainer;
+    private boolean comboRecording;
+    private ArrayList<String> comboRecordingSequence;
+    private TextView comboRecordingView;
+    private final Handler comboRecordingHandler = new Handler(Looper.getMainLooper());
+    private Runnable comboRecordingLongRunnable;
+    private float comboTouchDownX;
+    private float comboTouchDownY;
+    private long comboTouchDownTime;
+    private boolean comboTouchMoved;
+    private boolean comboTouchTwoFinger;
+    private boolean comboTouchLong;
+    private boolean comboTouchIgnoring;
+    private long comboLastTapTime;
+    private int comboLastKeyCode = -1;
+    private String comboLastKeyInput;
+    private View comboRecordButton;
+    private View comboStopButton;
+    private View comboInputButton;
+    private View comboActionButton;
     private LinearLayout foldersContainer;
 
     @Override
@@ -64,6 +89,10 @@ public class SettingsActivity extends Activity {
         folderManager   = new FolderManager(this);
         thumbnailLoader = new ThumbnailLoader(this);
         gestureSettings = new GestureSettings(this);
+        if (gestureSettings.consumeMacroComboNotice()) {
+            Toast.makeText(this, "Macro gestures converted to combos. Check Gesture Settings.",
+                    Toast.LENGTH_LONG).show();
+        }
         initializeTagListDefaultsIfMissing();
         tagListManager  = new TagListManager(this);
         tagManager      = new TagManager(this);
@@ -72,6 +101,224 @@ public class SettingsActivity extends Activity {
 
         buildSettings();
         isInitializing = false;
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (comboRecording) {
+            String inputId = comboKeyInput(event.getKeyCode());
+            if (inputId != null) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (event.getRepeatCount() == 0) {
+                        comboLastKeyCode = event.getKeyCode();
+                        comboLastKeyInput = inputId;
+                        recordComboInput(inputId);
+                        scheduleComboRecordingVolumeLong(event.getKeyCode());
+                    }
+                    return true;
+                }
+                if (event.getAction() == KeyEvent.ACTION_UP) {
+                    cancelComboRecordingVolumeLong();
+                    comboLastKeyCode = -1;
+                    comboLastKeyInput = null;
+                    return true;
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    public boolean onKeyLongPress(int keyCode, KeyEvent event) {
+        if (comboRecording) {
+            String longInput = comboLongKeyInput(keyCode);
+            if (longInput != null) {
+                recordComboLongInput(keyCode, longInput);
+                return true;
+            }
+        }
+        return super.onKeyLongPress(keyCode, event);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        if (comboRecording) recordComboTouch(event);
+        return super.dispatchTouchEvent(event);
+    }
+
+    private String comboKeyInput(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_UP: return GestureConstants.INPUT_DPAD_UP;
+            case KeyEvent.KEYCODE_DPAD_DOWN: return GestureConstants.INPUT_DPAD_DOWN;
+            case KeyEvent.KEYCODE_DPAD_LEFT: return GestureConstants.INPUT_DPAD_LEFT;
+            case KeyEvent.KEYCODE_DPAD_RIGHT: return GestureConstants.INPUT_DPAD_RIGHT;
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER: return GestureConstants.INPUT_DPAD_CENTER;
+            case KeyEvent.KEYCODE_VOLUME_UP: return GestureConstants.INPUT_VOLUME_UP;
+            case KeyEvent.KEYCODE_VOLUME_DOWN: return GestureConstants.INPUT_VOLUME_DOWN;
+            case KeyEvent.KEYCODE_BACK: return GestureConstants.INPUT_HARDWARE_BACK;
+            case KeyEvent.KEYCODE_MENU: return GestureConstants.INPUT_HARDWARE_MENU;
+            default: return null;
+        }
+    }
+
+    private String comboLongKeyInput(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_UP: return GestureConstants.INPUT_DPAD_UP_LONG;
+            case KeyEvent.KEYCODE_DPAD_DOWN: return GestureConstants.INPUT_DPAD_DOWN_LONG;
+            case KeyEvent.KEYCODE_DPAD_LEFT: return GestureConstants.INPUT_DPAD_LEFT_LONG;
+            case KeyEvent.KEYCODE_DPAD_RIGHT: return GestureConstants.INPUT_DPAD_RIGHT_LONG;
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER: return GestureConstants.INPUT_DPAD_CENTER_LONG;
+            case KeyEvent.KEYCODE_VOLUME_UP: return GestureConstants.INPUT_VOLUME_UP_LONG;
+            case KeyEvent.KEYCODE_VOLUME_DOWN: return GestureConstants.INPUT_VOLUME_DOWN_LONG;
+            case KeyEvent.KEYCODE_BACK: return GestureConstants.INPUT_BACK_LONG;
+            case KeyEvent.KEYCODE_MENU: return GestureConstants.INPUT_HARDWARE_MENU_LONG;
+            default: return null;
+        }
+    }
+
+    private void recordComboLongInput(int keyCode, String longInput) {
+        if (longInput.equals(comboLastKeyInput)) return;
+        if (comboLastKeyCode == keyCode && comboLastKeyInput != null
+                && !comboRecordingSequence.isEmpty()
+                && comboLastKeyInput.equals(comboRecordingSequence.get(
+                        comboRecordingSequence.size() - 1))) {
+            comboRecordingSequence.remove(comboRecordingSequence.size() - 1);
+        }
+        comboLastKeyCode = keyCode;
+        comboLastKeyInput = longInput;
+        recordComboInput(longInput);
+    }
+
+    private void scheduleComboRecordingVolumeLong(final int keyCode) {
+        cancelComboRecordingVolumeLong();
+        comboRecordingLongRunnable = new Runnable() {
+            @Override public void run() {
+                if (!comboRecording || comboLastKeyCode != keyCode) return;
+                String longInput = comboLongKeyInput(keyCode);
+                if (longInput != null) recordComboLongInput(keyCode, longInput);
+            }
+        };
+        int delay = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getInt("long_press_duration", 500);
+        comboRecordingHandler.postDelayed(comboRecordingLongRunnable, Math.max(1, delay));
+    }
+
+    private void cancelComboRecordingVolumeLong() {
+        if (comboRecordingLongRunnable != null) {
+            comboRecordingHandler.removeCallbacks(comboRecordingLongRunnable);
+            comboRecordingLongRunnable = null;
+        }
+    }
+
+    private void recordComboTouch(MotionEvent event) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            comboTouchIgnoring = isComboControlTouch(event);
+            if (comboTouchIgnoring) return;
+            comboTouchDownX = event.getX();
+            comboTouchDownY = event.getY();
+            comboTouchDownTime = event.getEventTime();
+            comboTouchMoved = false;
+            comboTouchTwoFinger = event.getPointerCount() > 1;
+            comboTouchLong = false;
+            comboRecordingHandler.postDelayed(comboRecordingLongRunnable = new Runnable() {
+                @Override public void run() {
+                    if (comboRecording && !comboTouchIgnoring && !comboTouchMoved) {
+                        comboTouchLong = true;
+                        recordComboInput(GestureConstants.INPUT_LONG_PRESS_PREVIEW);
+                    }
+                }
+            }, ViewConfiguration.getLongPressTimeout());
+            return;
+        }
+        if (comboTouchIgnoring) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                comboTouchIgnoring = false;
+            }
+            return;
+        }
+        if (event.getPointerCount() > 1) comboTouchTwoFinger = true;
+        if (action == MotionEvent.ACTION_MOVE) {
+            float dx = event.getX() - comboTouchDownX;
+            float dy = event.getY() - comboTouchDownY;
+            if (Math.abs(dx) > 30 || Math.abs(dy) > 30) {
+                comboTouchMoved = true;
+                cancelComboRecordingVolumeLong();
+            }
+            return;
+        }
+        if (action != MotionEvent.ACTION_UP && action != MotionEvent.ACTION_CANCEL) return;
+        cancelComboRecordingVolumeLong();
+        if (action == MotionEvent.ACTION_CANCEL) return;
+        if (!comboTouchLong) {
+            float dx = event.getX() - comboTouchDownX;
+            float dy = event.getY() - comboTouchDownY;
+            if (comboTouchMoved) {
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    recordComboInput(comboTouchTwoFinger
+                            ? (dx < 0 ? GestureConstants.INPUT_SWIPE_LEFT_TWO_FINGER_PREVIEW
+                                    : GestureConstants.INPUT_SWIPE_RIGHT_TWO_FINGER_PREVIEW)
+                            : (dx < 0 ? GestureConstants.INPUT_SWIPE_LEFT_PREVIEW
+                                    : GestureConstants.INPUT_SWIPE_RIGHT_PREVIEW));
+                } else {
+                    recordComboInput(comboTouchTwoFinger
+                            ? (dy < 0 ? GestureConstants.INPUT_SWIPE_UP_TWO_FINGER_PREVIEW
+                                    : GestureConstants.INPUT_SWIPE_DOWN_TWO_FINGER_PREVIEW)
+                            : (dy < 0 ? GestureConstants.INPUT_SWIPE_UP_PREVIEW
+                                    : GestureConstants.INPUT_SWIPE_DOWN_PREVIEW));
+                }
+                comboLastTapTime = 0;
+            } else {
+                long now = event.getEventTime();
+                if (now - comboLastTapTime <= 350
+                        && !comboRecordingSequence.isEmpty()
+                        && GestureConstants.INPUT_SINGLE_TAP_PREVIEW.equals(
+                                comboRecordingSequence.get(comboRecordingSequence.size() - 1))) {
+                    comboRecordingSequence.remove(comboRecordingSequence.size() - 1);
+                    recordComboInput(GestureConstants.INPUT_DOUBLE_TAP_PREVIEW);
+                    comboLastTapTime = 0;
+                } else {
+                    recordComboInput(GestureConstants.INPUT_SINGLE_TAP_PREVIEW);
+                    comboLastTapTime = now;
+                }
+            }
+        }
+        comboTouchIgnoring = false;
+    }
+
+    private boolean isComboControlTouch(MotionEvent event) {
+        int x = (int) event.getRawX();
+        int y = (int) event.getRawY();
+        return isPointInside(comboRecordButton, x, y)
+                || isPointInside(comboStopButton, x, y)
+                || isPointInside(comboInputButton, x, y)
+                || isPointInside(comboActionButton, x, y);
+    }
+
+    private boolean isPointInside(View view, int x, int y) {
+        if (view == null || !view.isShown()) return false;
+        android.graphics.Rect rect = new android.graphics.Rect();
+        view.getGlobalVisibleRect(rect);
+        return rect.contains(x, y);
+    }
+
+    private void recordComboInput(String inputId) {
+        if (!comboRecording) return;
+        appendComboInput(inputId);
+    }
+
+    private void appendComboInput(String inputId) {
+        if (!GestureConstants.isComboInputId(inputId)) return;
+        if (comboRecordingSequence == null
+                || comboRecordingSequence.size() >= GestureCombo.MAX_SEQUENCE_LENGTH) return;
+        comboRecordingSequence.add(inputId);
+        updateComboRecordingView();
+    }
+
+    private void updateComboRecordingView() {
+        if (comboRecordingView != null) comboRecordingView.setText(readableComboSequence(comboRecordingSequence));
     }
 
     @Override
@@ -273,6 +520,402 @@ public class SettingsActivity extends Activity {
             }
         });
         root.addView(reset);
+    }
+
+    private void addComboSettingsSection(LinearLayout root) {
+        root.addView(makeTitle("Combos"));
+        root.addView(makeLabel("Ordered input sequences can trigger an action or macro."));
+        combosContainer = new LinearLayout(this);
+        combosContainer.setOrientation(LinearLayout.VERTICAL);
+        root.addView(combosContainer);
+        refreshComboRows();
+
+        Button addCombo = makeButton("+ Add Combo");
+        addCombo.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                if (gestureSettings.getCombos().size() >= 20) {
+                    Toast.makeText(SettingsActivity.this, "Maximum 20 combos reached.",
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                showComboBuilderDialog(null);
+            }
+        });
+        root.addView(addCombo);
+    }
+
+    private void refreshComboRows() {
+        if (combosContainer == null) return;
+        combosContainer.removeAllViews();
+        List<GestureCombo> combos = gestureSettings.getCombos();
+        if (combos.isEmpty()) {
+            combosContainer.addView(makeLabel("No combos configured"));
+            return;
+        }
+        for (GestureCombo combo : combos) combosContainer.addView(makeComboRow(combo));
+    }
+
+    private View makeComboRow(final GestureCombo combo) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setBackgroundColor(0xFF1A1A2E);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.bottomMargin = 8;
+        row.setLayoutParams(rowLp);
+        row.setPadding(8, 8, 8, 8);
+
+        TextView name = makeLabel((combo.name == null || combo.name.isEmpty())
+                ? "Combo " + combo.id : combo.name);
+        row.addView(name);
+        TextView sequence = makeLabel(readableComboSequence(combo.sequence));
+        sequence.setTextColor(0xFFCCCCCC);
+        row.addView(sequence);
+        TextView assignment = makeLabel("Action: " + comboAssignmentLabel(combo)
+                + "  (" + combo.timeoutMs + "ms)");
+        assignment.setTextColor(0xFF888888);
+        row.addView(assignment);
+
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        Button edit = makeSmallButton("Edit");
+        edit.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { showComboBuilderDialog(combo); }
+        });
+        buttons.addView(edit);
+        Button delete = makeSmallButton("Delete");
+        delete.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { deleteCombo(combo.id); }
+        });
+        buttons.addView(delete);
+        row.addView(buttons);
+        return row;
+    }
+
+    private String readableComboSequence(List<String> sequence) {
+        if (sequence == null || sequence.isEmpty()) return "(empty sequence)";
+        StringBuilder result = new StringBuilder();
+        for (String input : sequence) {
+            if (result.length() > 0) result.append(" → ");
+            result.append(GestureConstants.inputLabel(input));
+        }
+        return result.toString();
+    }
+
+    private String comboAssignmentLabel(GestureCombo combo) {
+        if (combo != null && combo.isMacro()) {
+            GestureSettings.GestureMacro macro = gestureSettings.getMacro(combo.macroId);
+            return macro == null ? "Macro (" + combo.macroId + ")" : macro.name;
+        }
+        return combo == null ? "None" : GestureConstants.label(combo.actionId);
+    }
+
+    private void deleteCombo(String id) {
+        List<GestureCombo> combos = gestureSettings.getCombos();
+        for (int i = combos.size() - 1; i >= 0; i--) {
+            if (id != null && id.equals(combos.get(i).id)) combos.remove(i);
+        }
+        gestureSettings.saveCombos(combos);
+        refreshComboRows();
+    }
+
+    private void showComboBuilderDialog(GestureCombo source) {
+        final GestureCombo working = source == null ? new GestureCombo() : source.copy();
+        if (working.id == null || working.id.isEmpty()) {
+            working.id = String.valueOf(gestureSettings.getNextComboId());
+            working.name = "Combo " + working.id;
+        }
+        if (working.name == null || working.name.isEmpty()) working.name = "Combo " + working.id;
+        if (working.sequence.size() > GestureCombo.MAX_SEQUENCE_LENGTH) {
+            while (working.sequence.size() > GestureCombo.MAX_SEQUENCE_LENGTH) {
+                working.sequence.remove(working.sequence.size() - 1);
+            }
+        }
+        working.clampTimeout();
+        comboRecordingSequence = new ArrayList<String>(working.sequence);
+        comboRecording = false;
+        comboLastTapTime = 0;
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(24, 8, 24, 8);
+
+        content.addView(makeLabel("Name:"));
+        final EditText nameInput = new EditText(this);
+        nameInput.setText(working.name);
+        nameInput.setSingleLine(true);
+        content.addView(nameInput);
+
+        content.addView(makeLabel("Sequence:"));
+        final TextView sequenceView = makeLabel(readableComboSequence(comboRecordingSequence));
+        sequenceView.setTextColor(0xFFCCCCCC);
+        comboRecordingView = sequenceView;
+        content.addView(sequenceView);
+        LinearLayout recordRow = new LinearLayout(this);
+        recordRow.setOrientation(LinearLayout.HORIZONTAL);
+        final Button recordButton = makeSmallButton("Record");
+        final Button stopButton = makeSmallButton("Stop");
+        recordRow.addView(recordButton);
+        recordRow.addView(stopButton);
+        content.addView(recordRow);
+        final Button addInputButton = makeSmallButton("Add Input");
+        comboInputButton = addInputButton;
+        content.addView(addInputButton);
+
+        content.addView(makeLabel("Timeout (300-2000ms):"));
+        final EditText timeoutInput = new EditText(this);
+        timeoutInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+        timeoutInput.setText(String.valueOf(working.timeoutMs));
+        timeoutInput.setSingleLine(true);
+        content.addView(timeoutInput);
+
+        content.addView(makeLabel("Assignment:"));
+        final Button actionButton = makeButton(comboAssignmentLabel(working));
+        content.addView(actionButton);
+
+        recordButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                comboRecording = true;
+                comboRecordingSequence.clear();
+                comboRecordingView = sequenceView;
+                comboRecordButton = recordButton;
+                comboStopButton = stopButton;
+                comboInputButton = addInputButton;
+                comboActionButton = actionButton;
+                comboLastTapTime = 0;
+                updateComboRecordingView();
+                Toast.makeText(SettingsActivity.this,
+                        "Recording — perform your combo then tap Stop.", Toast.LENGTH_LONG).show();
+            }
+        });
+        stopButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                comboRecording = false;
+                cancelComboRecordingVolumeLong();
+                comboRecordButton = null;
+                comboStopButton = null;
+                comboInputButton = null;
+                comboActionButton = null;
+            }
+        });
+        addInputButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                comboRecording = false;
+                cancelComboRecordingVolumeLong();
+                showComboInputPicker();
+            }
+        });
+        actionButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                showComboActionPicker(working, actionButton);
+            }
+        });
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Combo Builder")
+                .setView(content)
+                .setPositiveButton("Save", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int which) {
+                        comboRecording = false;
+                        cancelComboRecordingVolumeLong();
+                        String name = nameInput.getText().toString().trim();
+                        if (name.isEmpty()) {
+                            Toast.makeText(SettingsActivity.this, "Combo name cannot be empty",
+                                    Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        int timeout;
+                        try {
+                            timeout = Integer.parseInt(timeoutInput.getText().toString().trim());
+                        } catch (Exception error) {
+                            Toast.makeText(SettingsActivity.this, "Invalid timeout (300-2000)",
+                                    Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        if (timeout < GestureCombo.MIN_TIMEOUT_MS
+                                || timeout > GestureCombo.MAX_TIMEOUT_MS) {
+                            Toast.makeText(SettingsActivity.this, "Invalid timeout (300-2000)",
+                                    Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        working.name = name;
+                        working.timeoutMs = timeout;
+                        working.sequence.clear();
+                        working.sequence.addAll(comboRecordingSequence);
+                        if (!working.hasValidSequence()) {
+                            Toast.makeText(SettingsActivity.this,
+                                    "Combo sequence must contain 2-8 valid inputs",
+                                    Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        saveComboWithConflict(working);
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                    @Override public void onCancel(DialogInterface d) {
+                        comboRecording = false;
+                        cancelComboRecordingVolumeLong();
+                        comboRecordButton = null;
+                        comboStopButton = null;
+                        comboInputButton = null;
+                        comboActionButton = null;
+                    }
+                })
+                .create();
+        dialog.show();
+    }
+
+    private void showComboInputPicker() {
+        final List<String> inputIds = GestureConstants.getComboInputIds();
+        String[] labels = new String[inputIds.size()];
+        for (int i = 0; i < inputIds.size(); i++) labels[i] = GestureConstants.inputLabel(inputIds.get(i));
+        new AlertDialog.Builder(this)
+                .setTitle("Add combo input")
+                .setItems(labels, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        appendComboInput(inputIds.get(which));
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showComboActionPicker(final GestureCombo combo, final TextView assignmentView) {
+        final String currentAction = combo.isMacro()
+                ? GestureConstants.ACTION_MACRO : combo.actionId;
+        final EditText search = new EditText(this);
+        search.setHint("Search actions…");
+        search.setSingleLine(true);
+        search.setTextColor(0xFFFFFFFF);
+        final ListView list = new ListView(this);
+        final List<String> rows = buildGesturePickerRows(currentAction, "");
+        final ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_list_item_1, rows);
+        list.setAdapter(adapter);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.addView(search);
+        content.addView(list, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Choose combo action")
+                .setView(content)
+                .setNegativeButton("Cancel", null)
+                .create();
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                List<String> filtered = buildGesturePickerRows(currentAction, s.toString());
+                adapter.clear();
+                adapter.addAll(filtered);
+                adapter.notifyDataSetChanged();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        list.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                String row = String.valueOf(parent.getItemAtPosition(position));
+                if (row.startsWith("[")) return;
+                if (row.startsWith("✓ ")) row = row.substring(2);
+                GestureSettings.GestureAction action = gestureSettings.fromLabel(row);
+                if (action == GestureSettings.GestureAction.MACRO) {
+                    showComboMacroPicker(combo, assignmentView, dialog);
+                    return;
+                }
+                combo.actionId = action.name();
+                combo.macroId = "";
+                assignmentView.setText(comboAssignmentLabel(combo));
+                dialog.dismiss();
+            }
+        });
+        dialog.show();
+    }
+
+    private void showComboMacroPicker(final GestureCombo combo, final TextView assignmentView,
+                                      final AlertDialog parentDialog) {
+        final List<GestureSettings.GestureMacro> macros = gestureSettings.getUsableMacros();
+        if (macros.isEmpty()) {
+            Toast.makeText(this, "No steps", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] names = new String[macros.size()];
+        for (int i = 0; i < macros.size(); i++) names[i] = macros.get(i).name;
+        new AlertDialog.Builder(this)
+                .setTitle("Choose macro")
+                .setItems(names, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int which) {
+                        combo.actionId = GestureConstants.ACTION_MACRO;
+                        combo.macroId = macros.get(which).id;
+                        assignmentView.setText(comboAssignmentLabel(combo));
+                        parentDialog.dismiss();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void saveComboWithConflict(final GestureCombo combo) {
+        GestureCombo conflict = findComboConflict(combo);
+        if (conflict == null) {
+            persistCombo(combo);
+            return;
+        }
+        String conflictName = conflict.name == null || conflict.name.isEmpty()
+                ? "Combo " + conflict.id : conflict.name;
+        new AlertDialog.Builder(this)
+                .setTitle("Sequence conflict")
+                .setMessage("This sequence conflicts with '" + conflictName
+                        + "'. The shorter sequence may not fire reliably.")
+                .setPositiveButton("Save anyway", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int which) {
+                        persistCombo(combo);
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private GestureCombo findComboConflict(GestureCombo candidate) {
+        for (GestureCombo existing : gestureSettings.getCombos()) {
+            if (existing.id != null && existing.id.equals(candidate.id)) continue;
+            if (sequencesConflict(existing.sequence, candidate.sequence)) return existing;
+        }
+        return null;
+    }
+
+    private boolean sequencesConflict(List<String> first, List<String> second) {
+        return isSequencePrefix(first, second) || isSequencePrefix(second, first);
+    }
+
+    private boolean isSequencePrefix(List<String> prefix, List<String> sequence) {
+        if (prefix == null || sequence == null || prefix.size() > sequence.size()) return false;
+        for (int i = 0; i < prefix.size(); i++) {
+            if (!GestureConstants.inputsEquivalent(prefix.get(i), sequence.get(i))) return false;
+        }
+        return true;
+    }
+
+    private void persistCombo(GestureCombo combo) {
+        List<GestureCombo> combos = gestureSettings.getCombos();
+        boolean replaced = false;
+        for (int i = 0; i < combos.size(); i++) {
+            if (combo.id != null && combo.id.equals(combos.get(i).id)) {
+                combos.set(i, combo.copy());
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) {
+            if (combos.size() >= 20) {
+                Toast.makeText(this, "Maximum 20 combos reached.", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            combos.add(combo.copy());
+        }
+        gestureSettings.saveCombos(combos);
+        refreshComboRows();
     }
 
     private void addGestureInputGroup(LinearLayout root, String title, String[] inputIds) {
@@ -681,6 +1324,7 @@ public class SettingsActivity extends Activity {
 
         // ── 5. Gesture settings ───────────────────────────────────────────────
         addGestureSettingsSection(root);
+        addComboSettingsSection(root);
 
         // ── Macros ────────────────────────────────────────────────────────────
         root.addView(makeTitle("Gesture Macros"));

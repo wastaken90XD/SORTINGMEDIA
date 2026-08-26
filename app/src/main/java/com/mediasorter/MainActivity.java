@@ -168,6 +168,17 @@ public class MainActivity extends Activity
     private long statsSequence;
     private boolean infoOverlayVisible;
     private boolean isGestureExecuting;
+    private final ArrayList<String> comboBuffer = new ArrayList<String>();
+    private final ArrayList<GestureCombo> partialMatches = new ArrayList<GestureCombo>();
+    private Runnable comboTimeoutRunnable;
+    private boolean volumeUpHeld;
+    private boolean volumeDownHeld;
+    private boolean volumeUpLongSent;
+    private boolean volumeDownLongSent;
+    private Runnable volumeUpLongRunnable;
+    private Runnable volumeDownLongRunnable;
+    private int dpadLongKeyCode = -1;
+    private boolean backLongSent;
     private int lastSweepSelectedIndex = RecyclerView.NO_POSITION;
     private boolean sweepTouchActive;
     private boolean sweepMoved;
@@ -332,20 +343,24 @@ public class MainActivity extends Activity
             fileBrowser.getViewTreeObserver().removeOnGlobalLayoutListener(explorerWidthLayoutListener);
             explorerWidthLayoutListener = null;
         }
+        cancelComboTimeout();
+        cancelVolumeLongPress(android.view.KeyEvent.KEYCODE_VOLUME_UP);
+        cancelVolumeLongPress(android.view.KeyEvent.KEYCODE_VOLUME_DOWN);
         refreshExecutor.shutdownNow();
         statsExecutor.shutdownNow();
     }
 
     @Override
     public void onBackPressed() {
+        if (backLongSent) return;
         if (gestureSettings != null) {
-            List<GestureSettings.GestureStep> hardware = gestureSettings.getSteps(
-                    GestureConstants.INPUT_HARDWARE_BACK);
-            if (hasAssignedGesture(hardware)) {
-                executeGestureSteps(hardware);
-                return;
-            }
+            onGestureInput(GestureConstants.INPUT_HARDWARE_BACK);
+            return;
         }
+        performDefaultBackNavigation();
+    }
+
+    private void performDefaultBackNavigation() {
         if (galleryModeActive) {
             if (galleryInfoPopup != null) {
                 dismissGalleryInfoPopup();
@@ -376,17 +391,24 @@ public class MainActivity extends Activity
             if (isTextInputFocused()) return super.onKeyDown(keyCode, event);
             android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
             if (!sp.getBoolean("volume_keys_enabled", true)) return super.onKeyDown(keyCode, event);
-            executeVolumeMapping(keyCode);
+            if (event == null || event.getRepeatCount() == 0) {
+                if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
+                    volumeUpHeld = true;
+                    volumeUpLongSent = false;
+                    scheduleVolumeLongPress(keyCode);
+                    onGestureInput(GestureConstants.INPUT_VOLUME_UP);
+                } else {
+                    volumeDownHeld = true;
+                    volumeDownLongSent = false;
+                    scheduleVolumeLongPress(keyCode);
+                    onGestureInput(GestureConstants.INPUT_VOLUME_DOWN);
+                }
+            }
             return true;
         }
         if (isGestureInputKey(keyCode) && isGestureExecuting) return true;
         if (keyCode == android.view.KeyEvent.KEYCODE_MENU && gestureSettings != null) {
-            List<GestureSettings.GestureStep> hardware = gestureSettings.getSteps(
-                    GestureConstants.INPUT_HARDWARE_MENU);
-            if (hasAssignedGesture(hardware)) {
-                executeGestureSteps(hardware);
-                return true;
-            }
+            if (onGestureInput(GestureConstants.INPUT_HARDWARE_MENU)) return true;
         }
         if (isDpadKey(keyCode)) {
             android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
@@ -424,6 +446,28 @@ public class MainActivity extends Activity
             if (isTextInputFocused()) return super.onKeyLongPress(keyCode, event);
             android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
             if (!sp.getBoolean("volume_keys_enabled", true)) return super.onKeyLongPress(keyCode, event);
+            fireVolumeLongInput(keyCode);
+            return true;
+        }
+        if (isDpadKey(keyCode)) {
+            android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+            boolean dpadEnabled = sp.getBoolean("dpad_enabled", true)
+                    && (gestureSettings == null || gestureSettings.isDpadEnabled());
+            if (!dpadEnabled) return super.onKeyLongPress(keyCode, event);
+            dpadLongKeyCode = keyCode;
+            onGestureInput(getDpadLongInputId(keyCode));
+            return true;
+        }
+        if (keyCode == android.view.KeyEvent.KEYCODE_BACK) {
+            if (isTextInputFocused() || gestureSettings == null) {
+                return super.onKeyLongPress(keyCode, event);
+            }
+            backLongSent = true;
+            onGestureInput(GestureConstants.INPUT_BACK_LONG);
+            return true;
+        }
+        if (keyCode == android.view.KeyEvent.KEYCODE_MENU && gestureSettings != null) {
+            onGestureInput(GestureConstants.INPUT_HARDWARE_MENU_LONG);
             return true;
         }
         return super.onKeyLongPress(keyCode, event);
@@ -432,9 +476,21 @@ public class MainActivity extends Activity
     @Override
     public boolean onKeyUp(int keyCode, android.view.KeyEvent event) {
         if (isVolumeKey(keyCode)) {
-            if (isTextInputFocused()) return super.onKeyUp(keyCode, event);
+            boolean textFocused = isTextInputFocused();
             android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
-            if (!sp.getBoolean("volume_keys_enabled", true)) return super.onKeyUp(keyCode, event);
+            boolean enabled = sp.getBoolean("volume_keys_enabled", true);
+            cancelVolumeLongPress(keyCode);
+            if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) volumeUpHeld = false;
+            else volumeDownHeld = false;
+            if (textFocused || !enabled) return super.onKeyUp(keyCode, event);
+            return true;
+        }
+        if (keyCode == android.view.KeyEvent.KEYCODE_BACK && backLongSent) {
+            backLongSent = false;
+            return true;
+        }
+        if (isDpadKey(keyCode) && dpadLongKeyCode == keyCode) {
+            dpadLongKeyCode = -1;
             return true;
         }
         if (isGestureInputKey(keyCode) && isGestureExecuting) {
@@ -447,8 +503,7 @@ public class MainActivity extends Activity
             if (!dpadEnabled) return false;
 
             if (previewManager != null) previewManager.hideHintLabel();
-            List<GestureSettings.GestureStep> steps = getDpadStepsForKey(keyCode);
-            executeDpad(steps);
+            onGestureInput(getDpadInputId(keyCode));
             return true;
         }
 
@@ -487,6 +542,83 @@ public class MainActivity extends Activity
         }
     }
 
+    private String getDpadInputId(int keyCode) {
+        switch (keyCode) {
+            case android.view.KeyEvent.KEYCODE_DPAD_UP: return GestureConstants.INPUT_DPAD_UP;
+            case android.view.KeyEvent.KEYCODE_DPAD_DOWN: return GestureConstants.INPUT_DPAD_DOWN;
+            case android.view.KeyEvent.KEYCODE_DPAD_LEFT: return GestureConstants.INPUT_DPAD_LEFT;
+            case android.view.KeyEvent.KEYCODE_DPAD_RIGHT: return GestureConstants.INPUT_DPAD_RIGHT;
+            case android.view.KeyEvent.KEYCODE_DPAD_CENTER:
+            case android.view.KeyEvent.KEYCODE_ENTER:
+            default: return GestureConstants.INPUT_DPAD_CENTER;
+        }
+    }
+
+    private String getDpadLongInputId(int keyCode) {
+        switch (keyCode) {
+            case android.view.KeyEvent.KEYCODE_DPAD_UP: return GestureConstants.INPUT_DPAD_UP_LONG;
+            case android.view.KeyEvent.KEYCODE_DPAD_DOWN: return GestureConstants.INPUT_DPAD_DOWN_LONG;
+            case android.view.KeyEvent.KEYCODE_DPAD_LEFT: return GestureConstants.INPUT_DPAD_LEFT_LONG;
+            case android.view.KeyEvent.KEYCODE_DPAD_RIGHT: return GestureConstants.INPUT_DPAD_RIGHT_LONG;
+            case android.view.KeyEvent.KEYCODE_DPAD_CENTER:
+            case android.view.KeyEvent.KEYCODE_ENTER:
+            default: return GestureConstants.INPUT_DPAD_CENTER_LONG;
+        }
+    }
+
+    private void scheduleVolumeLongPress(final int keyCode) {
+        cancelVolumeLongPress(keyCode);
+        Runnable runnable = new Runnable() {
+            @Override public void run() {
+                boolean held = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
+                        ? volumeUpHeld : volumeDownHeld;
+                if (held && !isTextInputFocused()) fireVolumeLongInput(keyCode);
+            }
+        };
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
+            volumeUpLongRunnable = runnable;
+        } else {
+            volumeDownLongRunnable = runnable;
+        }
+        int delay = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getInt("long_press_duration", 500);
+        mainHandler.postDelayed(runnable, Math.max(1, delay));
+    }
+
+    private void cancelVolumeLongPress(int keyCode) {
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
+            if (volumeUpLongRunnable != null) mainHandler.removeCallbacks(volumeUpLongRunnable);
+            volumeUpLongRunnable = null;
+        } else {
+            if (volumeDownLongRunnable != null) mainHandler.removeCallbacks(volumeDownLongRunnable);
+            volumeDownLongRunnable = null;
+        }
+    }
+
+    private void fireVolumeLongInput(int keyCode) {
+        if (isTextInputFocused()) return;
+        String normalInput;
+        String longInput;
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
+            if (volumeUpLongSent || !volumeUpHeld) return;
+            volumeUpLongSent = true;
+            normalInput = GestureConstants.INPUT_VOLUME_UP;
+            longInput = GestureConstants.INPUT_VOLUME_UP_LONG;
+        } else {
+            if (volumeDownLongSent || !volumeDownHeld) return;
+            volumeDownLongSent = true;
+            normalInput = GestureConstants.INPUT_VOLUME_DOWN;
+            longInput = GestureConstants.INPUT_VOLUME_DOWN_LONG;
+        }
+        if (!comboBuffer.isEmpty()
+                && GestureConstants.inputsEquivalent(comboBuffer.get(comboBuffer.size() - 1), normalInput)) {
+            comboBuffer.remove(comboBuffer.size() - 1);
+            partialMatches.clear();
+            cancelComboTimeout();
+        }
+        onGestureInput(longInput);
+    }
+
     private List<GestureSettings.GestureStep> getVolumeSteps(int keyCode, boolean longPress) {
         if (gestureSettings == null) return new ArrayList<GestureSettings.GestureStep>();
         if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
@@ -495,11 +627,13 @@ public class MainActivity extends Activity
         return longPress ? gestureSettings.getVolumeDownLong() : gestureSettings.getVolumeDown();
     }
 
-    private void executeVolumeMapping(int keyCode) {
-        List<GestureSettings.GestureStep> steps = getVolumeSteps(keyCode, false);
+    private void executeVolumeMapping(int keyCode, boolean longPress) {
+        List<GestureSettings.GestureStep> steps = getVolumeSteps(keyCode, longPress);
         if (steps == null || steps.isEmpty()) {
-            if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) navigateNext();
-            else navigatePrev();
+            if (!longPress) {
+                if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) navigateNext();
+                else navigatePrev();
+            }
             return;
         }
         for (GestureSettings.GestureStep step : steps) {
@@ -536,6 +670,268 @@ public class MainActivity extends Activity
                 && steps.get(0).action == GestureSettings.GestureAction.NOTHING);
     }
 
+    private boolean onGestureInput(String inputId) {
+        if (!GestureConstants.isComboInputId(inputId)) return false;
+        comboBuffer.add(inputId);
+        while (comboBuffer.size() > GestureCombo.MAX_SEQUENCE_LENGTH) comboBuffer.remove(0);
+
+        GestureCombo complete = findCompleteCombo();
+        if (complete != null) {
+            int completeStart = comboBuffer.size() - complete.sequence.size();
+            List<String> prefix = new ArrayList<String>();
+            for (int i = 0; i < completeStart; i++) prefix.add(comboBuffer.get(i));
+            comboBuffer.clear();
+            partialMatches.clear();
+            cancelComboTimeout();
+            for (String pending : prefix) dispatchSimpleGesture(pending);
+            executeCombo(complete);
+            return true;
+        }
+
+        List<GestureCombo> matches = findPartialMatches();
+        if (!matches.isEmpty()) {
+            int partialStart = findPartialStart(matches);
+            if (partialStart > 0) {
+                List<String> prefix = new ArrayList<String>();
+                for (int i = 0; i < partialStart; i++) prefix.add(comboBuffer.get(i));
+                for (int i = 0; i < partialStart; i++) comboBuffer.remove(0);
+                for (String pending : prefix) dispatchSimpleGesture(pending);
+                matches = findPartialMatches();
+            }
+            partialMatches.clear();
+            partialMatches.addAll(matches);
+            scheduleComboTimeout(matches);
+            return true;
+        }
+
+        List<String> pending = new ArrayList<String>(comboBuffer);
+        comboBuffer.clear();
+        partialMatches.clear();
+        cancelComboTimeout();
+        boolean handled = false;
+        for (String simpleInput : pending) {
+            if (dispatchSimpleGesture(simpleInput)) handled = true;
+        }
+        return handled;
+    }
+
+    private GestureCombo findCompleteCombo() {
+        GestureCombo result = null;
+        for (GestureCombo combo : getStoredCombos()) {
+            if (combo.sequence.size() > comboBuffer.size()) continue;
+            if (!bufferMatchesSequenceSuffix(combo.sequence, combo.sequence.size())) continue;
+            if (result == null || combo.sequence.size() > result.sequence.size()) result = combo;
+        }
+        return result;
+    }
+
+    private List<GestureCombo> findPartialMatches() {
+        List<GestureCombo> result = new ArrayList<GestureCombo>();
+        for (GestureCombo combo : getStoredCombos()) {
+            if (getPartialMatchLength(combo) > 0) result.add(combo);
+        }
+        return result;
+    }
+
+    private List<GestureCombo> getStoredCombos() {
+        return gestureSettings == null
+                ? new ArrayList<GestureCombo>() : gestureSettings.getCombos();
+    }
+
+    private int getPartialMatchLength(GestureCombo combo) {
+        if (combo == null || combo.sequence.size() < GestureCombo.MIN_SEQUENCE_LENGTH) return 0;
+        int maxLength = Math.min(comboBuffer.size(), combo.sequence.size() - 1);
+        for (int length = maxLength; length >= 1; length--) {
+            if (bufferMatchesSequenceSuffix(combo.sequence, length)) return length;
+        }
+        return 0;
+    }
+
+    private boolean bufferMatchesSequenceSuffix(List<String> sequence, int length) {
+        if (sequence == null || length <= 0 || length > sequence.size()
+                || length > comboBuffer.size()) return false;
+        int bufferStart = comboBuffer.size() - length;
+        for (int i = 0; i < length; i++) {
+            if (!GestureConstants.inputsEquivalent(comboBuffer.get(bufferStart + i), sequence.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private int findPartialStart(List<GestureCombo> matches) {
+        int start = comboBuffer.size();
+        for (GestureCombo combo : matches) {
+            int length = getPartialMatchLength(combo);
+            if (length > 0) start = Math.min(start, comboBuffer.size() - length);
+        }
+        return start == comboBuffer.size() ? 0 : start;
+    }
+
+    private void scheduleComboTimeout(List<GestureCombo> matches) {
+        cancelComboTimeout();
+        int shortest = GestureCombo.MAX_TIMEOUT_MS;
+        for (GestureCombo combo : matches) {
+            if (combo != null) {
+                shortest = Math.min(shortest, Math.max(GestureCombo.MIN_TIMEOUT_MS,
+                        Math.min(GestureCombo.MAX_TIMEOUT_MS, combo.timeoutMs)));
+            }
+        }
+        final int timeout = shortest;
+        comboTimeoutRunnable = new Runnable() {
+            @Override public void run() {
+                comboTimeoutRunnable = null;
+                flushComboTimeout();
+            }
+        };
+        mainHandler.postDelayed(comboTimeoutRunnable, timeout);
+    }
+
+    private void cancelComboTimeout() {
+        if (comboTimeoutRunnable != null) mainHandler.removeCallbacks(comboTimeoutRunnable);
+        comboTimeoutRunnable = null;
+    }
+
+    private void flushComboTimeout() {
+        while (!comboBuffer.isEmpty()) {
+            GestureCombo complete = findCompleteCombo();
+            if (complete != null) {
+                int completeStart = comboBuffer.size() - complete.sequence.size();
+                List<String> prefix = new ArrayList<String>();
+                for (int i = 0; i < completeStart; i++) prefix.add(comboBuffer.get(i));
+                comboBuffer.clear();
+                partialMatches.clear();
+                for (String pending : prefix) dispatchSimpleGesture(pending);
+                executeCombo(complete);
+                return;
+            }
+
+            List<GestureCombo> matches = findPartialMatches();
+            if (!matches.isEmpty() && findPartialStart(matches) > 0) {
+                String oldest = comboBuffer.remove(0);
+                dispatchSimpleGesture(oldest);
+                continue;
+            }
+
+            String oldest = comboBuffer.remove(0);
+            dispatchSimpleGesture(oldest);
+            List<GestureCombo> remainingMatches = findPartialMatches();
+            if (!remainingMatches.isEmpty() && findPartialStart(remainingMatches) == 0) {
+                partialMatches.clear();
+                partialMatches.addAll(remainingMatches);
+                scheduleComboTimeout(remainingMatches);
+                return;
+            }
+        }
+        partialMatches.clear();
+        cancelComboTimeout();
+    }
+
+    private void executeCombo(GestureCombo combo) {
+        if (combo == null) return;
+        if (combo.isMacro()) {
+            executeMacro(combo.macroId);
+            return;
+        }
+        if (combo.actionId == null || combo.actionId.isEmpty()) return;
+        try {
+            executeAction(GestureSettings.GestureAction.valueOf(combo.actionId));
+        } catch (Exception ignored) {}
+    }
+
+    private boolean dispatchSimpleGesture(String inputId) {
+        if (inputId == null) return false;
+        if (GestureConstants.INPUT_SWIPE_LEFT.equals(inputId)
+                || GestureConstants.INPUT_SWIPE_LEFT_PREVIEW.equals(inputId)) {
+            if (gestureSettings != null) executeSwipe(gestureSettings.getLeft());
+            return true;
+        }
+        if (GestureConstants.INPUT_SWIPE_RIGHT.equals(inputId)
+                || GestureConstants.INPUT_SWIPE_RIGHT_PREVIEW.equals(inputId)) {
+            if (gestureSettings != null) executeSwipe(gestureSettings.getRight());
+            return true;
+        }
+        if (GestureConstants.INPUT_SWIPE_UP.equals(inputId)
+                || GestureConstants.INPUT_SWIPE_UP_PREVIEW.equals(inputId)) {
+            if (gestureSettings != null) executeSwipe(gestureSettings.getUp());
+            return true;
+        }
+        if (GestureConstants.INPUT_SWIPE_DOWN.equals(inputId)
+                || GestureConstants.INPUT_SWIPE_DOWN_PREVIEW.equals(inputId)) {
+            if (gestureSettings != null) executeSwipe(gestureSettings.getDown());
+            return true;
+        }
+        if (GestureConstants.INPUT_SINGLE_TAP_PREVIEW.equals(inputId)
+                || GestureConstants.INPUT_TAP_SINGLE.equals(inputId)) {
+            if (gestureSettings != null) executeGestureSteps(
+                    gestureSettings.getSteps(GestureConstants.INPUT_TAP_SINGLE));
+            return true;
+        }
+        if (GestureConstants.INPUT_DOUBLE_TAP_PREVIEW.equals(inputId)
+                || GestureConstants.INPUT_TAP_DOUBLE.equals(inputId)) {
+            if (gestureSettings != null) executeGestureSteps(
+                    gestureSettings.getSteps(GestureConstants.INPUT_TAP_DOUBLE));
+            return true;
+        }
+        if (GestureConstants.INPUT_LONG_PRESS_PREVIEW.equals(inputId)
+                || GestureConstants.INPUT_TAP_LONG.equals(inputId)) {
+            if (gestureSettings != null) executeGestureSteps(
+                    gestureSettings.getSteps(GestureConstants.INPUT_TAP_LONG));
+            return true;
+        }
+        if (GestureConstants.INPUT_VOLUME_UP.equals(inputId)) {
+            executeVolumeMapping(android.view.KeyEvent.KEYCODE_VOLUME_UP, false);
+            return true;
+        }
+        if (GestureConstants.INPUT_VOLUME_DOWN.equals(inputId)) {
+            executeVolumeMapping(android.view.KeyEvent.KEYCODE_VOLUME_DOWN, false);
+            return true;
+        }
+        if (GestureConstants.INPUT_VOLUME_UP_LONG.equals(inputId)) {
+            executeVolumeMapping(android.view.KeyEvent.KEYCODE_VOLUME_UP, true);
+            return true;
+        }
+        if (GestureConstants.INPUT_VOLUME_DOWN_LONG.equals(inputId)) {
+            executeVolumeMapping(android.view.KeyEvent.KEYCODE_VOLUME_DOWN, true);
+            return true;
+        }
+        if (GestureConstants.INPUT_DPAD_UP.equals(inputId)
+                || GestureConstants.INPUT_DPAD_DOWN.equals(inputId)
+                || GestureConstants.INPUT_DPAD_LEFT.equals(inputId)
+                || GestureConstants.INPUT_DPAD_RIGHT.equals(inputId)
+                || GestureConstants.INPUT_DPAD_CENTER.equals(inputId)) {
+            if (gestureSettings != null) {
+                int keyCode = android.view.KeyEvent.KEYCODE_DPAD_CENTER;
+                if (GestureConstants.INPUT_DPAD_UP.equals(inputId)) keyCode = android.view.KeyEvent.KEYCODE_DPAD_UP;
+                else if (GestureConstants.INPUT_DPAD_DOWN.equals(inputId)) keyCode = android.view.KeyEvent.KEYCODE_DPAD_DOWN;
+                else if (GestureConstants.INPUT_DPAD_LEFT.equals(inputId)) keyCode = android.view.KeyEvent.KEYCODE_DPAD_LEFT;
+                else if (GestureConstants.INPUT_DPAD_RIGHT.equals(inputId)) keyCode = android.view.KeyEvent.KEYCODE_DPAD_RIGHT;
+                executeDpad(getDpadStepsForKey(keyCode));
+            }
+            return true;
+        }
+        if (GestureConstants.INPUT_HARDWARE_MENU.equals(inputId)) {
+            if (gestureSettings == null) return false;
+            List<GestureSettings.GestureStep> steps = gestureSettings.getSteps(inputId);
+            if (!hasAssignedGesture(steps)) return false;
+            executeGestureSteps(steps);
+            return true;
+        }
+        if (GestureConstants.INPUT_HARDWARE_BACK.equals(inputId)) {
+            if (gestureSettings != null) {
+                List<GestureSettings.GestureStep> steps = gestureSettings.getSteps(inputId);
+                if (hasAssignedGesture(steps)) executeGestureSteps(steps);
+                else performDefaultBackNavigation();
+            } else {
+                performDefaultBackNavigation();
+            }
+            return true;
+        }
+        // Region-specific list, gallery, two-finger, long-key and scale inputs
+        // have no legacy simple action; they remain available for combos.
+        return GestureConstants.isComboInputId(inputId);
+    }
+
     public static List<MediaFile> getLatestFullList() {
             return sLatestFullList;
     }
@@ -564,6 +960,10 @@ public class MainActivity extends Activity
         sortManager.setFileStatus(fileStatus);
         filterManager   = new FilterManager(fileStatus);
         gestureSettings = new GestureSettings(this);
+        if (gestureSettings.consumeMacroComboNotice()) {
+            Toast.makeText(this, "Macro gestures converted to combos. Check Gesture Settings.",
+                    Toast.LENGTH_LONG).show();
+        }
         lastRunMacroId = gestureSettings.getLastRunMacroId();
         migrateDuplicateWindowSetting();
         windowManager   = new WindowManager(getWindowSize());
@@ -725,6 +1125,50 @@ public class MainActivity extends Activity
         fileBrowser.setHasFixedSize(true);
         fileBrowser.setItemViewCacheSize(30);
 
+        final GestureDetector fileListGestureDetector = new GestureDetector(this,
+                new GestureDetector.SimpleOnGestureListener() {
+                    @Override public boolean onDown(MotionEvent event) { return true; }
+
+                    @Override
+                    public boolean onFling(MotionEvent e1, MotionEvent e2,
+                                           float velocityX, float velocityY) {
+                        if (e1 == null || e2 == null) return false;
+                        float dx = e2.getX() - e1.getX();
+                        float dy = e2.getY() - e1.getY();
+                        if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 100) {
+                            onGestureInput(dx < 0 ? GestureConstants.INPUT_SWIPE_LEFT_LIST
+                                    : GestureConstants.INPUT_SWIPE_RIGHT_LIST);
+                            return true;
+                        }
+                        if (Math.abs(dy) > 100) {
+                            onGestureInput(dy < 0 ? GestureConstants.INPUT_SWIPE_UP_LIST
+                                    : GestureConstants.INPUT_SWIPE_DOWN_LIST);
+                            return true;
+                        }
+                        return false;
+                    }
+
+                    @Override public boolean onSingleTapConfirmed(MotionEvent event) {
+                        onGestureInput(GestureConstants.INPUT_SINGLE_TAP_LIST);
+                        return true;
+                    }
+
+                    @Override public boolean onDoubleTap(MotionEvent event) {
+                        onGestureInput(GestureConstants.INPUT_DOUBLE_TAP_LIST);
+                        return true;
+                    }
+
+                    @Override public void onLongPress(MotionEvent event) {
+                        onGestureInput(GestureConstants.INPUT_LONG_PRESS_LIST);
+                    }
+                });
+        fileBrowser.setOnTouchListener(new View.OnTouchListener() {
+            @Override public boolean onTouch(View view, MotionEvent event) {
+                fileListGestureDetector.onTouchEvent(event);
+                return false;
+            }
+        });
+
         RecyclerView tagList = findViewById(R.id.tagList);
         tagList.setLayoutManager(new LinearLayoutManager(this));
         tagList.setAdapter(tagAdapter);
@@ -735,6 +1179,9 @@ public class MainActivity extends Activity
         getLayoutInflater().inflate(R.layout.panel_preview, previewContainer, true);
         previewManager = new PreviewManager(this, previewContainer, fileStatus);
         previewManager.setThumbnailLoader(thumbnailLoader);
+        previewManager.setGestureInputListener(new PreviewManager.GestureInputListener() {
+            @Override public void onInput(String inputId) { onGestureInput(inputId); }
+        });
         applyUiToggles();
 
         previewManager.setActionListener(new PreviewManager.ActionListener() {
@@ -742,11 +1189,11 @@ public class MainActivity extends Activity
             @Override public void onFlag()   { handleFlag(); }
             @Override public void onNext()   { navigateNext(); }
             @Override public void onPrev()   { navigatePrev(); }
-            @Override public void onDpadUp()     { executeDpad(gestureSettings.getDpadUp()); }
-            @Override public void onDpadDown()   { executeDpad(gestureSettings.getDpadDown()); }
-            @Override public void onDpadLeft()   { executeDpad(gestureSettings.getDpadLeft()); }
-            @Override public void onDpadRight()  { executeDpad(gestureSettings.getDpadRight()); }
-            @Override public void onDpadCenter() { executeDpad(gestureSettings.getDpadCenter()); }
+            @Override public void onDpadUp()     { onGestureInput(GestureConstants.INPUT_DPAD_UP); }
+            @Override public void onDpadDown()   { onGestureInput(GestureConstants.INPUT_DPAD_DOWN); }
+            @Override public void onDpadLeft()   { onGestureInput(GestureConstants.INPUT_DPAD_LEFT); }
+            @Override public void onDpadRight()  { onGestureInput(GestureConstants.INPUT_DPAD_RIGHT); }
+            @Override public void onDpadCenter() { onGestureInput(GestureConstants.INPUT_DPAD_CENTER); }
             @Override public void onTagListChanged(int index) {
                 tagListManager.setActiveIndex(index);
                 refreshSidePanel();
@@ -766,24 +1213,39 @@ public class MainActivity extends Activity
         // Swipe gesture
         GestureDetector gestureDetector = new GestureDetector(this,
                 new GestureDetector.SimpleOnGestureListener() {
+                    @Override public boolean onDown(MotionEvent event) { return true; }
+
                     @Override
                     public boolean onFling(MotionEvent e1, MotionEvent e2,
                                            float vX, float vY) {
                         if (e1 == null || e2 == null) return false;
                         float dx = e2.getX() - e1.getX();
                         float dy = e2.getY() - e1.getY();
+                        boolean twoFinger = e1.getPointerCount() > 1 || e2.getPointerCount() > 1;
                         if (Math.abs(dx) > Math.abs(dy)) {
                             if (Math.abs(dx) > 100) {
-                                executeSwipe(dx < 0
-                                        ? gestureSettings.getLeft()
-                                        : gestureSettings.getRight());
+                                if (twoFinger) {
+                                    onGestureInput(dx < 0
+                                            ? GestureConstants.INPUT_SWIPE_LEFT_TWO_FINGER_PREVIEW
+                                            : GestureConstants.INPUT_SWIPE_RIGHT_TWO_FINGER_PREVIEW);
+                                } else {
+                                    onGestureInput(dx < 0
+                                            ? GestureConstants.INPUT_SWIPE_LEFT_PREVIEW
+                                            : GestureConstants.INPUT_SWIPE_RIGHT_PREVIEW);
+                                }
                                 return true;
                             }
                         } else {
                             if (Math.abs(dy) > 100) {
-                                executeSwipe(dy < 0
-                                        ? gestureSettings.getUp()
-                                        : gestureSettings.getDown());
+                                if (twoFinger) {
+                                    onGestureInput(dy < 0
+                                            ? GestureConstants.INPUT_SWIPE_UP_TWO_FINGER_PREVIEW
+                                            : GestureConstants.INPUT_SWIPE_DOWN_TWO_FINGER_PREVIEW);
+                                } else {
+                                    onGestureInput(dy < 0
+                                            ? GestureConstants.INPUT_SWIPE_UP_PREVIEW
+                                            : GestureConstants.INPUT_SWIPE_DOWN_PREVIEW);
+                                }
                                 return true;
                             }
                         }
@@ -791,17 +1253,17 @@ public class MainActivity extends Activity
                     }
 
                     @Override public boolean onSingleTapConfirmed(MotionEvent event) {
-                        executeGestureSteps(gestureSettings.getSteps(GestureConstants.INPUT_TAP_SINGLE));
+                        onGestureInput(GestureConstants.INPUT_SINGLE_TAP_PREVIEW);
                         return true;
                     }
 
                     @Override public boolean onDoubleTap(MotionEvent event) {
-                        executeGestureSteps(gestureSettings.getSteps(GestureConstants.INPUT_TAP_DOUBLE));
+                        onGestureInput(GestureConstants.INPUT_DOUBLE_TAP_PREVIEW);
                         return true;
                     }
 
                     @Override public void onLongPress(MotionEvent event) {
-                        executeGestureSteps(gestureSettings.getSteps(GestureConstants.INPUT_TAP_LONG));
+                        onGestureInput(GestureConstants.INPUT_LONG_PRESS_PREVIEW);
                     }
                 });
 
@@ -4718,10 +5180,49 @@ private Spinner makeSpinner(String[] options) {
                 }
             });
 
+            final GestureDetector galleryGestureDetector = new GestureDetector(this,
+                    new GestureDetector.SimpleOnGestureListener() {
+                        @Override public boolean onDown(MotionEvent event) { return true; }
+
+                        @Override
+                        public boolean onFling(MotionEvent e1, MotionEvent e2,
+                                               float velocityX, float velocityY) {
+                            if (e1 == null || e2 == null) return false;
+                            float dx = e2.getX() - e1.getX();
+                            float dy = e2.getY() - e1.getY();
+                            if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 100) {
+                                onGestureInput(dx < 0 ? GestureConstants.INPUT_SWIPE_LEFT_GALLERY
+                                        : GestureConstants.INPUT_SWIPE_RIGHT_GALLERY);
+                                return true;
+                            }
+                            if (Math.abs(dy) > 100) {
+                                onGestureInput(dy < 0 ? GestureConstants.INPUT_SWIPE_UP_GALLERY
+                                        : GestureConstants.INPUT_SWIPE_DOWN_GALLERY);
+                                return true;
+                            }
+                            return false;
+                        }
+
+                        @Override public boolean onSingleTapConfirmed(MotionEvent event) {
+                            onGestureInput(GestureConstants.INPUT_SINGLE_TAP_GALLERY);
+                            return true;
+                        }
+
+                        @Override public boolean onDoubleTap(MotionEvent event) {
+                            onGestureInput(GestureConstants.INPUT_DOUBLE_TAP_GALLERY);
+                            return true;
+                        }
+
+                        @Override public void onLongPress(MotionEvent event) {
+                            onGestureInput(GestureConstants.INPUT_LONG_PRESS_GALLERY);
+                        }
+                    });
+
             galleryScaleDetector = new ScaleGestureDetector(this,
                     new ScaleGestureDetector.SimpleOnScaleGestureListener() {
                         @Override public boolean onScaleBegin(ScaleGestureDetector detector) {
                             galleryLastScale = 1.0f;
+                            onGestureInput(GestureConstants.INPUT_SCALE_GALLERY);
                             return true;
                         }
 
@@ -4745,6 +5246,7 @@ private Spinner makeSpinner(String[] options) {
                     if (galleryScaleDetector != null) {
                         galleryScaleDetector.onTouchEvent(event);
                     }
+                    galleryGestureDetector.onTouchEvent(event);
                     return false;
                 }
             });

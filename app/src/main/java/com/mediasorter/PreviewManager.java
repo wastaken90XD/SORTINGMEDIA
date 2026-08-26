@@ -44,6 +44,10 @@ public class PreviewManager {
         void onTagListChanged(int index);
     }
 
+    public interface GestureInputListener {
+        void onInput(String inputId);
+    }
+
     private final Context         context;
     private final ExecutorService executor    = Executors.newSingleThreadExecutor();
     private final Handler         mainHandler = new Handler(Looper.getMainLooper());
@@ -84,6 +88,7 @@ public class PreviewManager {
     private boolean hasFlashedForCurrentSwipe = false;
 
     private ActionListener       actionListener;
+    private GestureInputListener gestureInputListener;
     private FileStatus           fileStatus;
     private GestureDetector      swipeDetector;
     private ScaleGestureDetector scaleDetector;
@@ -103,6 +108,10 @@ public class PreviewManager {
     private float translateY  = 0f;
     private float lastTouchX  = 0f;
     private float lastTouchY  = 0f;
+    private float multiFingerDownX = 0f;
+    private float multiFingerDownY = 0f;
+    private boolean multiFingerTouch;
+    private boolean multiFingerSwipeSent;
 
     private static final float MIN_ZOOM = 1.0f;
     private static final float MAX_ZOOM = 8.0f;
@@ -452,9 +461,19 @@ public class PreviewManager {
 
     // ── Zoom ──────────────────────────────────────────────────────────────────
 
+    private void emitGestureInput(String inputId) {
+        if (gestureInputListener != null) gestureInputListener.onInput(inputId);
+    }
+
     private void setupZoom() {
         scaleDetector = new ScaleGestureDetector(context,
             new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                @Override
+                public boolean onScaleBegin(ScaleGestureDetector detector) {
+                    emitGestureInput(GestureConstants.INPUT_SCALE_PREVIEW);
+                    return true;
+                }
+
                 @Override
                 public boolean onScale(ScaleGestureDetector detector) {
                     scaleFactor *= detector.getScaleFactor();
@@ -474,6 +493,7 @@ public class PreviewManager {
                 boolean scaleHandled = scaleDetector.onTouchEvent(event);
 
                 boolean shouldHandleSwipe = swipeDetector != null
+                        && event.getPointerCount() <= 1
                         && !scaleDetector.isInProgress()
                         && scaleFactor <= MIN_ZOOM + 0.01f;
 
@@ -485,11 +505,38 @@ public class PreviewManager {
                     case MotionEvent.ACTION_DOWN:
                         lastTouchX = event.getX();
                         lastTouchY = event.getY();
+                        multiFingerTouch = false;
+                        multiFingerSwipeSent = false;
                         if (scaleFactor > 1.0f) {
                             imagePreview.setLayerType(View.LAYER_TYPE_HARDWARE, null);
                         }
                         break;
+                    case MotionEvent.ACTION_POINTER_DOWN:
+                        if (event.getPointerCount() > 1) {
+                            multiFingerTouch = true;
+                            multiFingerSwipeSent = false;
+                            multiFingerDownX = event.getX();
+                            multiFingerDownY = event.getY();
+                        }
+                        break;
                     case MotionEvent.ACTION_MOVE:
+                        if (multiFingerTouch && !multiFingerSwipeSent
+                                && event.getPointerCount() > 1) {
+                            float multiDx = event.getX() - multiFingerDownX;
+                            float multiDy = event.getY() - multiFingerDownY;
+                            if (Math.abs(multiDx) >= 100 || Math.abs(multiDy) >= 100) {
+                                if (Math.abs(multiDx) > Math.abs(multiDy)) {
+                                    emitGestureInput(multiDx < 0
+                                            ? GestureConstants.INPUT_SWIPE_LEFT_TWO_FINGER_PREVIEW
+                                            : GestureConstants.INPUT_SWIPE_RIGHT_TWO_FINGER_PREVIEW);
+                                } else {
+                                    emitGestureInput(multiDy < 0
+                                            ? GestureConstants.INPUT_SWIPE_UP_TWO_FINGER_PREVIEW
+                                            : GestureConstants.INPUT_SWIPE_DOWN_TWO_FINGER_PREVIEW);
+                                }
+                                multiFingerSwipeSent = true;
+                            }
+                        }
                         if (!scaleDetector.isInProgress() && scaleFactor > 1.0f) {
                             translateX += event.getX() - lastTouchX;
                             translateY += event.getY() - lastTouchY;
@@ -499,6 +546,9 @@ public class PreviewManager {
                         lastTouchY = event.getY();
                         break;
                     case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        multiFingerTouch = false;
+                        multiFingerSwipeSent = false;
                         if (scaleFactor <= MIN_ZOOM) {
                             resetZoom();
                             imagePreview.setLayerType(View.LAYER_TYPE_NONE, null);
@@ -530,6 +580,7 @@ public class PreviewManager {
 
     public void setSwipeDetector(GestureDetector d) { this.swipeDetector = d; }
     public void setActionListener(ActionListener l) { this.actionListener = l; }
+    public void setGestureInputListener(GestureInputListener l) { this.gestureInputListener = l; }
 
     public void setThumbnailLoader(ThumbnailLoader loader) {
         if (loader != null) this.thumbnailLoader = loader;

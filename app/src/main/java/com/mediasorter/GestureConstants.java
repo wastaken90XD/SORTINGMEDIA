@@ -90,6 +90,47 @@ public final class GestureConstants {
     public static final String INPUT_HARDWARE_BACK = "hardware_back_v2";
     public static final String INPUT_HARDWARE_MENU = "hardware_menu_v2";
 
+    // Additional combo-capable input ids. Existing simple gesture ids above
+    // remain unchanged for on-disk compatibility.
+    public static final String INPUT_SWIPE_LEFT_PREVIEW = "swipe_left_preview_v2";
+    public static final String INPUT_SWIPE_RIGHT_PREVIEW = "swipe_right_preview_v2";
+    public static final String INPUT_SWIPE_UP_PREVIEW = "swipe_up_preview_v2";
+    public static final String INPUT_SWIPE_DOWN_PREVIEW = "swipe_down_preview_v2";
+    public static final String INPUT_SWIPE_LEFT_TWO_FINGER_PREVIEW =
+            "swipe_left_two_finger_preview_v2";
+    public static final String INPUT_SWIPE_RIGHT_TWO_FINGER_PREVIEW =
+            "swipe_right_two_finger_preview_v2";
+    public static final String INPUT_SWIPE_UP_TWO_FINGER_PREVIEW =
+            "swipe_up_two_finger_preview_v2";
+    public static final String INPUT_SWIPE_DOWN_TWO_FINGER_PREVIEW =
+            "swipe_down_two_finger_preview_v2";
+    public static final String INPUT_SWIPE_LEFT_LIST = "swipe_left_list_v2";
+    public static final String INPUT_SWIPE_RIGHT_LIST = "swipe_right_list_v2";
+    public static final String INPUT_SWIPE_UP_LIST = "swipe_up_list_v2";
+    public static final String INPUT_SWIPE_DOWN_LIST = "swipe_down_list_v2";
+    public static final String INPUT_SWIPE_LEFT_GALLERY = "swipe_left_gallery_v2";
+    public static final String INPUT_SWIPE_RIGHT_GALLERY = "swipe_right_gallery_v2";
+    public static final String INPUT_SWIPE_UP_GALLERY = "swipe_up_gallery_v2";
+    public static final String INPUT_SWIPE_DOWN_GALLERY = "swipe_down_gallery_v2";
+    public static final String INPUT_SINGLE_TAP_PREVIEW = "single_tap_preview_v2";
+    public static final String INPUT_DOUBLE_TAP_PREVIEW = "double_tap_preview_v2";
+    public static final String INPUT_LONG_PRESS_PREVIEW = "long_press_preview_v2";
+    public static final String INPUT_SINGLE_TAP_LIST = "single_tap_list_v2";
+    public static final String INPUT_DOUBLE_TAP_LIST = "double_tap_list_v2";
+    public static final String INPUT_LONG_PRESS_LIST = "long_press_list_v2";
+    public static final String INPUT_SINGLE_TAP_GALLERY = "single_tap_gallery_v2";
+    public static final String INPUT_DOUBLE_TAP_GALLERY = "double_tap_gallery_v2";
+    public static final String INPUT_LONG_PRESS_GALLERY = "long_press_gallery_v2";
+    public static final String INPUT_DPAD_UP_LONG = "dpad_up_long_v2";
+    public static final String INPUT_DPAD_DOWN_LONG = "dpad_down_long_v2";
+    public static final String INPUT_DPAD_LEFT_LONG = "dpad_left_long_v2";
+    public static final String INPUT_DPAD_RIGHT_LONG = "dpad_right_long_v2";
+    public static final String INPUT_DPAD_CENTER_LONG = "dpad_center_long_v2";
+    public static final String INPUT_BACK_LONG = "back_long_v2";
+    public static final String INPUT_HARDWARE_MENU_LONG = "hardware_menu_long_v2";
+    public static final String INPUT_SCALE_PREVIEW = "scale_preview_v2";
+    public static final String INPUT_SCALE_GALLERY = "scale_gallery_v2";
+
     private static final LinkedHashMap<String, String> LABELS = new LinkedHashMap<>();
     private static final LinkedHashMap<String, Category> CATEGORIES = new LinkedHashMap<>();
 
@@ -218,6 +259,64 @@ public final class GestureConstants {
                 INPUT_HARDWARE_BACK, INPUT_HARDWARE_MENU));
     }
 
+    /** Every input that can be recorded in a combo sequence. */
+    public static List<String> getComboInputIds() {
+        List<String> ids = getInputIds();
+        String[] extra = {
+                INPUT_SWIPE_LEFT_PREVIEW, INPUT_SWIPE_RIGHT_PREVIEW,
+                INPUT_SWIPE_UP_PREVIEW, INPUT_SWIPE_DOWN_PREVIEW,
+                INPUT_SWIPE_LEFT_TWO_FINGER_PREVIEW,
+                INPUT_SWIPE_RIGHT_TWO_FINGER_PREVIEW,
+                INPUT_SWIPE_UP_TWO_FINGER_PREVIEW,
+                INPUT_SWIPE_DOWN_TWO_FINGER_PREVIEW,
+                INPUT_SWIPE_LEFT_LIST, INPUT_SWIPE_RIGHT_LIST,
+                INPUT_SWIPE_UP_LIST, INPUT_SWIPE_DOWN_LIST,
+                INPUT_SWIPE_LEFT_GALLERY, INPUT_SWIPE_RIGHT_GALLERY,
+                INPUT_SWIPE_UP_GALLERY, INPUT_SWIPE_DOWN_GALLERY,
+                INPUT_SINGLE_TAP_PREVIEW, INPUT_DOUBLE_TAP_PREVIEW,
+                INPUT_LONG_PRESS_PREVIEW,
+                INPUT_SINGLE_TAP_LIST, INPUT_DOUBLE_TAP_LIST,
+                INPUT_LONG_PRESS_LIST,
+                INPUT_SINGLE_TAP_GALLERY, INPUT_DOUBLE_TAP_GALLERY,
+                INPUT_LONG_PRESS_GALLERY,
+                INPUT_DPAD_UP_LONG, INPUT_DPAD_DOWN_LONG,
+                INPUT_DPAD_LEFT_LONG, INPUT_DPAD_RIGHT_LONG,
+                INPUT_DPAD_CENTER_LONG, INPUT_BACK_LONG,
+                INPUT_HARDWARE_MENU_LONG, INPUT_SCALE_PREVIEW,
+                INPUT_SCALE_GALLERY
+        };
+        for (String id : extra) if (!ids.contains(id)) ids.add(id);
+        return ids;
+    }
+
+    public static List<String> getAllInputIds() {
+        return getComboInputIds();
+    }
+
+    public static boolean isComboInputId(String inputId) {
+        return inputId != null && getComboInputIds().contains(inputId);
+    }
+
+    /** Existing simple preview ids and their region-specific combo ids match. */
+    public static boolean inputsEquivalent(String first, String second) {
+        if (first == null || second == null) return first == second;
+        if (first.equals(second)) return true;
+        return (INPUT_SWIPE_LEFT.equals(first) && INPUT_SWIPE_LEFT_PREVIEW.equals(second))
+                || (INPUT_SWIPE_LEFT_PREVIEW.equals(first) && INPUT_SWIPE_LEFT.equals(second))
+                || (INPUT_SWIPE_RIGHT.equals(first) && INPUT_SWIPE_RIGHT_PREVIEW.equals(second))
+                || (INPUT_SWIPE_RIGHT_PREVIEW.equals(first) && INPUT_SWIPE_RIGHT.equals(second))
+                || (INPUT_SWIPE_UP.equals(first) && INPUT_SWIPE_UP_PREVIEW.equals(second))
+                || (INPUT_SWIPE_UP_PREVIEW.equals(first) && INPUT_SWIPE_UP.equals(second))
+                || (INPUT_SWIPE_DOWN.equals(first) && INPUT_SWIPE_DOWN_PREVIEW.equals(second))
+                || (INPUT_SWIPE_DOWN_PREVIEW.equals(first) && INPUT_SWIPE_DOWN.equals(second))
+                || (INPUT_TAP_SINGLE.equals(first) && INPUT_SINGLE_TAP_PREVIEW.equals(second))
+                || (INPUT_SINGLE_TAP_PREVIEW.equals(first) && INPUT_TAP_SINGLE.equals(second))
+                || (INPUT_TAP_DOUBLE.equals(first) && INPUT_DOUBLE_TAP_PREVIEW.equals(second))
+                || (INPUT_DOUBLE_TAP_PREVIEW.equals(first) && INPUT_TAP_DOUBLE.equals(second))
+                || (INPUT_TAP_LONG.equals(first) && INPUT_LONG_PRESS_PREVIEW.equals(second))
+                || (INPUT_LONG_PRESS_PREVIEW.equals(first) && INPUT_TAP_LONG.equals(second));
+    }
+
     public static String inputLabel(String inputId) {
         if (INPUT_DPAD_UP.equals(inputId)) return "D-Pad Up";
         if (INPUT_DPAD_DOWN.equals(inputId)) return "D-Pad Down";
@@ -237,6 +336,48 @@ public final class GestureConstants {
         if (INPUT_VOLUME_DOWN_LONG.equals(inputId)) return "Volume Down Long Press";
         if (INPUT_HARDWARE_BACK.equals(inputId)) return "Hardware Back";
         if (INPUT_HARDWARE_MENU.equals(inputId)) return "Hardware Menu";
+        if (INPUT_SWIPE_LEFT_PREVIEW.equals(inputId)) return "Swipe Left (Preview)";
+        if (INPUT_SWIPE_RIGHT_PREVIEW.equals(inputId)) return "Swipe Right (Preview)";
+        if (INPUT_SWIPE_UP_PREVIEW.equals(inputId)) return "Swipe Up (Preview)";
+        if (INPUT_SWIPE_DOWN_PREVIEW.equals(inputId)) return "Swipe Down (Preview)";
+        if (INPUT_SWIPE_LEFT_TWO_FINGER_PREVIEW.equals(inputId)) {
+            return "Two-finger Swipe Left (Preview)";
+        }
+        if (INPUT_SWIPE_RIGHT_TWO_FINGER_PREVIEW.equals(inputId)) {
+            return "Two-finger Swipe Right (Preview)";
+        }
+        if (INPUT_SWIPE_UP_TWO_FINGER_PREVIEW.equals(inputId)) {
+            return "Two-finger Swipe Up (Preview)";
+        }
+        if (INPUT_SWIPE_DOWN_TWO_FINGER_PREVIEW.equals(inputId)) {
+            return "Two-finger Swipe Down (Preview)";
+        }
+        if (INPUT_SWIPE_LEFT_LIST.equals(inputId)) return "Swipe Left (File List)";
+        if (INPUT_SWIPE_RIGHT_LIST.equals(inputId)) return "Swipe Right (File List)";
+        if (INPUT_SWIPE_UP_LIST.equals(inputId)) return "Swipe Up (File List)";
+        if (INPUT_SWIPE_DOWN_LIST.equals(inputId)) return "Swipe Down (File List)";
+        if (INPUT_SWIPE_LEFT_GALLERY.equals(inputId)) return "Swipe Left (Gallery)";
+        if (INPUT_SWIPE_RIGHT_GALLERY.equals(inputId)) return "Swipe Right (Gallery)";
+        if (INPUT_SWIPE_UP_GALLERY.equals(inputId)) return "Swipe Up (Gallery)";
+        if (INPUT_SWIPE_DOWN_GALLERY.equals(inputId)) return "Swipe Down (Gallery)";
+        if (INPUT_SINGLE_TAP_PREVIEW.equals(inputId)) return "Single Tap (Preview)";
+        if (INPUT_DOUBLE_TAP_PREVIEW.equals(inputId)) return "Double Tap (Preview)";
+        if (INPUT_LONG_PRESS_PREVIEW.equals(inputId)) return "Long Press (Preview)";
+        if (INPUT_SINGLE_TAP_LIST.equals(inputId)) return "Single Tap (File List)";
+        if (INPUT_DOUBLE_TAP_LIST.equals(inputId)) return "Double Tap (File List)";
+        if (INPUT_LONG_PRESS_LIST.equals(inputId)) return "Long Press (File List)";
+        if (INPUT_SINGLE_TAP_GALLERY.equals(inputId)) return "Single Tap (Gallery)";
+        if (INPUT_DOUBLE_TAP_GALLERY.equals(inputId)) return "Double Tap (Gallery)";
+        if (INPUT_LONG_PRESS_GALLERY.equals(inputId)) return "Long Press (Gallery)";
+        if (INPUT_DPAD_UP_LONG.equals(inputId)) return "D-Pad Up Long Press";
+        if (INPUT_DPAD_DOWN_LONG.equals(inputId)) return "D-Pad Down Long Press";
+        if (INPUT_DPAD_LEFT_LONG.equals(inputId)) return "D-Pad Left Long Press";
+        if (INPUT_DPAD_RIGHT_LONG.equals(inputId)) return "D-Pad Right Long Press";
+        if (INPUT_DPAD_CENTER_LONG.equals(inputId)) return "D-Pad Center Long Press";
+        if (INPUT_BACK_LONG.equals(inputId)) return "Hardware Back Long Press";
+        if (INPUT_HARDWARE_MENU_LONG.equals(inputId)) return "Hardware Menu Long Press";
+        if (INPUT_SCALE_PREVIEW.equals(inputId)) return "Pinch/Scale (Preview)";
+        if (INPUT_SCALE_GALLERY.equals(inputId)) return "Pinch/Scale (Gallery)";
         return inputId == null ? "Unknown input" : inputId;
     }
 

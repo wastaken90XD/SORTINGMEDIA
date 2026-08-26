@@ -78,6 +78,9 @@ public class GestureSettings {
     private static final String KEY_DPAD_ENABLED = "dpad_enabled";
     private static final String KEY_TAGS_PROMPT = "tags_prompt_enabled";
     public static final String KEY_LAST_MACRO = "last_macro_id";
+    public static final String KEY_COMBOS = "gesture_combos";
+    private static final String KEY_COMBO_MIGRATED = "macro_gesture_combo_migrated_v1";
+    private static final String KEY_COMBO_NOTICE = "macro_gesture_combo_notice";
 
     private final SharedPreferences prefs;
     private final SharedPreferences settingsPrefs;
@@ -87,7 +90,9 @@ public class GestureSettings {
         // dpad_enabled is a UI/control setting, so it has one canonical home
         // in settings_prefs rather than being duplicated in gesture_prefs.
         this.settingsPrefs = context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
+        ensureVolumeDefaults();
         migrateLegacyControlKeys();
+        migrateMacroGesturesToCombos();
     }
 
     private void migrateLegacyControlKeys() {
@@ -455,6 +460,129 @@ public class GestureSettings {
 
     public String getLastRunMacroId() {
         return prefs.getString(KEY_LAST_MACRO, "");
+    }
+
+    private void ensureVolumeDefaults() {
+        SharedPreferences.Editor editor = prefs.edit();
+        boolean changed = false;
+        if (!prefs.contains(KEY_VOLUME_UP)) {
+            editor.putString(KEY_VOLUME_UP, GestureAction.NEXT_FILE.name() + "|");
+            changed = true;
+        }
+        if (!prefs.contains(KEY_VOLUME_DOWN)) {
+            editor.putString(KEY_VOLUME_DOWN, GestureAction.PREV_FILE.name() + "|");
+            changed = true;
+        }
+        if (changed) editor.apply();
+    }
+
+    public List<GestureCombo> getCombos() {
+        List<GestureCombo> result = new ArrayList<GestureCombo>();
+        String raw = prefs.getString(KEY_COMBOS, "[]");
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(raw);
+            for (int i = 0; i < array.length() && result.size() < 20; i++) {
+                GestureCombo combo = GestureCombo.fromJson(array.optJSONObject(i));
+                if (combo != null && combo.hasValidSequence()) result.add(combo);
+            }
+        } catch (Exception ignored) {}
+        return result;
+    }
+
+    public int getNextComboId() {
+        int max = 0;
+        for (GestureCombo combo : getCombos()) {
+            try {
+                max = Math.max(max, Integer.parseInt(combo.id));
+            } catch (Exception ignored) {}
+        }
+        return max + 1;
+    }
+
+    public void saveCombos(List<GestureCombo> combos) {
+        org.json.JSONArray array = new org.json.JSONArray();
+        java.util.HashSet<String> ids = new java.util.HashSet<String>();
+        int nextId = 1;
+        if (combos != null) {
+            for (GestureCombo combo : combos) {
+                if (array.length() >= 20 || combo == null || !combo.hasValidSequence()) continue;
+                if (combo.id == null || combo.id.isEmpty() || ids.contains(combo.id)) {
+                    while (ids.contains(String.valueOf(nextId))) nextId++;
+                    combo.id = String.valueOf(nextId++);
+                }
+                ids.add(combo.id);
+                combo.clampTimeout();
+                try {
+                    array.put(combo.toJson());
+                } catch (Exception ignored) {}
+            }
+        }
+        prefs.edit().putString(KEY_COMBOS, array.toString()).apply();
+    }
+
+    private void migrateMacroGesturesToCombos() {
+        if (prefs.getBoolean(KEY_COMBO_MIGRATED, false)) return;
+        List<GestureCombo> combos = getCombos();
+        int nextId = getNextComboId();
+        boolean converted = false;
+        SharedPreferences.Editor editor = prefs.edit();
+
+        for (String inputId : GestureConstants.getInputIds()) {
+            String raw = prefs.getString(inputId, "");
+            if (raw == null || raw.isEmpty()) continue;
+            List<GestureStep> steps = deserialize(raw,
+                    GestureConstants.defaultActionForInput(inputId));
+            List<GestureStep> remaining = new ArrayList<GestureStep>();
+            boolean removedMacro = false;
+            for (GestureStep step : steps) {
+                if (step != null && step.action == GestureAction.MACRO
+                        && step.tag != null && !step.tag.isEmpty()) {
+                    if (!containsComboForMacro(combos, inputId, step.tag)) {
+                        GestureCombo combo = new GestureCombo();
+                        combo.id = String.valueOf(nextId++);
+                        combo.name = "Converted " + GestureConstants.inputLabel(inputId);
+                        combo.sequence.add(inputId);
+                        combo.sequence.add(inputId);
+                        combo.actionId = GestureConstants.ACTION_MACRO;
+                        combo.macroId = step.tag;
+                        combo.timeoutMs = GestureCombo.DEFAULT_TIMEOUT_MS;
+                        combos.add(combo);
+                    }
+                    removedMacro = true;
+                    converted = true;
+                } else {
+                    remaining.add(step);
+                }
+            }
+            if (removedMacro) {
+                if (remaining.isEmpty()) {
+                    remaining.add(new GestureStep(GestureAction.NOTHING, ""));
+                }
+                editor.putString(inputId, serialize(remaining));
+            }
+        }
+
+        if (converted) saveCombos(combos);
+        editor.putBoolean(KEY_COMBO_MIGRATED, true);
+        editor.putBoolean(KEY_COMBO_NOTICE, converted);
+        editor.apply();
+    }
+
+    private boolean containsComboForMacro(List<GestureCombo> combos, String inputId, String macroId) {
+        for (GestureCombo combo : combos) {
+            if (combo == null || !combo.isMacro() || !macroId.equals(combo.macroId)
+                    || combo.sequence.size() != 2) continue;
+            if (inputId.equals(combo.sequence.get(0)) && inputId.equals(combo.sequence.get(1))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean consumeMacroComboNotice() {
+        boolean pending = prefs.getBoolean(KEY_COMBO_NOTICE, false);
+        if (pending) prefs.edit().putBoolean(KEY_COMBO_NOTICE, false).apply();
+        return pending;
     }
 
     /** Restore all input mappings to the defaults in GestureConstants. */

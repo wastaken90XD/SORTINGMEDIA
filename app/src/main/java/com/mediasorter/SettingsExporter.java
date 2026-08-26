@@ -65,7 +65,7 @@ public final class SettingsExporter {
             GestureConstants.INPUT_VOLUME_DOWN_LONG, GestureConstants.INPUT_TAP_SINGLE,
             GestureConstants.INPUT_TAP_DOUBLE, GestureConstants.INPUT_TAP_LONG,
             GestureConstants.INPUT_HARDWARE_BACK, GestureConstants.INPUT_HARDWARE_MENU,
-            "tags_prompt_enabled", "gesture_macros",
+            "tags_prompt_enabled", "gesture_macros", GestureSettings.KEY_COMBOS,
             GestureSettings.KEY_LAST_MACRO
     ));
 
