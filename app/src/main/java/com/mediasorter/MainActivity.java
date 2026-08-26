@@ -392,18 +392,22 @@ public class MainActivity extends Activity
             if (isTextInputFocused()) return super.onKeyDown(keyCode, event);
             android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
             if (!sp.getBoolean("volume_keys_enabled", true)) return super.onKeyDown(keyCode, event);
+            String inputId = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
+                    ? GestureConstants.INPUT_VOLUME_UP : GestureConstants.INPUT_VOLUME_DOWN;
+            if (!hasComboStartingWith(inputId)) {
+                executeVolumeMapping(keyCode, false);
+                return true;
+            }
             if (event == null || event.getRepeatCount() == 0) {
                 if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
                     volumeUpHeld = true;
                     volumeUpLongSent = false;
-                    scheduleVolumeLongPress(keyCode);
-                    onGestureInput(GestureConstants.INPUT_VOLUME_UP);
                 } else {
                     volumeDownHeld = true;
                     volumeDownLongSent = false;
-                    scheduleVolumeLongPress(keyCode);
-                    onGestureInput(GestureConstants.INPUT_VOLUME_DOWN);
                 }
+                scheduleVolumeLongPress(keyCode);
+                onGestureInput(inputId);
             }
             return true;
         }
@@ -737,6 +741,16 @@ public class MainActivity extends Activity
     private List<GestureCombo> getStoredCombos() {
         return gestureSettings == null
                 ? new ArrayList<GestureCombo>() : gestureSettings.getCombos();
+    }
+
+    private boolean hasComboStartingWith(String inputId) {
+        for (GestureCombo combo : getStoredCombos()) {
+            if (combo != null && !combo.sequence.isEmpty()
+                    && GestureConstants.inputsEquivalent(inputId, combo.sequence.get(0))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private int getPartialMatchLength(GestureCombo combo) {
