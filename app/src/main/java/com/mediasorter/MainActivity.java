@@ -18,6 +18,7 @@ import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -1274,6 +1275,7 @@ public class MainActivity extends Activity
             @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
                 if (searchBar != null && s.toString().trim().isEmpty()) {
                     searchBar.setHint("Search " + RandomGenerator.randomSyllableTag() + "…");
+                    clearSearchFocusAndHideKeyboard();
                 }
                 scheduleRefresh();
             }
@@ -1291,6 +1293,7 @@ public class MainActivity extends Activity
             @Override public boolean onEditorAction(TextView view, int actionId, android.view.KeyEvent event) {
                 saveSearchToHistory(searchBar.getText().toString().trim());
                 if (searchHistoryPopup != null) searchHistoryPopup.dismiss();
+                clearSearchFocusAndHideKeyboard();
                 scheduleRefresh();
                 return false;
             }
@@ -3838,6 +3841,26 @@ private Spinner makeSpinner(String[] options) {
     }
 
     // ── Search history / saved searches ─────────────────────────────────────
+
+    private void clearSearchFocusAndHideKeyboard() {
+        if (searchBar == null) return;
+        searchBar.clearFocus();
+        hideKeyboard(searchBar);
+        View activityContent = findViewById(android.R.id.content);
+        if (activityContent != null) {
+            activityContent.setFocusable(true);
+            activityContent.setFocusableInTouchMode(true);
+            activityContent.requestFocus();
+        }
+    }
+
+    private void hideKeyboard(EditText input) {
+        InputMethodManager manager =
+                (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (manager != null && input != null) {
+            manager.hideSoftInputFromWindow(input.getWindowToken(), 0);
+        }
+    }
 
     private void showSearchHistoryPopup() {
         if (searchBar == null || searchHistory == null) return;
