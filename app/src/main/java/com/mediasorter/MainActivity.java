@@ -219,13 +219,14 @@ public class MainActivity extends Activity
             if (focused instanceof EditText) {
                 Rect outRect = new Rect();
                 focused.getGlobalVisibleRect(outRect);
-                if (!outRect.contains((int) event.getRawX(), (int) event.getRawY())) {
-                    focused.clearFocus();
-                    InputMethodManager imm = (InputMethodManager)
-                            getSystemService(Context.INPUT_METHOD_SERVICE);
-                    if (imm != null) {
-                        imm.hideSoftInputFromWindow(focused.getWindowToken(), 0);
-                    }
+                if (outRect.contains((int) event.getRawX(), (int) event.getRawY())) {
+                    return super.dispatchTouchEvent(event);
+                }
+                focused.clearFocus();
+                InputMethodManager imm = (InputMethodManager)
+                        getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (imm != null) {
+                    imm.hideSoftInputFromWindow(focused.getWindowToken(), 0);
                 }
             }
         }
