@@ -3852,6 +3852,16 @@ private Spinner makeSpinner(String[] options) {
             activityContent.setFocusableInTouchMode(true);
             activityContent.requestFocus();
         }
+        if (activityContent == null || !activityContent.hasFocus()) {
+            View focusTarget = fileBrowser;
+            if (focusTarget == null) focusTarget = findViewById(R.id.fileBrowser);
+            if (focusTarget == null) focusTarget = findViewById(R.id.previewPanel);
+            if (focusTarget != null) {
+                focusTarget.setFocusable(true);
+                focusTarget.setFocusableInTouchMode(true);
+                focusTarget.requestFocus();
+            }
+        }
     }
 
     private void hideKeyboard(EditText input) {
