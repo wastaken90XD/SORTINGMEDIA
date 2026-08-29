@@ -68,7 +68,10 @@ public class ThumbnailLoader {
     }
 
     public long getMaxBytes() {
-        return prefs.getLong(KEY_MAX_BYTES, DEFAULT_MAX_BYTES);
+        Object raw = prefs.getAll().get(KEY_MAX_BYTES);
+        if (raw instanceof Long) return ((Long) raw).longValue();
+        if (raw instanceof Integer) return ((Integer) raw).longValue();
+        return DEFAULT_MAX_BYTES;
     }
 
     public void setMaxBytes(long bytes) {

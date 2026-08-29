@@ -512,7 +512,9 @@ public final class SettingsExporter {
             for (int i = 0; i < array.length(); i++) set.add(array.optString(i, ""));
             editor.putStringSet(key, set);
         } else if (value instanceof Boolean) editor.putBoolean(key, (Boolean) value);
-        else if (value instanceof Integer) editor.putInt(key, (Integer) value);
+        else if (value instanceof Integer && "thumb_max_bytes".equals(key)) {
+            editor.putLong(key, ((Integer) value).longValue());
+        } else if (value instanceof Integer) editor.putInt(key, (Integer) value);
         else if (value instanceof Long) editor.putLong(key, (Long) value);
         else if (value instanceof Double) editor.putFloat(key, ((Double) value).floatValue());
         else if (value instanceof Number) editor.putFloat(key, ((Number) value).floatValue());
