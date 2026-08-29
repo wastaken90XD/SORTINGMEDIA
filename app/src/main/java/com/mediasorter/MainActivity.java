@@ -3,8 +3,10 @@ package com.mediasorter;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.ActivityManager;
+import android.content.Context;
 import android.content.Intent;
 import android.content.DialogInterface;
+import android.graphics.Rect;
 import com.mediasorter.features.RandomGenerator;
 import android.os.Bundle;
 import android.os.Handler;
@@ -207,6 +209,26 @@ public class MainActivity extends Activity
         initManagers();  // ← must be first
         initAdapters();  // ← depends on thumbnailLoader from initManagers
         initViews();
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event != null && event.getAction() == MotionEvent.ACTION_DOWN) {
+            View focused = getCurrentFocus();
+            if (focused instanceof EditText) {
+                Rect outRect = new Rect();
+                focused.getGlobalVisibleRect(outRect);
+                if (!outRect.contains((int) event.getRawX(), (int) event.getRawY())) {
+                    focused.clearFocus();
+                    InputMethodManager imm = (InputMethodManager)
+                            getSystemService(Context.INPUT_METHOD_SERVICE);
+                    if (imm != null) {
+                        imm.hideSoftInputFromWindow(focused.getWindowToken(), 0);
+                    }
+                }
+            }
+        }
+        return super.dispatchTouchEvent(event);
     }
 
     @Override
@@ -3852,15 +3874,13 @@ private Spinner makeSpinner(String[] options) {
             activityContent.setFocusableInTouchMode(true);
             activityContent.requestFocus();
         }
-        if (activityContent == null || !activityContent.hasFocus()) {
-            View focusTarget = fileBrowser;
-            if (focusTarget == null) focusTarget = findViewById(R.id.fileBrowser);
-            if (focusTarget == null) focusTarget = findViewById(R.id.previewPanel);
-            if (focusTarget != null) {
-                focusTarget.setFocusable(true);
-                focusTarget.setFocusableInTouchMode(true);
-                focusTarget.requestFocus();
-            }
+        View focusTarget = fileBrowser;
+        if (focusTarget == null) focusTarget = findViewById(R.id.fileBrowser);
+        if (focusTarget == null) focusTarget = findViewById(R.id.previewPanel);
+        if (focusTarget != null) {
+            focusTarget.setFocusable(true);
+            focusTarget.setFocusableInTouchMode(true);
+            focusTarget.requestFocus();
         }
     }
 
