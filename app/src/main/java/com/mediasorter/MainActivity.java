@@ -21,6 +21,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -3769,7 +3770,7 @@ private Spinner makeSpinner(String[] options) {
                     case "Group by tag position":
                         showTagGroupingOptions();
                         return true;
-                    case "By Date":                          groupManager.setGroupBy(Group.GroupBy.DATE);      break;
+                    case "By Date":      groupManager.setGroupBy(Group.GroupBy.DATE);      break;
                     case "By Folder":    groupManager.setGroupBy(Group.GroupBy.FOLDER);    break;
                     case "By Tag Prefix": groupManager.setGroupBy(Group.GroupBy.TAG_PREFIX); break;
                     case "By Sequence Group": groupManager.setGroupBy(Group.GroupBy.SEQUENCE_GROUP); break;
