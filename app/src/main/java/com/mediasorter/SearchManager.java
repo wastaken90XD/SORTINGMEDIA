@@ -27,6 +27,32 @@ public class SearchManager {
         return result;
     }
 
+    /** Match one tag using the same whitespace and '-' operator rules as search(). */
+    public boolean matchesTagPattern(String tag, String query) {
+        if (tag == null || query == null || query.trim().isEmpty()) return false;
+        String[] terms = query.toLowerCase().trim().split("\\s+");
+        String value = tag.toLowerCase();
+        for (String term : terms) {
+            if (term.startsWith("-")) {
+                String exclude = term.substring(1);
+                if (!exclude.isEmpty() && matchesTagTerm(value, exclude)) return false;
+            } else if (!matchesTagTerm(value, term)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean matchesTagTerm(String lowerTag, String term) {
+        if (term.startsWith("tag:")) term = term.substring(4);
+        if (term.startsWith("exact:")) return lowerTag.equals(term.substring(6));
+        if (term.startsWith("starts:")) return lowerTag.startsWith(term.substring(7));
+        if (term.startsWith("ends:")) return lowerTag.endsWith(term.substring(5));
+        if ("tagged".equals(term)) return true;
+        if ("untagged".equals(term)) return false;
+        return !term.isEmpty() && lowerTag.contains(term);
+    }
+
     private boolean matchesAll(MediaFile f, String[] terms) {
         for (String term : terms) {
             if (term.startsWith("-")) {

@@ -19,8 +19,12 @@ public class GroupManager {
 
     private volatile Group.GroupBy current = Group.GroupBy.FILE_TYPE;
     private volatile String watchedRoot = "";
+    private volatile String tagGroupMode = "all";
+    private volatile int tagGroupPosition = 1;
+    private volatile String tagGroupPattern = "";
     private final Map<String, String> manualAssignments =
             new java.util.concurrent.ConcurrentHashMap<String, String>();
+    private final SearchManager tagQueryParser = new SearchManager();
     private volatile String lastError = "";
 
     public void setGroupBy(Group.GroupBy value) {
@@ -30,6 +34,20 @@ public class GroupManager {
 
     public Group.GroupBy getCurrent() { return current; }
     public String getLastError() { return lastError; }
+
+    public void setTagGroupingConfiguration(String mode, int position, String pattern) {
+        if (!"first".equals(mode) && !"last".equals(mode)
+                && !"position".equals(mode) && !"pattern".equals(mode)) {
+            mode = "all";
+        }
+        tagGroupMode = mode;
+        tagGroupPosition = Math.max(1, Math.min(10, position));
+        tagGroupPattern = pattern == null ? "" : pattern.trim();
+    }
+
+    public String getTagGroupMode() { return tagGroupMode; }
+    public int getTagGroupPosition() { return tagGroupPosition; }
+    public String getTagGroupPattern() { return tagGroupPattern; }
 
     public void setWatchedRoot(String root) { watchedRoot = root == null ? "" : root; }
 
@@ -106,12 +124,33 @@ public class GroupManager {
         Group untagged = new Group("Untagged", Group.GroupBy.TAG);
         for (MediaFile file : files) {
             if (file == null) continue;
+            List<String> tags = sanitizedTags(file);
             boolean added = false;
-            List<String> tags = file.getTags();
-            if (tags != null) {
-                for (String rawTag : tags) {
-                    String tag = TagText.plain(rawTag);
-                    if (tag.isEmpty()) continue;
+            if ("first".equals(tagGroupMode)) {
+                if (!tags.isEmpty()) {
+                    add(map, tags.get(0), Group.GroupBy.TAG, file);
+                    added = true;
+                }
+            } else if ("last".equals(tagGroupMode)) {
+                if (!tags.isEmpty()) {
+                    add(map, tags.get(tags.size() - 1), Group.GroupBy.TAG, file);
+                    added = true;
+                }
+            } else if ("position".equals(tagGroupMode)) {
+                int index = tagGroupPosition - 1;
+                if (index >= 0 && index < tags.size()) {
+                    add(map, tags.get(index), Group.GroupBy.TAG, file);
+                    added = true;
+                }
+            } else if ("pattern".equals(tagGroupMode)) {
+                for (String tag : tags) {
+                    if (tagQueryParser.matchesTagPattern(tag, tagGroupPattern)) {
+                        add(map, tag, Group.GroupBy.TAG, file);
+                        added = true;
+                    }
+                }
+            } else {
+                for (String tag : tags) {
                     add(map, tag, Group.GroupBy.TAG, file);
                     added = true;
                 }
@@ -128,6 +167,16 @@ public class GroupManager {
         // Untagged is intentionally appended after all tag groups, regardless
         // of its count.
         if (untagged.getCount() > 0) result.add(untagged);
+        return result;
+    }
+
+    private List<String> sanitizedTags(MediaFile file) {
+        List<String> result = new ArrayList<String>();
+        if (file == null || file.getTags() == null) return result;
+        for (String rawTag : file.getTags()) {
+            String tag = TagText.plain(rawTag);
+            if (!tag.isEmpty()) result.add(tag);
+        }
         return result;
     }
 

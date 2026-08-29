@@ -967,6 +967,7 @@ public class MainActivity extends Activity
         folderWatcher   = new FolderWatcher(this);
         searchManager   = new SearchManager();
         groupManager    = new GroupManager();
+        loadTagGroupingConfiguration();
         if (!folderManager.getFolders().isEmpty()) groupManager.setWatchedRoot(folderManager.getFolders().get(0));
         loadManualGroupAssignments();
         cacheManager    = new CacheManager(this);
@@ -1035,6 +1036,15 @@ public class MainActivity extends Activity
         int fallback = getWindowSize();
         int value = settings.getInt("page_size", fallback);
         return Math.max(1, Math.min(500, value));
+    }
+
+    private void loadTagGroupingConfiguration() {
+        android.content.SharedPreferences settings = getSharedPreferences(
+                "settings_prefs", MODE_PRIVATE);
+        groupManager.setTagGroupingConfiguration(
+                settings.getString("group_tag_mode", "all"),
+                settings.getInt("group_tag_position", 1),
+                settings.getString("group_tag_pattern", ""));
     }
 
     private void migrateDuplicateWindowSetting() {
@@ -1948,6 +1958,7 @@ public class MainActivity extends Activity
                 && fullList.get(currentIndex) != null
                 ? fullList.get(currentIndex).getPath() : null;
 
+        loadTagGroupingConfiguration();
         final boolean groupingByTag = groupManager.getCurrent() == Group.GroupBy.TAG;
         // Tag grouping must always start from MediaIndexer.getFullIndex();
         // WindowManager contains only the current display window.
@@ -2191,7 +2202,11 @@ public class MainActivity extends Activity
             case DESELECT_ALL: deselectAllActiveFiles(); break;
             case SORT_PICKER: showSortBuilder(); break;
             case FILTER_PICKER: showFilterMenu(btnFilter); break;
-            case GROUP_PICKER: showGroupMenu(findViewById(R.id.btnGroupBy)); break;
+            case GROUP_PICKER:
+                View groupAnchor = galleryModeActive && toolbarOverflowButton != null
+                        ? toolbarOverflowButton : findViewById(R.id.btnGroupBy);
+                showGroupMenu(groupAnchor);
+                break;
             case UNDO: undoLastAction(); break;
             case DELETE: deleteCurrentFile(); break;
             case TOGGLE_TAG_PANEL: findViewById(R.id.btnToggleTagPanel).performClick(); break;
@@ -3618,6 +3633,115 @@ private Spinner makeSpinner(String[] options) {
                 }).setNegativeButton("Cancel", null).show();
     }
 
+    private void showTagGroupingOptions() {
+        final android.content.SharedPreferences settings = getSharedPreferences(
+                "settings_prefs", MODE_PRIVATE);
+        final String[] modeIds = {"all", "first", "last", "position", "pattern"};
+        final String[] modeLabels = {
+                "All tags",
+                "First tag only",
+                "Last tag only",
+                "Tag position N",
+                "Tags matching pattern"
+        };
+        String savedMode = settings.getString("group_tag_mode", "all");
+        int selectedMode = 0;
+        for (int i = 0; i < modeIds.length; i++) {
+            if (modeIds[i].equals(savedMode)) {
+                selectedMode = i;
+                break;
+            }
+        }
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(24, 8, 24, 8);
+        content.addView(makeLabel("Group by tag position"));
+
+        final Spinner modeSpinner = new Spinner(this);
+        ArrayAdapter<String> modeAdapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_item, modeLabels);
+        modeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        modeSpinner.setAdapter(modeAdapter);
+        modeSpinner.setSelection(selectedMode);
+        content.addView(modeSpinner);
+
+        final LinearLayout positionRow = new LinearLayout(this);
+        positionRow.setOrientation(LinearLayout.HORIZONTAL);
+        positionRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView positionLabel = makeLabel("Tag position (1-10):");
+        positionLabel.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        positionRow.addView(positionLabel);
+        final EditText positionInput = new EditText(this);
+        positionInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        positionInput.setSingleLine(true);
+        positionInput.setText(String.valueOf(Math.max(1, Math.min(10,
+                settings.getInt("group_tag_position", 1)))));
+        positionRow.addView(positionInput);
+        content.addView(positionRow);
+
+        final LinearLayout patternRow = new LinearLayout(this);
+        patternRow.setOrientation(LinearLayout.VERTICAL);
+        TextView patternLabel = makeLabel("Tag pattern (uses search operators):");
+        patternRow.addView(patternLabel);
+        final EditText patternInput = new EditText(this);
+        patternInput.setSingleLine(true);
+        patternInput.setHint("tag:travel -tag:private");
+        patternInput.setText(settings.getString("group_tag_pattern", ""));
+        patternRow.addView(patternInput);
+        content.addView(patternRow);
+
+        updateTagGroupingOptionVisibility(positionRow, patternRow, selectedMode);
+        modeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view,
+                                                  int position, long id) {
+                updateTagGroupingOptionVisibility(positionRow, patternRow, position);
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+
+        new AlertDialog.Builder(this)
+                .setTitle("Group by tag position")
+                .setView(content)
+                .setPositiveButton("Apply", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        int position;
+                        try {
+                            position = Integer.parseInt(positionInput.getText().toString().trim());
+                        } catch (Exception error) {
+                            Toast.makeText(MainActivity.this,
+                                    "Tag position must be 1-10", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        if (position < 1 || position > 10) {
+                            Toast.makeText(MainActivity.this,
+                                    "Tag position must be 1-10", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        int selected = modeSpinner.getSelectedItemPosition();
+                        if (selected < 0 || selected >= modeIds.length) selected = 0;
+                        String pattern = TagText.plain(patternInput.getText().toString()).trim();
+                        settings.edit()
+                                .putString("group_tag_mode", modeIds[selected])
+                                .putInt("group_tag_position", position)
+                                .putString("group_tag_pattern", pattern)
+                                .apply();
+                        loadTagGroupingConfiguration();
+                        tagGroupPage = 0;
+                        scheduleRefresh();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void updateTagGroupingOptionVisibility(View positionRow, View patternRow,
+                                                   int selectedMode) {
+        positionRow.setVisibility(selectedMode == 3 ? View.VISIBLE : View.GONE);
+        patternRow.setVisibility(selectedMode == 4 ? View.VISIBLE : View.GONE);
+    }
+
     private void showGroupMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
         menu.getMenu().add("By File Type");
@@ -3629,6 +3753,9 @@ private Spinner makeSpinner(String[] options) {
         menu.getMenu().add("By Color Profile");
         menu.getMenu().add("By Directory Depth");
         menu.getMenu().add("By Manual Group");
+        if (groupManager.getCurrent() == Group.GroupBy.TAG) {
+            menu.getMenu().add("Group by tag position");
+        }
         menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
             @Override public boolean onMenuItemClick(android.view.MenuItem item) {
                 switch (item.getTitle().toString()) {
@@ -3636,8 +3763,13 @@ private Spinner makeSpinner(String[] options) {
                     case "By Tag":
                         if (groupManager.getCurrent() != Group.GroupBy.TAG) tagGroupPage = 0;
                         groupManager.setGroupBy(Group.GroupBy.TAG);
-                        break;
-                    case "By Date":      groupManager.setGroupBy(Group.GroupBy.DATE);      break;
+                        scheduleRefresh();
+                        showTagGroupingOptions();
+                        return true;
+                    case "Group by tag position":
+                        showTagGroupingOptions();
+                        return true;
+                    case "By Date":                          groupManager.setGroupBy(Group.GroupBy.DATE);      break;
                     case "By Folder":    groupManager.setGroupBy(Group.GroupBy.FOLDER);    break;
                     case "By Tag Prefix": groupManager.setGroupBy(Group.GroupBy.TAG_PREFIX); break;
                     case "By Sequence Group": groupManager.setGroupBy(Group.GroupBy.SEQUENCE_GROUP); break;
