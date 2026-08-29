@@ -3867,21 +3867,9 @@ private Spinner makeSpinner(String[] options) {
     private void clearSearchFocusAndHideKeyboard() {
         if (searchBar == null) return;
         searchBar.clearFocus();
+        searchBar.setFocusable(false);
+        searchBar.setFocusable(true);
         hideKeyboard(searchBar);
-        View activityContent = findViewById(android.R.id.content);
-        if (activityContent != null) {
-            activityContent.setFocusable(true);
-            activityContent.setFocusableInTouchMode(true);
-            activityContent.requestFocus();
-        }
-        View focusTarget = fileBrowser;
-        if (focusTarget == null) focusTarget = findViewById(R.id.fileBrowser);
-        if (focusTarget == null) focusTarget = findViewById(R.id.previewPanel);
-        if (focusTarget != null) {
-            focusTarget.setFocusable(true);
-            focusTarget.setFocusableInTouchMode(true);
-            focusTarget.requestFocus();
-        }
     }
 
     private void hideKeyboard(EditText input) {
