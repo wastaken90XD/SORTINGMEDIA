@@ -299,44 +299,115 @@ public class MainActivity extends Activity
             boolean showPreview = sp.getBoolean("show_preview", true);
             preview.setVisibility(showPreview ? View.VISIBLE : View.GONE);
         }
-        applyTagPanelWidth();
+        applyRootPanelWidths();
     }
 
-    private void applyTagPanelWidth() {
-        View tagPanel = findViewById(R.id.tagPanel);
-        if (!(tagPanel instanceof LinearLayout)) return;
-        int widthDp = getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                .getInt("tag_bar_width", 120);
-        widthDp = Math.max(48, Math.min(200, widthDp));
-        int widthPx = (int) (widthDp * getResources().getDisplayMetrics().density + 0.5f);
-        ViewGroup.LayoutParams raw = tagPanel.getLayoutParams();
+    /**
+     * Give the fixed right-side tag bar its space before splitting the rest
+     * between the explorer and preview. All three panel roots use fixed pixel
+     * widths so LinearLayout weights cannot draw over the tag bar.
+     */
+    private void applyRootPanelWidths() {
+        android.content.SharedPreferences prefs = getSharedPreferences(
+                "settings_prefs", MODE_PRIVATE);
+        View preview = findViewById(R.id.previewPanel);
+        boolean previewVisible = preview != null && preview.getVisibility() == View.VISIBLE;
+        applyRootPanelWidths(prefs.getInt("explorer_width_percent", 40), previewVisible);
+    }
+
+    private void applyRootPanelWidths(int explorerPercent, boolean previewVisible) {
+        View rootView = findViewById(R.id.contentPanels);
+        View explorer = findViewById(R.id.explorerPanel);
+        View preview = findViewById(R.id.previewPanel);
+        View tagBar = findViewById(R.id.tagBarContainer);
+        if (!(rootView instanceof LinearLayout)
+                || explorer == null || preview == null || tagBar == null) return;
+
+        LinearLayout root = (LinearLayout) rootView;
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        int measuredRootWidth = root.getWidth();
+        if (measuredRootWidth > 0) screenWidth = Math.min(screenWidth, measuredRootWidth);
+        if (screenWidth <= 0) return;
+
+        android.content.SharedPreferences prefs = getSharedPreferences(
+                "settings_prefs", MODE_PRIVATE);
+        int tagWidthDp = prefs.getInt("tag_bar_width", 120);
+        tagWidthDp = Math.max(48, Math.min(200, tagWidthDp));
+        int tagWidthPx = (int) (tagWidthDp * getResources().getDisplayMetrics().density + 0.5f);
+        if (tagBar.getVisibility() != View.VISIBLE) tagWidthPx = 0;
+
+        int dividerWidth = getFixedChildWidth(findViewById(R.id.explorerDivider))
+                + getFixedChildWidth(findViewById(R.id.previewDivider));
+        tagWidthPx = Math.min(tagWidthPx, Math.max(0, screenWidth - dividerWidth));
+        int remainingWidth = Math.max(0, screenWidth - dividerWidth - tagWidthPx);
+        int percent = Math.max(0, Math.min(100, explorerPercent));
+        int explorerWidth;
+        int previewWidth;
+        if (previewVisible) {
+            explorerWidth = remainingWidth * percent / 100;
+            previewWidth = remainingWidth - explorerWidth;
+        } else {
+            explorerWidth = remainingWidth;
+            previewWidth = 0;
+        }
+
+        // Set the rightmost panel first, then consume only the width left for
+        // the two content panels. This ordering is intentional.
+        setFixedPanelWidth(tagBar, tagWidthPx);
+        setFixedPanelWidth(explorer, explorerWidth);
+        setFixedPanelWidth(preview, previewWidth);
+    }
+
+    private int getFixedChildWidth(View child) {
+        if (child == null || child.getVisibility() == View.GONE) return 0;
+        int measured = child.getMeasuredWidth();
+        if (measured > 0) return measured;
+        ViewGroup.LayoutParams params = child.getLayoutParams();
+        return params == null ? 0 : Math.max(0, params.width);
+    }
+
+    private void setFixedPanelWidth(View panel, int widthPx) {
+        ViewGroup.LayoutParams raw = panel.getLayoutParams();
         if (!(raw instanceof LinearLayout.LayoutParams)) return;
         LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) raw;
-        params.width = widthPx;
+        params.width = Math.max(0, widthPx);
         params.weight = 0f;
-        tagPanel.setLayoutParams(params);
+        panel.setLayoutParams(params);
     }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) installExplorerWidthLayoutListener();
+        if (!hasFocus) return;
+        applyRootPanelWidths();
+        final View rootView = findViewById(R.id.contentPanels);
+        if (rootView != null) {
+            rootView.post(new Runnable() {
+                @Override public void run() {
+                    applyRootPanelWidths();
+                    installExplorerWidthLayoutListener();
+                }
+            });
+        } else {
+            installExplorerWidthLayoutListener();
+        }
     }
 
     private void installExplorerWidthLayoutListener() {
-        if (fileBrowser == null) return;
-        final android.view.ViewTreeObserver observer = fileBrowser.getViewTreeObserver();
+        View rootView = findViewById(R.id.contentPanels);
+        if (rootView == null) return;
+        final android.view.ViewTreeObserver observer = rootView.getViewTreeObserver();
         if (!observer.isAlive()) return;
         if (explorerWidthLayoutListener != null) return;
         explorerWidthLayoutListener = new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
             @Override public void onGlobalLayout() {
-                if (fileBrowser == null || fileBrowser.getWidth() <= 0 || fileBrowser.getHeight() <= 0) return;
-                android.content.SharedPreferences prefs = getSharedPreferences(
-                        "settings_prefs", MODE_PRIVATE);
-                boolean showPreview = prefs.getBoolean("show_preview", true);
-                applyExplorerWidth(prefs.getInt("explorer_width_percent", 40), showPreview);
-                android.view.ViewTreeObserver current = fileBrowser.getViewTreeObserver();
-                if (current.isAlive()) current.removeOnGlobalLayoutListener(explorerWidthLayoutListener);
+                View currentRoot = findViewById(R.id.contentPanels);
+                if (currentRoot == null || currentRoot.getWidth() <= 0
+                        || currentRoot.getHeight() <= 0) return;
+                applyRootPanelWidths();
+                android.view.ViewTreeObserver current = currentRoot.getViewTreeObserver();
+                if (current.isAlive()) current.removeOnGlobalLayoutListener(
+                        explorerWidthLayoutListener);
                 explorerWidthLayoutListener = null;
             }
         };
@@ -344,21 +415,7 @@ public class MainActivity extends Activity
     }
 
     private void applyExplorerWidth(int percent, boolean previewVisible) {
-        View browser = fileBrowser;
-        if (browser == null || !(browser.getParent() instanceof ViewGroup)) return;
-        ViewGroup explorer = (ViewGroup) browser.getParent();
-        if (!(explorer.getParent() instanceof LinearLayout)) return;
-        LinearLayout.LayoutParams explorerParams = (LinearLayout.LayoutParams) explorer.getLayoutParams();
-        explorerParams.weight = previewVisible ? Math.max(20, Math.min(80, percent)) : 1f;
-        explorerParams.width = 0;
-        explorer.setLayoutParams(explorerParams);
-        View preview = findViewById(R.id.previewPanel);
-        if (preview != null && preview.getParent() instanceof LinearLayout && previewVisible) {
-            LinearLayout.LayoutParams previewParams = (LinearLayout.LayoutParams) preview.getLayoutParams();
-            previewParams.weight = Math.max(1, 100 - explorerParams.weight);
-            previewParams.width = 0;
-            preview.setLayoutParams(previewParams);
-        }
+        applyRootPanelWidths(percent, previewVisible);
     }
 
     /** Force-hides the tag panel and marks the toggle when tags are disabled. */
@@ -388,9 +445,11 @@ public class MainActivity extends Activity
         thumbnailLoader.shutdown();
         if (galleryThumbnailLoader != null) galleryThumbnailLoader.shutdown();
         if (searchHistoryPopup != null) searchHistoryPopup.dismiss();
-        if (explorerWidthLayoutListener != null && fileBrowser != null
-                && fileBrowser.getViewTreeObserver().isAlive()) {
-            fileBrowser.getViewTreeObserver().removeOnGlobalLayoutListener(explorerWidthLayoutListener);
+        View contentPanels = findViewById(R.id.contentPanels);
+        if (explorerWidthLayoutListener != null && contentPanels != null
+                && contentPanels.getViewTreeObserver().isAlive()) {
+            contentPanels.getViewTreeObserver().removeOnGlobalLayoutListener(
+                    explorerWidthLayoutListener);
             explorerWidthLayoutListener = null;
         }
         cancelComboTimeout();

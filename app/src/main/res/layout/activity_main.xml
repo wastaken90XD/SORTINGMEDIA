@@ -157,56 +157,16 @@
         android:textSize="11sp" />
 
     <LinearLayout
-        android:id="@+id/tagBarContainer"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:background="#161626">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <EditText
-                android:id="@+id/tagBarSearch"
-                android:layout_width="0dp"
-                android:layout_height="32dp"
-                android:layout_weight="1"
-                android:hint="Search tags…"
-                android:textColorHint="#666666"
-                android:textColor="#FFFFFF"
-                android:singleLine="true"
-                android:inputType="text"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp" />
-
-            <Button
-                android:id="@+id/tagBarSort"
-                android:layout_width="wrap_content"
-                android:layout_height="32dp"
-                android:text="Usage"
-                android:textSize="10sp"
-                android:textAllCaps="false" />
-        </LinearLayout>
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/tagBarList"
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:overScrollMode="never" />
-    </LinearLayout>
-
-    <LinearLayout
+        android:id="@+id/contentPanels"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="horizontal">
 
         <FrameLayout
+            android:id="@+id/explorerPanel"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="2">
+            android:layout_weight="0">
 
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/fileBrowser"
@@ -228,6 +188,7 @@
         </FrameLayout>
 
         <View
+            android:id="@+id/explorerDivider"
             android:layout_width="1dp"
             android:layout_height="match_parent"
             android:background="#2A2A3E"/>
@@ -236,24 +197,68 @@
             android:id="@+id/previewPanel"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="4"
+            android:layout_weight="0"
             android:background="#0F0F1A"/>
 
         <View
+            android:id="@+id/previewDivider"
             android:layout_width="1dp"
             android:layout_height="match_parent"
             android:background="#2A2A3E"/>
 
-        <!-- Tag panel — hidden by default, toggled by btnToggleTagPanel -->
+        <!-- The tag bar is the fixed-width, rightmost panel. -->
         <LinearLayout
-            android:id="@+id/tagPanel"
+            android:id="@+id/tagBarContainer"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="2"
+            android:layout_weight="0"
             android:orientation="vertical"
-            android:background="#161626"
-            android:padding="8dp"
-            android:visibility="gone">
+            android:background="#161626">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <EditText
+                    android:id="@+id/tagBarSearch"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:hint="Search tags…"
+                    android:textColorHint="#666666"
+                    android:textColor="#FFFFFF"
+                    android:singleLine="true"
+                    android:inputType="text"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp" />
+
+                <Button
+                    android:id="@+id/tagBarSort"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:text="Usage"
+                    android:textSize="10sp"
+                    android:textAllCaps="false" />
+            </LinearLayout>
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/tagBarList"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:overScrollMode="never" />
+
+            <!-- Legacy tag panel remains available inside the reserved tag-bar space. -->
+            <LinearLayout
+                android:id="@+id/tagPanel"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:background="#161626"
+                android:padding="8dp"
+                android:visibility="gone">
 
             <TextView
                 android:layout_width="match_parent"
@@ -312,6 +317,8 @@
                     android:textSize="18sp"
                     android:backgroundTint="#E94560"
                     android:layout_marginStart="4dp"/>
+
+            </LinearLayout>
 
             </LinearLayout>
 
