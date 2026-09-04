@@ -6016,8 +6016,8 @@ private Spinner makeSpinner(String[] options) {
 
     private void showAboutFromOverflow() {
         new AlertDialog.Builder(this)
-                .setTitle("About MediaSorter")
-                .setMessage("MediaSorter")
+                .setTitle(getString(R.string.app_name))
+                .setMessage(getString(R.string.app_about_message))
                 .setPositiveButton("OK", null)
                 .show();
     }

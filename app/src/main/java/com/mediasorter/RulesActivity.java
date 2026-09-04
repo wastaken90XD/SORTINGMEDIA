@@ -28,6 +28,7 @@ public class RulesActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setTitle(getString(R.string.app_name) + " Organizer");
 
         // Managers
         TagManager tagManager = new TagManager(this);

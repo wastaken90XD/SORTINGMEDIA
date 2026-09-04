@@ -20,6 +20,7 @@ public class DashboardActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setTitle(getString(R.string.app_name) + " Dashboard");
 
         // Prefer the static snapshots passed by MainActivity — a whole media
         // index sent as Intent extras can overflow the binder transaction

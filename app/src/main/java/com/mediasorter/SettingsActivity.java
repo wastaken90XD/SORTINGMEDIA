@@ -90,6 +90,7 @@ public class SettingsActivity extends Activity {
         try {
             isInitializing = true;
             super.onCreate(savedInstanceState);
+            setTitle(getString(R.string.app_name) + " Settings");
         cacheManager    = new CacheManager(this);
         folderManager   = new FolderManager(this);
         thumbnailLoader = new ThumbnailLoader(this);
