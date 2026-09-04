@@ -2920,7 +2920,8 @@ public class SettingsActivity extends Activity {
         mainLayout.addView(stepsContainer);
 
         final Button[] addStepHolder = new Button[1];
-        final Runnable renderStepsList = new Runnable() {
+        final Runnable[] renderStepsList = new Runnable[1];
+        renderStepsList[0] = new Runnable() {
             @Override public void run() {
                 stepsContainer.removeAllViews();
                 if (tempActions.isEmpty()) {
@@ -2950,7 +2951,7 @@ public class SettingsActivity extends Activity {
                                 if (stepIndex <= 0) return;
                                 com.mediasorter.organizer.Action moved = tempActions.remove(stepIndex);
                                 tempActions.add(stepIndex - 1, moved);
-                                renderStepsList.run();
+                                renderStepsList[0].run();
                             }
                         });
                         stepRow.addView(up);
@@ -2962,7 +2963,7 @@ public class SettingsActivity extends Activity {
                                 if (stepIndex >= tempActions.size() - 1) return;
                                 com.mediasorter.organizer.Action moved = tempActions.remove(stepIndex);
                                 tempActions.add(stepIndex + 1, moved);
-                                renderStepsList.run();
+                                renderStepsList[0].run();
                             }
                         });
                         stepRow.addView(down);
@@ -2979,7 +2980,7 @@ public class SettingsActivity extends Activity {
                                                     com.mediasorter.organizer.Action updated) {
                                                 if (updated != null) {
                                                     tempActions.set(stepIndex, updated);
-                                                    renderStepsList.run();
+                                                    renderStepsList[0].run();
                                                 }
                                             }
                                         });
@@ -2991,7 +2992,7 @@ public class SettingsActivity extends Activity {
                         remove.setOnClickListener(new View.OnClickListener() {
                             @Override public void onClick(View view) {
                                 tempActions.remove(stepIndex);
-                                renderStepsList.run();
+                                renderStepsList[0].run();
                             }
                         });
                         stepRow.addView(remove);
@@ -3003,7 +3004,7 @@ public class SettingsActivity extends Activity {
                 }
             }
         };
-        renderStepsList.run();
+        renderStepsList[0].run();
 
         final Button addStep = makeButton("Add Step");
         addStepHolder[0] = addStep;
@@ -3027,7 +3028,7 @@ public class SettingsActivity extends Activity {
                                     return;
                                 }
                                 tempActions.add(action);
-                                renderStepsList.run();
+                                renderStepsList[0].run();
                                 if (tempActions.size() >= 10) {
                                     Toast.makeText(SettingsActivity.this,
                                             "Maximum 10 steps reached.", Toast.LENGTH_SHORT).show();
