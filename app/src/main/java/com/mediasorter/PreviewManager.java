@@ -578,6 +578,17 @@ public class PreviewManager {
         }
     }
 
+    public void rotatePreview(float degrees) {
+        if (imagePreview != null) imagePreview.setRotation(imagePreview.getRotation() + degrees);
+    }
+
+    public void zoomPreview(float factor) {
+        scaleFactor = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, scaleFactor * factor));
+        applyMatrix();
+    }
+
+    public void resetPreviewZoom() { resetZoom(); }
+
     public void setSwipeDetector(GestureDetector d) { this.swipeDetector = d; }
     public void setActionListener(ActionListener l) { this.actionListener = l; }
     public void setGestureInputListener(GestureInputListener l) { this.gestureInputListener = l; }

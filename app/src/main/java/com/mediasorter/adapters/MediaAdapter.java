@@ -433,6 +433,26 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         if (selectionListener != null) selectionListener.onSelectionChanged(0);
     }
 
+    public void invertSelection() {
+        if (groupedMode) {
+            for (DisplayItem item : displayItems) {
+                if (item.header || item.file == null) continue;
+                String key = appearanceKey(item);
+                if (selected.contains(key)) selected.remove(key);
+                else selected.add(key);
+            }
+        } else {
+            for (MediaFile file : files) {
+                if (file == null) continue;
+                String path = file.getPath();
+                if (selected.contains(path)) selected.remove(path);
+                else selected.add(path);
+            }
+        }
+        notifySelectionChangedVisually();
+        if (selectionListener != null) selectionListener.onSelectionChanged(getSelectedCount());
+    }
+
     /**
      * Rebind only the selection visuals of visible rows (checkbox, highlight,
      * order badge) via payload — a full notifyDataSetChanged() here forced a

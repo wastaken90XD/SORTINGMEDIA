@@ -2230,9 +2230,99 @@ public class MainActivity extends Activity
             case DELETE: deleteCurrentFile(); break;
             case TOGGLE_TAG_PANEL: findViewById(R.id.btnToggleTagPanel).performClick(); break;
             case CYCLE_TAG_BAR_SORT: cycleTagBarSort(); break;
+            case IMPORT_SETTINGS:
+            case OPEN_MACRO_BUILDER:
+            case OPEN_GESTURE_SETTINGS:
+            case OPEN_COMBO_SETTINGS:
+            case OPEN_TOOLBAR_SETTINGS:
+                startActivity(new Intent(this, SettingsActivity.class)); break;
+            case TOGGLE_SEARCH_BAR: toggleSearchBar(); break;
+            case TOGGLE_PREVIEW_PANEL: togglePreviewPanel(); break;
+            case STRIP_METADATA_CURRENT: stripCurrentMetadata(); break;
+            case WRITE_METADATA_NOW: writeMetadataNow(); break;
+            case ROTATE_PREVIEW_CW: if (previewManager != null) previewManager.rotatePreview(90f); break;
+            case ROTATE_PREVIEW_CCW: if (previewManager != null) previewManager.rotatePreview(-90f); break;
+            case RESET_ZOOM: if (previewManager != null) previewManager.resetPreviewZoom(); break;
+            case ZOOM_IN: if (previewManager != null) previewManager.zoomPreview(1.2f); break;
+            case ZOOM_OUT: if (previewManager != null) previewManager.zoomPreview(0.8f); break;
+            case CLEAR_ALL_TAGS: clearAllTagsFromCurrent(); break;
+            case ADD_LAST_TAG: addLastRecentTag(); break;
+            case REMOVE_LAST_TAG: removeLastRecentTag(); break;
+            case OPEN_MOVE_DIALOG: showGalleryCopyMoveDialog(false); break;
+            case OPEN_COPY_DIALOG: showGalleryCopyMoveDialog(true); break;
+            case OPEN_RENAME_DIALOG:
+                if (currentFileReference() != null) showFileRenameDialog(currentFileReference());
+                break;
+            case OPEN_AUTO_LINK_DIALOG: showAutoLinkSequentialDialog(); break;
+            case OPEN_BATCH_TAG_DIALOG: showBatchTagDialog(); break;
+            case OPEN_COLOR_PICKER: showColorAnalysisDialog(); break;
+            case INVERT_SELECTION:
+                if (galleryModeActive && galleryAdapter != null) galleryAdapter.invertSelection();
+                break;
             case NOTHING: break;
             default: break;
         }
+    }
+
+    private void toggleSearchBar() {
+        if (searchBar == null) return;
+        boolean show = searchBar.getVisibility() != View.VISIBLE;
+        boolean allowed = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getBoolean("show_search_bar", true);
+        searchBar.setVisibility(show && allowed ? View.VISIBLE : View.GONE);
+        if (!show) clearSearchFocusAndHideKeyboard();
+    }
+
+    private void togglePreviewPanel() {
+        View preview = findViewById(R.id.previewPanel);
+        if (preview == null) return;
+        boolean show = preview.getVisibility() != View.VISIBLE;
+        getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
+                .putBoolean("show_preview", show).apply();
+        preview.setVisibility(show ? View.VISIBLE : View.GONE);
+        applyExplorerWidth(getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getInt("explorer_width_percent", 40), show);
+    }
+
+    private void writeMetadataNow() {
+        MediaFile file = currentFileReference();
+        if (file == null) return;
+        MetadataWriter.writeTags(file.getPath(), file.getTags());
+        file.setMetadataPresent(true);
+    }
+
+    private void stripCurrentMetadata() {
+        MediaFile file = currentFileReference();
+        if (file == null) return;
+        String lower = file.getPath().toLowerCase(java.util.Locale.US);
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+            MetadataWriter.stripJpegMetadata(file.getPath(), true);
+        } else if (lower.endsWith(".png")) {
+            MetadataWriter.stripPngMetadata(file.getPath());
+        }
+        file.setMetadataPresent(false);
+    }
+
+    private void clearAllTagsFromCurrent() {
+        MediaFile file = currentFileReference();
+        if (file == null) return;
+        for (String tag : new ArrayList<String>(file.getTags())) tagManager.removeTag(file, tag);
+        tagAdapter.setCurrentFile(file);
+        tagAdapter.setTags(tagManager.getAllTags());
+        refreshSidePanel();
+        refreshTagBar();
+    }
+
+    private void addLastRecentTag() {
+        MediaFile file = currentFileReference();
+        List<Tag> recent = tagManager.getRecentTags(1);
+        if (file != null && !recent.isEmpty()) tagManager.applyTag(file, recent.get(0).getName());
+    }
+
+    private void removeLastRecentTag() {
+        MediaFile file = currentFileReference();
+        List<Tag> recent = tagManager.getRecentTags(1);
+        if (file != null && !recent.isEmpty()) tagManager.removeTag(file, recent.get(0).getName());
     }
 
     private void applyQuickTagToCurrent(String tag) {

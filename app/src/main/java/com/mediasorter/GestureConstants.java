@@ -64,7 +64,43 @@ public final class GestureConstants {
     public static final String ACTION_SCAN = "SCAN";
     public static final String ACTION_TOGGLE_TAG_PANEL = "TOGGLE_TAG_PANEL";
     public static final String ACTION_CYCLE_TAG_BAR_SORT = "CYCLE_TAG_BAR_SORT";
+    public static final String ACTION_IMPORT_SETTINGS = "IMPORT_SETTINGS";
+    public static final String ACTION_TOGGLE_SEARCH_BAR = "TOGGLE_SEARCH_BAR";
+    public static final String ACTION_TOGGLE_PREVIEW_PANEL = "TOGGLE_PREVIEW_PANEL";
+    public static final String ACTION_OPEN_MACRO_BUILDER = "OPEN_MACRO_BUILDER";
+    public static final String ACTION_OPEN_GESTURE_SETTINGS = "OPEN_GESTURE_SETTINGS";
+    public static final String ACTION_OPEN_COMBO_SETTINGS = "OPEN_COMBO_SETTINGS";
+    public static final String ACTION_OPEN_TOOLBAR_SETTINGS = "OPEN_TOOLBAR_SETTINGS";
+    public static final String ACTION_STRIP_METADATA_CURRENT = "STRIP_METADATA_CURRENT";
+    public static final String ACTION_WRITE_METADATA_NOW = "WRITE_METADATA_NOW";
+    public static final String ACTION_ROTATE_PREVIEW_CW = "ROTATE_PREVIEW_CW";
+    public static final String ACTION_ROTATE_PREVIEW_CCW = "ROTATE_PREVIEW_CCW";
+    public static final String ACTION_RESET_ZOOM = "RESET_ZOOM";
+    public static final String ACTION_ZOOM_IN = "ZOOM_IN";
+    public static final String ACTION_ZOOM_OUT = "ZOOM_OUT";
+    public static final String ACTION_CLEAR_ALL_TAGS = "CLEAR_ALL_TAGS";
+    public static final String ACTION_ADD_LAST_TAG = "ADD_LAST_TAG";
+    public static final String ACTION_REMOVE_LAST_TAG = "REMOVE_LAST_TAG";
+    public static final String ACTION_OPEN_MOVE_DIALOG = "OPEN_MOVE_DIALOG";
+    public static final String ACTION_OPEN_COPY_DIALOG = "OPEN_COPY_DIALOG";
+    public static final String ACTION_OPEN_RENAME_DIALOG = "OPEN_RENAME_DIALOG";
+    public static final String ACTION_OPEN_AUTO_LINK_DIALOG = "OPEN_AUTO_LINK_DIALOG";
+    public static final String ACTION_OPEN_BATCH_TAG_DIALOG = "OPEN_BATCH_TAG_DIALOG";
+    public static final String ACTION_OPEN_COLOR_PICKER = "OPEN_COLOR_PICKER";
+    public static final String ACTION_INVERT_SELECTION = "INVERT_SELECTION";
     public static final String ACTION_NOTHING = "NOTHING";
+
+    // Stable aliases retained for callers that use the expanded action names.
+    public static final String ACTION_OPEN_GALLERY_MODE = ACTION_OPEN_GALLERY;
+    public static final String ACTION_OPEN_RULES_EDITOR = ACTION_OPEN_RULES;
+    public static final String ACTION_APPLY_QUICK_RANDOM_TAG = ACTION_QUICK_RANDOM_TAG;
+    public static final String ACTION_JUMP_TO_FIRST = ACTION_JUMP_FIRST;
+    public static final String ACTION_JUMP_TO_LAST = ACTION_JUMP_LAST;
+    public static final String ACTION_TOGGLE_TAG_BAR = ACTION_TOGGLE_TAG_PANEL;
+    public static final String ACTION_UNDO_LAST = ACTION_UNDO;
+    public static final String ACTION_SELECT_CURRENT = ACTION_TOGGLE_SELECTION_CURRENT;
+    public static final String ACTION_TOGGLE_FLAG = ACTION_FLAG;
+    public static final String ACTION_TOGGLE_SKIP = ACTION_SKIP;
 
     /** DONE remains a valid programmatic/rules action, but is not a gesture default. */
     public enum Category {
@@ -186,6 +222,30 @@ public final class GestureConstants {
         add(ACTION_TRIGGER_RESCAN, "Trigger rescan", Category.UTILITY);
         add(ACTION_REPEAT_LAST_MACRO, "Repeat last macro", Category.MACROS);
         add(ACTION_MACRO, "Macro", Category.MACROS);
+        add(ACTION_IMPORT_SETTINGS, "Import settings", Category.METADATA);
+        add(ACTION_TOGGLE_SEARCH_BAR, "Toggle search bar", Category.VIEWING);
+        add(ACTION_TOGGLE_PREVIEW_PANEL, "Toggle preview panel", Category.VIEWING);
+        add(ACTION_OPEN_MACRO_BUILDER, "Open macro builder", Category.MACROS);
+        add(ACTION_OPEN_GESTURE_SETTINGS, "Open gesture settings", Category.UTILITY);
+        add(ACTION_OPEN_COMBO_SETTINGS, "Open combo settings", Category.UTILITY);
+        add(ACTION_OPEN_TOOLBAR_SETTINGS, "Open toolbar settings", Category.UTILITY);
+        add(ACTION_STRIP_METADATA_CURRENT, "Strip metadata from current", Category.METADATA);
+        add(ACTION_WRITE_METADATA_NOW, "Write metadata now", Category.METADATA);
+        add(ACTION_ROTATE_PREVIEW_CW, "Rotate preview clockwise", Category.VIEWING);
+        add(ACTION_ROTATE_PREVIEW_CCW, "Rotate preview counter-clockwise", Category.VIEWING);
+        add(ACTION_RESET_ZOOM, "Reset preview zoom", Category.VIEWING);
+        add(ACTION_ZOOM_IN, "Zoom in", Category.VIEWING);
+        add(ACTION_ZOOM_OUT, "Zoom out", Category.VIEWING);
+        add(ACTION_CLEAR_ALL_TAGS, "Clear all tags", Category.TAGGING);
+        add(ACTION_ADD_LAST_TAG, "Add last tag", Category.TAGGING);
+        add(ACTION_REMOVE_LAST_TAG, "Remove last tag", Category.TAGGING);
+        add(ACTION_OPEN_MOVE_DIALOG, "Open move dialog", Category.ORGANIZATION);
+        add(ACTION_OPEN_COPY_DIALOG, "Open copy dialog", Category.ORGANIZATION);
+        add(ACTION_OPEN_RENAME_DIALOG, "Open rename dialog", Category.ORGANIZATION);
+        add(ACTION_OPEN_AUTO_LINK_DIALOG, "Open auto-link dialog", Category.ORGANIZATION);
+        add(ACTION_OPEN_BATCH_TAG_DIALOG, "Open batch tag dialog", Category.TAGGING);
+        add(ACTION_OPEN_COLOR_PICKER, "Open color picker", Category.METADATA);
+        add(ACTION_INVERT_SELECTION, "Invert selection", Category.NAVIGATION);
     }
 
     private static void add(String id, String label, Category category) {
