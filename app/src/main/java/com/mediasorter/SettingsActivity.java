@@ -456,53 +456,83 @@ public class SettingsActivity extends Activity {
 
     private void addToolbarSection(LinearLayout root) {
         root.addView(makeTitle("Toolbar"));
-        root.addView(makeLabel("Choose up to five visible action slots. Everything else remains in the overflow menu."));
-        root.addView(makeLabel("Available actions:"));
-        final List<String> ids = GestureConstants.getToolbarActionIds();
-        final String[] labels = new String[ids.size()];
-        StringBuilder available = new StringBuilder();
-        for (int i = 0; i < ids.size(); i++) {
-            labels[i] = GestureConstants.label(ids.get(i));
-            if (i > 0) available.append(", ");
-            available.append(labels[i]);
+        root.addView(makeLabel("Assigned actions appear on the toolbar; all other actions remain in overflow."));
+        final LinearLayout rows = new LinearLayout(this);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        root.addView(rows);
+        final List<String> assigned = loadToolbarSlots();
+        final Runnable render = new Runnable() {
+            @Override public void run() { renderToolbarRows(rows, assigned, render); }
+        };
+        render.run();
+        Button add = makeButton("+ Add Toolbar Action");
+        add.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                showToolbarActionPicker(assigned, render);
+            }
+        });
+        root.addView(add);
+    }
+
+    private void renderToolbarRows(final LinearLayout rows, final List<String> assigned,
+                                   final Runnable render) {
+        rows.removeAllViews();
+        if (assigned.isEmpty()) {
+            rows.addView(makeLabel("No toolbar actions assigned"));
+            return;
         }
-        root.addView(makeLabel(available.toString()));
-        List<String> saved = loadToolbarSlots();
-        final List<Spinner> spinners = new ArrayList<Spinner>();
-        int slotCount = Math.max(5, saved.size());
-        for (int slot = 0; slot < slotCount; slot++) {
+        for (int i = 0; i < assigned.size(); i++) {
+            final int index = i;
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            TextView label = makeLabel("Slot " + (slot + 1));
+            TextView label = makeLabel((i + 1) + ". " + toolbarActionLabel(assigned.get(i)));
             label.setLayoutParams(new LinearLayout.LayoutParams(0,
                     LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
             row.addView(label);
-            Spinner spinner = new Spinner(this);
-            ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
-                    android.R.layout.simple_spinner_item, labels);
-            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-            spinner.setAdapter(adapter);
-            String selected = slot < saved.size() ? saved.get(slot) : GestureConstants.ACTION_NOTHING;
-            int selectedPosition = ids.indexOf(selected);
-            if (selectedPosition < 0) selectedPosition = 0;
-            spinner.setSelection(selectedPosition);
-            final Spinner currentSpinner = spinner;
-            final boolean[] spinnerReady = new boolean[]{false};
-            spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-                @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                    if (!spinnerReady[0]) {
-                        spinnerReady[0] = true;
-                        return;
-                    }
-                    if (!isInitializing) saveToolbarSlots(spinners, ids);
+            Button up = makeSmallButton("Up");
+            up.setEnabled(i > 0);
+            up.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View view) {
+                    if (index <= 0) return;
+                    String value = assigned.remove(index);
+                    assigned.add(index - 1, value);
+                    saveToolbarSlotList(assigned);
+                    render.run();
                 }
-                @Override public void onNothingSelected(AdapterView<?> parent) {}
             });
-            row.addView(spinner);
-            spinners.add(currentSpinner);
-            root.addView(row);
+            row.addView(up);
+            Button down = makeSmallButton("Down");
+            down.setEnabled(i < assigned.size() - 1);
+            down.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View view) {
+                    if (index >= assigned.size() - 1) return;
+                    String value = assigned.remove(index);
+                    assigned.add(index + 1, value);
+                    saveToolbarSlotList(assigned);
+                    render.run();
+                }
+            });
+            row.addView(down);
+            Button remove = makeSmallButton("Remove");
+            remove.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View view) {
+                    assigned.remove(index);
+                    saveToolbarSlotList(assigned);
+                    render.run();
+                }
+            });
+            row.addView(remove);
+            rows.addView(row);
         }
+    }
+
+    private String toolbarActionLabel(String id) {
+        if (id != null && id.startsWith("MACRO:")) {
+            GestureSettings.GestureMacro macro = gestureSettings.getMacro(id.substring(6));
+            return macro == null ? "Macro" : macro.name;
+        }
+        return GestureConstants.label(id);
     }
 
     private List<String> loadToolbarSlots() {
@@ -514,8 +544,9 @@ public class SettingsActivity extends Activity {
             int maxSlots = GestureConstants.getToolbarActionIds().size();
             for (int i = 0; i < array.length() && result.size() < maxSlots; i++) {
                 String id = array.optString(i, "");
-                if (GestureConstants.isKnownAction(id) && !GestureConstants.ACTION_DONE.equals(id)
-                        && !GestureConstants.ACTION_NOTHING.equals(id)) result.add(id);
+                boolean macro = id.startsWith("MACRO:") && gestureSettings.getMacro(id.substring(6)) != null;
+                if ((GestureConstants.isKnownAction(id) && !GestureConstants.ACTION_DONE.equals(id)
+                        && !GestureConstants.ACTION_NOTHING.equals(id)) || macro) result.add(id);
             }
         } catch (Exception ignored) {}
         if (result.isEmpty() && !hasSavedSlots) {
@@ -528,19 +559,81 @@ public class SettingsActivity extends Activity {
         return result;
     }
 
-    private void saveToolbarSlots(List<Spinner> spinners, List<String> ids) {
+    private void saveToolbarSlotList(List<String> assigned) {
         org.json.JSONArray array = new org.json.JSONArray();
-        int maxSlots = ids.size();
-        for (Spinner spinner : spinners) {
-            int position = spinner.getSelectedItemPosition();
-            if (position < 0 || position >= ids.size()) continue;
-            String id = ids.get(position);
-            if (GestureConstants.ACTION_NOTHING.equals(id) || GestureConstants.ACTION_DONE.equals(id)) continue;
-            boolean duplicate = false;
-            for (int i = 0; i < array.length(); i++) if (id.equals(array.optString(i))) duplicate = true;
-            if (!duplicate && array.length() < maxSlots) array.put(id);
-        }
+        for (String id : assigned) if (id != null && array.length() < GestureConstants.getToolbarActionIds().size()) array.put(id);
         saveString("toolbar_slots", array.toString());
+    }
+
+    private void showToolbarActionPicker(final List<String> assigned, final Runnable render) {
+        final EditText search = new EditText(this);
+        search.setHint("Search actions…");
+        final ListView list = new ListView(this);
+        final List<String> rows = buildGesturePickerRows(GestureConstants.ACTION_NOTHING, "");
+        final ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_list_item_1, rows);
+        list.setAdapter(adapter);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.addView(search);
+        content.addView(list, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Add toolbar action")
+                .setView(content)
+                .setNegativeButton("Cancel", null).create();
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+            @Override public void onTextChanged(CharSequence s, int st, int before, int count) {
+                List<String> filtered = buildGesturePickerRows(GestureConstants.ACTION_NOTHING, s.toString());
+                adapter.clear();
+                adapter.addAll(filtered);
+                adapter.notifyDataSetChanged();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        list.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                String row = String.valueOf(parent.getItemAtPosition(position));
+                if (row.startsWith("[")) return;
+                GestureSettings.GestureAction action = gestureSettings.fromLabel(row);
+                if (action == GestureSettings.GestureAction.MACRO) {
+                    showToolbarMacroPicker(assigned, render, dialog);
+                    return;
+                }
+                String actionId = action.name();
+                if (!assigned.contains(actionId) && !GestureConstants.ACTION_NOTHING.equals(actionId)) {
+                    assigned.add(actionId);
+                    saveToolbarSlotList(assigned);
+                    render.run();
+                }
+                dialog.dismiss();
+            }
+        });
+        dialog.show();
+    }
+
+    private void showToolbarMacroPicker(final List<String> assigned, final Runnable render,
+                                        final AlertDialog parent) {
+        final List<GestureSettings.GestureMacro> macros = gestureSettings.getUsableMacros();
+        if (macros.isEmpty()) {
+            Toast.makeText(this, "No steps", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] names = new String[macros.size()];
+        for (int i = 0; i < macros.size(); i++) names[i] = macros.get(i).name;
+        new AlertDialog.Builder(this).setTitle("Choose macro").setItems(names,
+                new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        String id = "MACRO:" + macros.get(which).id;
+                        if (!assigned.contains(id)) {
+                            assigned.add(id);
+                            saveToolbarSlotList(assigned);
+                            render.run();
+                        }
+                        parent.dismiss();
+                    }
+                }).setNegativeButton("Cancel", null).show();
     }
 
     private void addGestureSettingsSection(LinearLayout root) {

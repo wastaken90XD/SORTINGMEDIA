@@ -5725,6 +5725,15 @@ private Spinner makeSpinner(String[] options) {
         rebuildCustomToolbar();
     }
 
+    private String toolbarActionLabel(String id) {
+        if (id != null && id.startsWith("MACRO:")) {
+            GestureSettings.GestureMacro macro = gestureSettings == null ? null
+                    : gestureSettings.getMacro(id.substring(6));
+            return macro == null ? "Macro" : macro.name;
+        }
+        return GestureConstants.label(id);
+    }
+
     private List<String> getToolbarSlotIds() {
         List<String> result = new ArrayList<String>();
         String raw = galleryPrefs().getString("toolbar_slots", "");
@@ -5735,9 +5744,12 @@ private Spinner makeSpinner(String[] options) {
                 int maxSlots = GestureConstants.getToolbarActionIds().size();
                 for (int i = 0; i < array.length() && result.size() < maxSlots; i++) {
                     String id = array.optString(i, "");
-                    if (GestureConstants.isKnownAction(id)
+                    boolean macro = id.startsWith("MACRO:")
+                            && gestureSettings != null
+                            && gestureSettings.getMacro(id.substring(6)) != null;
+                    if ((GestureConstants.isKnownAction(id)
                             && !GestureConstants.ACTION_DONE.equals(id)
-                            && !GestureConstants.ACTION_NOTHING.equals(id)
+                            && !GestureConstants.ACTION_NOTHING.equals(id) || macro)
                             && !result.contains(id)) result.add(id);
                 }
             }
@@ -5772,7 +5784,7 @@ private Spinner makeSpinner(String[] options) {
         toolbarSlotsChecksum = toolbarSlotsChecksum();
         for (String action : slots) {
             Button button = new Button(this);
-            button.setText(GestureConstants.label(action));
+            button.setText(toolbarActionLabel(action));
             button.setAllCaps(false);
             button.setTextSize(10f);
             final String actionId = action;
@@ -5786,6 +5798,10 @@ private Spinner makeSpinner(String[] options) {
 
     private void performToolbarAction(String actionId) {
         if (actionId == null) return;
+        if (actionId.startsWith("MACRO:")) {
+            executeMacro(actionId.substring(6));
+            return;
+        }
         if (GestureConstants.ACTION_FLAG.equals(actionId)) handleFlag();
         else if (GestureConstants.ACTION_QUICK_TAGS.equals(actionId)) openQuickTagAction();
         else if (GestureConstants.ACTION_SURPRISE_ME.equals(actionId)) {
@@ -5845,6 +5861,14 @@ private Spinner makeSpinner(String[] options) {
             if (GestureConstants.ACTION_NOTHING.equals(id)
                     || GestureConstants.ACTION_DONE.equals(id)) continue;
             addOverflowAction(menu, actionByTitle, visible, id);
+        }
+        if (gestureSettings != null) {
+            for (GestureSettings.GestureMacro macro : gestureSettings.getUsableMacros()) {
+                String macroId = "MACRO:" + macro.id;
+                if (!visible.contains(macroId)) {
+                    addOverflowCustom(menu, actionByTitle, macro.name, macroId);
+                }
+            }
         }
 
         int selected = activeSelectionCount();
