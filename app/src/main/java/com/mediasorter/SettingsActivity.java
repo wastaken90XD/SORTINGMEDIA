@@ -461,10 +461,12 @@ public class SettingsActivity extends Activity {
         rows.setOrientation(LinearLayout.VERTICAL);
         root.addView(rows);
         final List<String> assigned = loadToolbarSlots();
-        final Runnable render = new Runnable() {
-            @Override public void run() { renderToolbarRows(rows, assigned, render); }
+        final Runnable[] renderHolder = new Runnable[1];
+        renderHolder[0] = new Runnable() {
+            @Override public void run() { renderToolbarRows(rows, assigned, renderHolder[0]); }
         };
-        render.run();
+        renderHolder[0].run();
+        final Runnable render = renderHolder[0];
         Button add = makeButton("+ Add Toolbar Action");
         add.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
