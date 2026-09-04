@@ -5,6 +5,7 @@ import android.util.Log;
 import com.mediasorter.BatchRenameManager;
 import com.mediasorter.FileStatus;
 import com.mediasorter.MetadataWriter;
+import com.mediasorter.MainActivity;
 import com.mediasorter.TagManager;
 import com.mediasorter.features.RandomGenerator;
 import com.mediasorter.models.MediaFile;
