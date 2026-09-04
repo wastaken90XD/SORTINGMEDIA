@@ -53,7 +53,7 @@ public final class SettingsExporter {
             "sort_tag_rules", "show_stats_bar", "show_tag_bar", "show_search_bar",
             "show_preview", "explorer_width_percent", "random_tag_format",
             "random_tag_custom_pattern", "toolbar_slots", "manual_groups",
-            "group_tag_mode", "group_tag_position", "group_tag_pattern"
+            "group_tag_mode", "group_tag_position", "group_tag_pattern", "tag_bar_width"
     ));
 
     private static final Set<String> GESTURE_KEYS = new HashSet<String>(Arrays.asList(

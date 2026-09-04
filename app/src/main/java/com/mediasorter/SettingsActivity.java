@@ -447,6 +447,11 @@ public class SettingsActivity extends Activity {
                 new OnNumericChangeListener() {
                     @Override public void onChange(int value) { saveInt("explorer_width_percent", value); }
                 }));
+        root.addView(makeNumericInputRow("Tag bar width (48-200dp):",
+                settingsPrefs.getInt("tag_bar_width", 120), 48, 200,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("tag_bar_width", value); }
+                }));
     }
 
     private void addToolbarSection(LinearLayout root) {
@@ -2895,140 +2900,175 @@ public class SettingsActivity extends Activity {
         }
     }
 
-    private void showMacroStepBuilder(final GestureSettings.GestureMacro macro, final LinearLayout macrosContainer) {
-        final List<com.mediasorter.organizer.Action> tempActions = new ArrayList<>(macro.actions);
+    private void showMacroStepBuilder(final GestureSettings.GestureMacro macro,
+                                      final LinearLayout macrosContainer) {
+        final List<com.mediasorter.organizer.Action> tempActions =
+                new ArrayList<com.mediasorter.organizer.Action>(macro.actions);
 
         LinearLayout mainLayout = new LinearLayout(this);
         mainLayout.setOrientation(LinearLayout.VERTICAL);
         mainLayout.setPadding(32, 16, 32, 16);
 
+        final EditText nameInput = new EditText(this);
+        nameInput.setSingleLine(true);
+        nameInput.setText(macro.name == null ? "" : macro.name);
+        nameInput.setHint("Macro name");
+        mainLayout.addView(nameInput);
+
         final LinearLayout stepsContainer = new LinearLayout(this);
         stepsContainer.setOrientation(LinearLayout.VERTICAL);
         mainLayout.addView(stepsContainer);
 
+        final Button[] addStepHolder = new Button[1];
         final Runnable renderStepsList = new Runnable() {
-            @Override
-            public void run() {
+            @Override public void run() {
                 stepsContainer.removeAllViews();
-                for (int i = 0; i < tempActions.size(); i++) {
-                    final int stepIdx = i;
-                    com.mediasorter.organizer.Action act = tempActions.get(i);
+                if (tempActions.isEmpty()) {
+                    stepsContainer.addView(makeLabel("No steps added."));
+                } else {
+                    for (int i = 0; i < tempActions.size(); i++) {
+                        final int stepIndex = i;
+                        final com.mediasorter.organizer.Action action = tempActions.get(i);
+                        LinearLayout stepRow = new LinearLayout(SettingsActivity.this);
+                        stepRow.setOrientation(LinearLayout.HORIZONTAL);
+                        stepRow.setGravity(Gravity.CENTER_VERTICAL);
+                        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT,
+                                LinearLayout.LayoutParams.WRAP_CONTENT);
+                        rowParams.bottomMargin = 4;
+                        stepRow.setLayoutParams(rowParams);
 
-                    LinearLayout stepRow = new LinearLayout(SettingsActivity.this);
-                    stepRow.setOrientation(LinearLayout.HORIZONTAL);
-                    stepRow.setGravity(Gravity.CENTER_VERTICAL);
-                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT);
-                    lp.bottomMargin = 4;
-                    stepRow.setLayoutParams(lp);
+                        TextView actionName = makeLabel((stepIndex + 1) + ". " + action.describe());
+                        actionName.setLayoutParams(new LinearLayout.LayoutParams(
+                                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+                        stepRow.addView(actionName);
 
-                    TextView stepLbl = makeLabel((stepIdx + 1) + ". " + act.describe());
-                    stepLbl.setLayoutParams(new LinearLayout.LayoutParams(
-                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
-                    stepRow.addView(stepLbl);
+                        Button up = makeSmallButton("Up");
+                        up.setEnabled(stepIndex > 0);
+                        up.setOnClickListener(new View.OnClickListener() {
+                            @Override public void onClick(View view) {
+                                if (stepIndex <= 0) return;
+                                com.mediasorter.organizer.Action moved = tempActions.remove(stepIndex);
+                                tempActions.add(stepIndex - 1, moved);
+                                renderStepsList.run();
+                            }
+                        });
+                        stepRow.addView(up);
 
-                    Button btnUp = makeSmallButton("▲");
-                    btnUp.setEnabled(stepIdx > 0);
-                    btnUp.setOnClickListener(new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            com.mediasorter.organizer.Action current = tempActions.remove(stepIdx);
-                            tempActions.add(stepIdx - 1, current);
-                            run();
-                        }
-                    });
-                    stepRow.addView(btnUp);
+                        Button down = makeSmallButton("Down");
+                        down.setEnabled(stepIndex < tempActions.size() - 1);
+                        down.setOnClickListener(new View.OnClickListener() {
+                            @Override public void onClick(View view) {
+                                if (stepIndex >= tempActions.size() - 1) return;
+                                com.mediasorter.organizer.Action moved = tempActions.remove(stepIndex);
+                                tempActions.add(stepIndex + 1, moved);
+                                renderStepsList.run();
+                            }
+                        });
+                        stepRow.addView(down);
 
-                    Button btnDown = makeSmallButton("▼");
-                    btnDown.setEnabled(stepIdx < tempActions.size() - 1);
-                    btnDown.setOnClickListener(new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            com.mediasorter.organizer.Action current = tempActions.remove(stepIdx);
-                            tempActions.add(stepIdx + 1, current);
-                            run();
-                        }
-                    });
-                    stepRow.addView(btnDown);
+                        Button edit = makeSmallButton("Edit");
+                        edit.setOnClickListener(new View.OnClickListener() {
+                            @Override public void onClick(View view) {
+                                com.mediasorter.organizer.ActionBuilderHelper helper =
+                                        new com.mediasorter.organizer.ActionBuilderHelper(
+                                                SettingsActivity.this);
+                                helper.showActionPickerDialog(tempActions.get(stepIndex),
+                                        new com.mediasorter.organizer.ActionBuilderHelper.ActionCallback() {
+                                            @Override public void onActionSelected(
+                                                    com.mediasorter.organizer.Action updated) {
+                                                if (updated != null) {
+                                                    tempActions.set(stepIndex, updated);
+                                                    renderStepsList.run();
+                                                }
+                                            }
+                                        });
+                            }
+                        });
+                        stepRow.addView(edit);
 
-                    Button btnEditStep = makeSmallButton("Edit");
-                    btnEditStep.setOnClickListener(new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            com.mediasorter.organizer.ActionBuilderHelper helper = new com.mediasorter.organizer.ActionBuilderHelper(SettingsActivity.this);
-                            helper.showActionPickerDialog(tempActions.get(stepIdx), new com.mediasorter.organizer.ActionBuilderHelper.ActionCallback() {
-                                @Override
-                                public void onActionSelected(com.mediasorter.organizer.Action updatedAction) {
-                                    tempActions.set(stepIdx, updatedAction);
-                                    run();
-                                }
-                            });
-                        }
-                    });
-                    stepRow.addView(btnEditStep);
-
-                    Button btnDel = makeSmallButton("✕");
-                    btnDel.setOnClickListener(new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            tempActions.remove(stepIdx);
-                            run();
-                        }
-                    });
-                    stepRow.addView(btnDel);
-
-                    stepsContainer.addView(stepRow);
+                        Button remove = makeSmallButton("Remove");
+                        remove.setOnClickListener(new View.OnClickListener() {
+                            @Override public void onClick(View view) {
+                                tempActions.remove(stepIndex);
+                                renderStepsList.run();
+                            }
+                        });
+                        stepRow.addView(remove);
+                        stepsContainer.addView(stepRow);
+                    }
+                }
+                if (addStepHolder[0] != null) {
+                    addStepHolder[0].setEnabled(tempActions.size() < 10);
                 }
             }
         };
-
         renderStepsList.run();
 
-        Button btnAddStep = makeSmallButton("+ Add Step");
-        btnAddStep.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
+        final Button addStep = makeButton("Add Step");
+        addStepHolder[0] = addStep;
+        addStep.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
                 if (tempActions.size() >= 10) {
-                    Toast.makeText(SettingsActivity.this, "Maximum of 10 steps per macro allowed", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(SettingsActivity.this, "Maximum 10 steps reached.",
+                            Toast.LENGTH_SHORT).show();
                     return;
                 }
-                com.mediasorter.organizer.ActionBuilderHelper helper = new com.mediasorter.organizer.ActionBuilderHelper(SettingsActivity.this);
-                helper.showActionPickerDialog(null, new com.mediasorter.organizer.ActionBuilderHelper.ActionCallback() {
-                    @Override
-                    public void onActionSelected(com.mediasorter.organizer.Action action) {
-                        if (action != null) {
-                            tempActions.add(action);
-                            renderStepsList.run();
-                        }
-                    }
-                });
+                com.mediasorter.organizer.ActionBuilderHelper helper =
+                        new com.mediasorter.organizer.ActionBuilderHelper(SettingsActivity.this);
+                helper.showActionPickerDialog(null,
+                        new com.mediasorter.organizer.ActionBuilderHelper.ActionCallback() {
+                            @Override public void onActionSelected(
+                                    com.mediasorter.organizer.Action action) {
+                                if (action == null) return;
+                                if (tempActions.size() >= 10) {
+                                    Toast.makeText(SettingsActivity.this,
+                                            "Maximum 10 steps reached.", Toast.LENGTH_SHORT).show();
+                                    return;
+                                }
+                                tempActions.add(action);
+                                renderStepsList.run();
+                                if (tempActions.size() >= 10) {
+                                    Toast.makeText(SettingsActivity.this,
+                                            "Maximum 10 steps reached.", Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                        });
             }
         });
-        mainLayout.addView(btnAddStep);
+        mainLayout.addView(addStep);
 
-        ScrollView sv = new ScrollView(this);
-        sv.addView(mainLayout);
-
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(mainLayout);
         new AlertDialog.Builder(this)
-            .setTitle("Edit Macro: " + macro.name)
-            .setView(sv)
-            .setPositiveButton("Save", new DialogInterface.OnClickListener() {
-                @Override
-                public void onClick(DialogInterface d, int w) {
-                    macro.actions = tempActions;
-                    List<GestureSettings.GestureMacro> mList = gestureSettings.loadMacros();
-                    for (GestureSettings.GestureMacro existingM : mList) {
-                        if (existingM.id.equals(macro.id)) {
-                            existingM.actions = macro.actions;
-                            break;
+                .setTitle("Edit Macro: " + macro.name)
+                .setView(scroll)
+                .setPositiveButton("Save", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        if (tempActions.isEmpty()) {
+                            Toast.makeText(SettingsActivity.this, "Add at least one step.",
+                                    Toast.LENGTH_SHORT).show();
+                            return;
                         }
+                        String name = nameInput.getText().toString().trim();
+                        if (name.isEmpty()) name = macro.name == null ? "Macro" : macro.name;
+                        macro.name = name;
+                        macro.actions = new ArrayList<com.mediasorter.organizer.Action>(tempActions);
+                        List<GestureSettings.GestureMacro> macros = gestureSettings.loadMacros();
+                        for (GestureSettings.GestureMacro existing : macros) {
+                            if (existing.id.equals(macro.id)) {
+                                existing.name = macro.name;
+                                existing.actions = new ArrayList<com.mediasorter.organizer.Action>(
+                                        tempActions);
+                                break;
+                            }
+                        }
+                        gestureSettings.saveMacros(macros);
+                        renderMacros(macrosContainer);
                     }
-                    gestureSettings.saveMacros(mList);
-                    renderMacros(macrosContainer);
-                }
-            })
-            .setNegativeButton("Cancel", null)
-            .show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
+
 }

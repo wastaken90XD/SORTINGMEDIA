@@ -210,12 +210,18 @@ public class MediaIndexer {
             if (existingIndex != null && existingManifest != null
                     && existingManifest.size == size
                     && existingManifest.lastModified == mod) {
-                // Already indexed and up to date – skip
+                // Refresh XMP even for unchanged files so tags written by
+                // another application become visible without a file change.
+                if (mergeXmpTags(existingIndex, XmpReader.readTags(absPath))
+                        && listener != null) {
+                    try { listener.onFileChanged(existingIndex); } catch (Exception ignored) {}
+                }
                 continue;
             }
 
             try {
                 MediaFile mf = buildLight(f);
+                mergeIndexTags(mf, existingIndex);
                 if (mf.getType() == MediaFile.Type.UNSUPPORTED) continue;
 
                 scanned++;
@@ -318,6 +324,7 @@ public class MediaIndexer {
             if (needsAdd) {
                 try {
                     MediaFile mf = buildLight(f);
+                    mergeIndexTags(mf, inIndex ? findInIndex(path) : null);
                     if (mf.getType() == MediaFile.Type.UNSUPPORTED) continue;
 
                     if (inIndex) {
@@ -568,6 +575,33 @@ public class MediaIndexer {
         } catch (Exception ignored) {}
         readDimensions(mf);
         return mf;
+    }
+
+    private void mergeIndexTags(MediaFile target, MediaFile existing) {
+        if (target == null) return;
+        List<String> merged = new ArrayList<String>();
+        if (existing != null) {
+            for (String tag : existing.getTags()) addMergedTag(merged, tag);
+        }
+        for (String tag : target.getTags()) addMergedTag(merged, tag);
+        target.setTags(merged);
+    }
+
+    private boolean mergeXmpTags(MediaFile target, List<String> xmpTags) {
+        if (target == null) return false;
+        List<String> before = new ArrayList<String>(target.getTags());
+        List<String> merged = new ArrayList<String>();
+        for (String tag : before) addMergedTag(merged, tag);
+        if (xmpTags != null) {
+            for (String tag : xmpTags) addMergedTag(merged, tag);
+        }
+        target.setTags(merged);
+        return !before.equals(target.getTags());
+    }
+
+    private void addMergedTag(List<String> tags, String rawTag) {
+        String tag = TagText.plain(rawTag);
+        if (!tag.isEmpty() && !tags.contains(tag)) tags.add(tag);
     }
 
     private void readDimensions(MediaFile mf) {

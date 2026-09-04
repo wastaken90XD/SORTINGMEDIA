@@ -32,6 +32,8 @@ public class AutoOrganizer {
     private final List<String> log = new ArrayList<String>();
     private final Stack<List<UndoEntry>> undoStack = new Stack<List<UndoEntry>>();
     private volatile int activeIndex = -1;
+    private volatile int runIndex;
+    private final long sessionStartMillis = System.currentTimeMillis();
     private volatile boolean lastUndoPartial;
 
     public AutoOrganizer(Context ctx, TagManager tm, BatchRenameManager rm, FileStatus fs) {
@@ -68,45 +70,180 @@ public class AutoOrganizer {
                                  int sequenceCounter) {
         if (file == null) {
             Log.w("AutoOrganizer", "Cannot resolve rule variables without a MediaFile");
-            return pattern;
+            return replaceUnknownPlaceholders(pattern == null ? "" : pattern);
         }
         if (pattern == null) return "";
+
         String name = file.getName() == null ? "" : file.getName();
         int dot = name.lastIndexOf('.');
         String filename = dot > 0 ? name.substring(0, dot) : name;
-        String extension = dot >= 0 && dot < name.length() - 1 ? name.substring(dot + 1) : "";
+        String extension = dot >= 0 && dot < name.length() - 1
+                ? name.substring(dot + 1) : "";
+        File source = file.getPath() == null ? null : new File(file.getPath());
+        File parent = source == null ? null : source.getParentFile();
+        String dir = parent == null ? "" : parent.getName();
+        String dirpath = parent == null ? "" : parent.getAbsolutePath();
         long timestamp = file.getDateAdded() > 0 ? file.getDateAdded()
-                : new File(file.getPath()).lastModified();
+                : source == null ? 0L : source.lastModified();
         Calendar calendar = Calendar.getInstance();
         calendar.setTimeInMillis(timestamp);
+        Calendar nowCalendar = Calendar.getInstance();
         String date = new SimpleDateFormat("yyyyMMdd", Locale.US).format(calendar.getTime());
+        String now = new SimpleDateFormat("yyyyMMdd", Locale.US).format(nowCalendar.getTime());
+        String nowTime = new SimpleDateFormat("HHmmss", Locale.US).format(nowCalendar.getTime());
+        long size = file.getSize();
+        long sizeKb = Math.round(size / 1024.0d);
+        long sizeMb = Math.round(size / (1024.0d * 1024.0d));
+        String type = file.getType() == MediaFile.Type.IMAGE ? "image"
+                : file.getType() == MediaFile.Type.VIDEO ? "video" : "unsupported";
+        String ratio = aspectRatio(file.getWidth(), file.getHeight());
+        List<String> tags = file.getTags() == null
+                ? new ArrayList<String>() : file.getTags();
+        String firstTag = tags.isEmpty() ? "" : String.valueOf(tags.get(0));
+        String lastTag = tags.isEmpty() ? "" : String.valueOf(tags.get(tags.size() - 1));
+        String joinedTags = joinTags(tags, "_");
+        String csvTags = joinTags(tags, ",");
+        String sequence = sequenceCounter >= 0
+                ? RandomGenerator.sequenceLabel(sequenceCounter) : nextSequence(file);
+        int sequenceIndex = sequenceCounter >= 0 ? sequenceCounter :
+                RandomGenerator.nextSequenceIndex(sequencePrefix(file), existingTagNames());
+        String group = linkGroup(file);
+        String status = fileStatus == null ? "NONE" : fileStatus.getStatus(file.getPath()).name();
+        List<MediaFile> active = MainActivity.getLatestFullList();
+        int listIndex = index;
+        int listTotal = active == null ? 0 : active.size();
+        if (active != null) {
+            for (int i = 0; i < active.size(); i++) {
+                if (active.get(i) != null && file.getPath().equals(active.get(i).getPath())) {
+                    listIndex = i;
+                    break;
+                }
+            }
+        }
+        int pageSize = context.getSharedPreferences("window_prefs", Context.MODE_PRIVATE)
+                .getInt("window_size", 20);
+        pageSize = Math.max(1, pageSize);
+        int page = listIndex < 0 ? 1 : (listIndex / pageSize) + 1;
+        int pageTotal = listTotal == 0 ? 0 : ((listTotal + pageSize - 1) / pageSize);
+        String color = file.getColorFamily();
+        String uuid = String.valueOf(System.currentTimeMillis()) + "_"
+                + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase(Locale.US);
 
         String resolved = pattern;
         resolved = resolved.replace("{filename}", filename);
+        resolved = resolved.replace("{fullname}", name);
         resolved = resolved.replace("{ext}", extension);
+        resolved = resolved.replace("{path}", file.getPath() == null ? "" : file.getPath());
+        resolved = resolved.replace("{dir}", dir);
+        resolved = resolved.replace("{dirpath}", dirpath);
+        resolved = resolved.replace("{size}", String.valueOf(size));
+        resolved = resolved.replace("{size_kb}", String.valueOf(sizeKb));
+        resolved = resolved.replace("{size_mb}", String.valueOf(sizeMb));
+        resolved = resolved.replace("{width}", String.valueOf(file.getWidth()));
+        resolved = resolved.replace("{height}", String.valueOf(file.getHeight()));
+        resolved = resolved.replace("{ratio}", ratio);
+        resolved = resolved.replace("{type}", type);
         resolved = resolved.replace("{date}", date);
         resolved = resolved.replace("{year}", String.format(Locale.US, "%04d", calendar.get(Calendar.YEAR)));
         resolved = resolved.replace("{month}", String.format(Locale.US, "%02d", calendar.get(Calendar.MONTH) + 1));
         resolved = resolved.replace("{day}", String.format(Locale.US, "%02d", calendar.get(Calendar.DAY_OF_MONTH)));
-        resolved = resolved.replace("{size}", String.valueOf(file.getSize()));
-        resolved = resolved.replace("{index}", String.valueOf(index < 0 ? 0 : index));
-        String sequence = sequenceCounter >= 0
-                ? RandomGenerator.sequenceLabel(sequenceCounter) : nextSequence(file);
+        resolved = resolved.replace("{hour}", String.format(Locale.US, "%02d", calendar.get(Calendar.HOUR_OF_DAY)));
+        resolved = resolved.replace("{minute}", String.format(Locale.US, "%02d", calendar.get(Calendar.MINUTE)));
+        resolved = resolved.replace("{timestamp}", String.valueOf(timestamp));
+        resolved = resolved.replace("{now}", now);
+        resolved = resolved.replace("{now_time}", nowTime);
         resolved = resolved.replace("{seq}", sequence);
+        resolved = resolved.replace("{seq_index}", String.valueOf(sequenceIndex));
+        resolved = resolved.replace("{group}", group);
+        resolved = resolved.replace("{manual_order}", String.valueOf(file.getManualOrder()));
+        resolved = resolved.replace("{list_index}", String.valueOf(listIndex < 0 ? 0 : listIndex));
+        resolved = resolved.replace("{list_total}", String.valueOf(listTotal));
+        resolved = resolved.replace("{page}", String.valueOf(page));
+        resolved = resolved.replace("{page_total}", String.valueOf(pageTotal));
+        resolved = resolved.replace("{flagged}", String.valueOf("FLAGGED".equals(status)));
+        resolved = resolved.replace("{skipped}", String.valueOf("SKIPPED".equals(status)));
+        resolved = resolved.replace("{done}", String.valueOf("DONE".equals(status)));
+        resolved = resolved.replace("{is_duplicate}", String.valueOf(file.isDuplicate()));
+        resolved = resolved.replace("{has_metadata}", String.valueOf(file.hasMetadata()));
+        resolved = resolved.replace("{color}", color);
+        resolved = resolved.replace("{color_hex}", "");
         resolved = resolved.replace("{random}", RandomGenerator.randomSyllableTag());
-
+        resolved = resolved.replace("{random_hex}", randomHex());
+        resolved = resolved.replace("{random_seq}", RandomGenerator.sequenceLabel(
+                RandomGenerator.nextSequenceIndex("random", existingTagNames())));
+        resolved = resolved.replace("{uuid}", uuid);
+        resolved = resolved.replace("{session_date}", new SimpleDateFormat("yyyyMMdd", Locale.US)
+                .format(new Date(sessionStartMillis)));
+        resolved = resolved.replace("{run_index}", String.valueOf(runIndex));
         Matcher tagMatcher = Pattern.compile("\\{tag:(\\d+)\\}").matcher(resolved);
         StringBuffer buffer = new StringBuffer();
         while (tagMatcher.find()) {
             int tagIndex;
             try { tagIndex = Integer.parseInt(tagMatcher.group(1)); }
             catch (Exception ignored) { tagIndex = -1; }
-            String value = tagIndex >= 0 && tagIndex < file.getTags().size()
-                    ? file.getTags().get(tagIndex) : "";
-            tagMatcher.appendReplacement(buffer, Matcher.quoteReplacement(value == null ? "" : value));
+            String value = tagIndex >= 0 && tagIndex < tags.size()
+                    ? String.valueOf(tags.get(tagIndex)) : "";
+            tagMatcher.appendReplacement(buffer, Matcher.quoteReplacement(value));
         }
         tagMatcher.appendTail(buffer);
-        return buffer.toString();
+        resolved = buffer.toString();
+        resolved = resolved.replace("{tag_count}", String.valueOf(tags.size()));
+        resolved = resolved.replace("{first_tag}", firstTag);
+        resolved = resolved.replace("{last_tag}", lastTag);
+        resolved = resolved.replace("{tags}", joinedTags);
+        resolved = resolved.replace("{tags_csv}", csvTags);
+        return replaceUnknownPlaceholders(resolved);
+    }
+
+    private String replaceUnknownPlaceholders(String value) {
+        if (value == null) return "";
+        Matcher matcher = Pattern.compile("\\{[^{}]+\\}").matcher(value);
+        StringBuffer result = new StringBuffer();
+        while (matcher.find()) {
+            Log.w("AutoOrganizer", "Unknown variable: " + matcher.group());
+            matcher.appendReplacement(result, "");
+        }
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    private String aspectRatio(int width, int height) {
+        if (width <= 0 || height <= 0) return "";
+        int a = width;
+        int b = height;
+        while (b != 0) {
+            int temp = a % b;
+            a = b;
+            b = temp;
+        }
+        return (width / a) + ":" + (height / a);
+    }
+
+    private String joinTags(List<String> values, String separator) {
+        StringBuilder result = new StringBuilder();
+        for (String value : values) {
+            if (result.length() > 0) result.append(separator);
+            result.append(value == null ? "" : value);
+        }
+        return result.toString();
+    }
+
+    private String linkGroup(MediaFile file) {
+        if (file == null || file.getTags() == null) return "";
+        for (String value : file.getTags()) {
+            if (value == null) continue;
+            String tag = value.trim();
+            if (tag.startsWith("link_") || tag.startsWith("link-")) {
+                String group = tag.substring(5);
+                int sequence = group.indexOf("_seq_");
+                return sequence > 0 ? group.substring(0, sequence) : group;
+            }
+        }
+        return "";
+    }
+
+    private String randomHex() {
+        return String.format(Locale.US, "%06X", new java.util.Random().nextInt(0x1000000));
     }
 
     private String sequencePrefix(MediaFile file) {
@@ -239,6 +376,7 @@ public class AutoOrganizer {
 
     /** Apply all enabled rules; callers run this on their background executor. */
     public int applyTo(List<MediaFile> files) {
+        runIndex++;
         log.clear();
         if (rules == null || files == null || files.isEmpty()) return 0;
         List<UndoEntry> batch = new ArrayList<UndoEntry>();
@@ -312,6 +450,7 @@ public class AutoOrganizer {
 
     /** Apply the first matching auto-apply rule to a status-triggered file. */
     public boolean applyToSingle(MediaFile file) {
+        runIndex++;
         if (rules == null || file == null) return false;
         Map<String, Integer> sequenceCounters = new HashMap<String, Integer>();
         Set<String> existingTags = existingTagNames();
@@ -458,6 +597,7 @@ public class AutoOrganizer {
 
     /** Execute a synthetic rule such as a macro on the supplied selection. */
     public int execute(Rule rule, List<MediaFile> files) {
+        runIndex++;
         if (rule == null || files == null || files.isEmpty()) return -1;
         List<UndoEntry> batch = new ArrayList<UndoEntry>();
         Map<String, Integer> sequenceCounters = new HashMap<String, Integer>();

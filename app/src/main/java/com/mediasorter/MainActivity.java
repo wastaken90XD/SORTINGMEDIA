@@ -110,6 +110,7 @@ public class MainActivity extends Activity
     private static List<MediaFile> sLatestFullList = new ArrayList<>();
     private static List<Tag>       sLatestTagList  = new ArrayList<>();
     private int             currentIndex = -1;
+    private MediaFile        currentFile;
 
     // Tag grouping is a virtual display: a real MediaFile may occur in more
     // than one group, while currentFiles/fullList retain those appearances.
@@ -125,6 +126,7 @@ public class MainActivity extends Activity
     private Button   btnSort;
     private Button   btnFilter;
     private Button   btnScan;
+    private Button   btnRescanButton;
     private ProgressBar scanProgress;
 
     private RecyclerView fileBrowser;   // reference for scrolling to keep list in sync with preview
@@ -297,6 +299,22 @@ public class MainActivity extends Activity
             boolean showPreview = sp.getBoolean("show_preview", true);
             preview.setVisibility(showPreview ? View.VISIBLE : View.GONE);
         }
+        applyTagPanelWidth();
+    }
+
+    private void applyTagPanelWidth() {
+        View tagPanel = findViewById(R.id.tagPanel);
+        if (!(tagPanel instanceof LinearLayout)) return;
+        int widthDp = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getInt("tag_bar_width", 120);
+        widthDp = Math.max(48, Math.min(200, widthDp));
+        int widthPx = (int) (widthDp * getResources().getDisplayMetrics().density + 0.5f);
+        ViewGroup.LayoutParams raw = tagPanel.getLayoutParams();
+        if (!(raw instanceof LinearLayout.LayoutParams)) return;
+        LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) raw;
+        params.width = widthPx;
+        params.weight = 0f;
+        tagPanel.setLayoutParams(params);
     }
 
     @Override
@@ -1073,9 +1091,8 @@ public class MainActivity extends Activity
         mediaAdapter.setFileStatus(fileStatus);
         mediaAdapter.setHighlightProvider(new MediaAdapter.HighlightProvider() {
             @Override public boolean isHighlighted(MediaFile file) {
-                return currentIndex >= 0 && currentIndex < fullList.size()
-                        && file != null && fullList.get(currentIndex) != null
-                        && file.getPath().equals(fullList.get(currentIndex).getPath());
+                return currentFile != null && file != null
+                        && currentFile.getPath().equals(file.getPath());
             }
         });
         tagAdapter   = new TagAdapter(new TagAdapter.OnTagToggleListener() {
@@ -1425,7 +1442,8 @@ public class MainActivity extends Activity
                     LinearLayout.LayoutParams.MATCH_PARENT, 8));
         }
 
-        View btnRescanView = findViewById(R.id.btnRescan);
+        btnRescanButton = findViewById(R.id.btnRescan);
+        View btnRescanView = btnRescanButton;
         btnRescanView.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 if (folderManager.isEmpty()) {
@@ -1955,10 +1973,8 @@ public class MainActivity extends Activity
         final String query = searchBar != null
                 ? searchBar.getText().toString().trim()
                 : "";
-        final String currentPathBeforeRefresh = currentIndex >= 0
-                && currentIndex < fullList.size()
-                && fullList.get(currentIndex) != null
-                ? fullList.get(currentIndex).getPath() : null;
+        final String currentPathBeforeRefresh = currentFile == null
+                ? null : currentFile.getPath();
 
         loadTagGroupingConfiguration();
         final boolean groupingByTag = groupManager.getCurrent() == Group.GroupBy.TAG;
@@ -2035,6 +2051,7 @@ public class MainActivity extends Activity
                         // search, and sort. A numeric index from the old list is
                         // never reused for a different file.
                         currentIndex = findIndexByPath(fullList, currentPathBeforeRefresh);
+                        currentFile = currentIndex >= 0 ? fullList.get(currentIndex) : null;
                         windowManager.setFullIndex(fullList);
                         sLatestFullList = windowManager.getFullIndexSnapshot();
                         sLatestTagList  = new ArrayList<>(tagManager.getAllTags());
@@ -2518,12 +2535,15 @@ public class MainActivity extends Activity
     private void loadFileAtIndex(int absoluteIndex) {
         if (absoluteIndex < 0 || absoluteIndex >= fullList.size()) {
             currentIndex = -1;
+            currentFile = null;
             if (mediaAdapter != null) mediaAdapter.notifyHighlightChanged();
             return;
         }
         // MainActivity.currentIndex is the single source of truth. Update the
         // adapter's provider-driven highlight before any preview work.
         currentIndex = absoluteIndex;
+        currentFile = fullList.get(absoluteIndex);
+        mergeXmpTagsIntoFile(currentFile);
         if (!windowManager.isInWindow(absoluteIndex)) {
             windowManager.centerOn(absoluteIndex);
             updateWindow();
@@ -2545,6 +2565,21 @@ public class MainActivity extends Activity
             }
             updateGalleryMemoryWindow();
         }
+    }
+
+    private void mergeXmpTagsIntoFile(MediaFile file) {
+        if (file == null || file.getPath() == null) return;
+        List<String> merged = new ArrayList<String>();
+        for (String tag : file.getTags()) {
+            String plain = TagText.plain(tag);
+            if (!plain.isEmpty() && !merged.contains(plain)) merged.add(plain);
+        }
+        for (String tag : XmpReader.readTags(file.getPath())) {
+            String plain = TagText.plain(tag);
+            if (!plain.isEmpty() && !merged.contains(plain)) merged.add(plain);
+        }
+        file.setTags(merged);
+        if (!merged.isEmpty()) tagManager.importTagsFromFiles(merged);
     }
 
     private List<MediaFile> getCurrentFilesSnapshot() {
@@ -2605,6 +2640,7 @@ public class MainActivity extends Activity
         int abs = windowManager.findAbsoluteIndex(file);
         if (abs < 0) return;
         currentIndex = abs;
+        currentFile = file;
         shiftWindowIfNeeded(currentIndex);
         loadFileAtIndex(currentIndex);
     }
@@ -5167,9 +5203,12 @@ private Spinner makeSpinner(String[] options) {
                     scanProgress.setMax(total > 0 ? total : 100);
                     scanProgress.setProgress(scanned);
                 }
-                if (btnScan != null) {
-                    btnScan.setText(scanned + "/" + total);
+                if (btnScan != null) btnScan.setText(scanned + "/" + total);
+                if (btnRescanButton != null) {
+                    btnRescanButton.setEnabled(false);
+                    btnRescanButton.setText("Scanning...");
                 }
+                if (statsBar != null) statsBar.setText("Scanning...");
             }
         });
     }
@@ -5187,6 +5226,10 @@ private Spinner makeSpinner(String[] options) {
             @Override public void run() {
                 btnScan.setEnabled(true);
                 btnScan.setText("SCAN");
+                if (btnRescanButton != null) {
+                    btnRescanButton.setEnabled(true);
+                    btnRescanButton.setText("RESCAN");
+                }
                 if (scanProgress != null) scanProgress.setVisibility(View.GONE);
 
                 // Import all tags found in scanned files into TagManager
@@ -5204,8 +5247,7 @@ private Spinner makeSpinner(String[] options) {
     public void onFileChanged(MediaFile file) {
         mainHandler.post(new Runnable() {
             @Override public void run() {
-                String oldCurrentPath = currentIndex >= 0 && currentIndex < fullList.size()
-                        ? fullList.get(currentIndex).getPath() : null;
+                String oldCurrentPath = currentFile == null ? null : currentFile.getPath();
                 for (int i = 0; i < fullList.size(); i++) {
                     if (fullList.get(i).getPath().equals(file.getPath())) {
                         fullList.set(i, file);
@@ -5215,7 +5257,9 @@ private Spinner makeSpinner(String[] options) {
                 currentIndex = findIndexByPath(fullList,
                         oldCurrentPath != null && oldCurrentPath.equals(file.getPath())
                                 ? file.getPath() : oldCurrentPath);
+                currentFile = currentIndex >= 0 ? fullList.get(currentIndex) : null;
                 mediaAdapter.updateFile(file);
+                tagManager.importTagsFromFiles(file.getTags());
                 mediaAdapter.notifyHighlightChanged();
                 if (galleryAdapter != null) {
                     if (tagGroupingActive) scheduleRefresh();
@@ -5232,12 +5276,12 @@ private Spinner makeSpinner(String[] options) {
     public void onFileRemoved(String path) {
         mainHandler.post(new Runnable() {
             @Override public void run() {
-                String oldCurrentPath = currentIndex >= 0 && currentIndex < fullList.size()
-                        ? fullList.get(currentIndex).getPath() : null;
+                String oldCurrentPath = currentFile == null ? null : currentFile.getPath();
                 for (int i = fullList.size() - 1; i >= 0; i--) {
                     if (fullList.get(i).getPath().equals(path)) fullList.remove(i);
                 }
                 currentIndex = findIndexByPath(fullList, oldCurrentPath);
+                currentFile = currentIndex >= 0 ? fullList.get(currentIndex) : null;
                 mediaAdapter.removeFile(path);
                 mediaAdapter.notifyHighlightChanged();
                 if (galleryAdapter != null) {
