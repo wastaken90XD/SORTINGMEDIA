@@ -5732,7 +5732,8 @@ private Spinner makeSpinner(String[] options) {
         try {
             if (hasSavedSlots) {
                 org.json.JSONArray array = new org.json.JSONArray(raw);
-                for (int i = 0; i < array.length() && result.size() < 5; i++) {
+                int maxSlots = GestureConstants.getToolbarActionIds().size();
+                for (int i = 0; i < array.length() && result.size() < maxSlots; i++) {
                     String id = array.optString(i, "");
                     if (GestureConstants.isKnownAction(id)
                             && !GestureConstants.ACTION_DONE.equals(id)

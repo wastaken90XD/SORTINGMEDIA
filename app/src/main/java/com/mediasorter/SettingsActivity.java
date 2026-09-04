@@ -469,7 +469,8 @@ public class SettingsActivity extends Activity {
         root.addView(makeLabel(available.toString()));
         List<String> saved = loadToolbarSlots();
         final List<Spinner> spinners = new ArrayList<Spinner>();
-        for (int slot = 0; slot < 5; slot++) {
+        int slotCount = Math.max(5, saved.size());
+        for (int slot = 0; slot < slotCount; slot++) {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
@@ -510,7 +511,8 @@ public class SettingsActivity extends Activity {
         boolean hasSavedSlots = raw != null && !raw.trim().isEmpty();
         try {
             org.json.JSONArray array = new org.json.JSONArray(hasSavedSlots ? raw : "[]");
-            for (int i = 0; i < array.length() && result.size() < 5; i++) {
+            int maxSlots = GestureConstants.getToolbarActionIds().size();
+            for (int i = 0; i < array.length() && result.size() < maxSlots; i++) {
                 String id = array.optString(i, "");
                 if (GestureConstants.isKnownAction(id) && !GestureConstants.ACTION_DONE.equals(id)
                         && !GestureConstants.ACTION_NOTHING.equals(id)) result.add(id);
@@ -528,6 +530,7 @@ public class SettingsActivity extends Activity {
 
     private void saveToolbarSlots(List<Spinner> spinners, List<String> ids) {
         org.json.JSONArray array = new org.json.JSONArray();
+        int maxSlots = ids.size();
         for (Spinner spinner : spinners) {
             int position = spinner.getSelectedItemPosition();
             if (position < 0 || position >= ids.size()) continue;
@@ -535,7 +538,7 @@ public class SettingsActivity extends Activity {
             if (GestureConstants.ACTION_NOTHING.equals(id) || GestureConstants.ACTION_DONE.equals(id)) continue;
             boolean duplicate = false;
             for (int i = 0; i < array.length(); i++) if (id.equals(array.optString(i))) duplicate = true;
-            if (!duplicate && array.length() < 5) array.put(id);
+            if (!duplicate && array.length() < maxSlots) array.put(id);
         }
         saveString("toolbar_slots", array.toString());
     }
