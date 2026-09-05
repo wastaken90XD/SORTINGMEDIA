@@ -7,6 +7,7 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 import com.mediasorter.R;
+import com.mediasorter.TagText;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -23,9 +24,19 @@ public class SidePanelTagAdapter extends
     private OnTagClickListener listener;
 
     public void setTags(List<String> tags, List<String> appliedTags) {
-        this.tags        = new ArrayList<>(tags);
-        this.appliedTags = new ArrayList<>(appliedTags);
+        this.tags        = plainTags(tags);
+        this.appliedTags = plainTags(appliedTags);
         notifyDataSetChanged();
+    }
+
+    private static List<String> plainTags(List<String> values) {
+        List<String> result = new ArrayList<>();
+        if (values == null) return result;
+        for (String value : values) {
+            String plain = TagText.plain(value);
+            if (!plain.isEmpty() && !result.contains(plain)) result.add(plain);
+        }
+        return result;
     }
 
     public void setListener(OnTagClickListener l) { this.listener = l; }
@@ -92,8 +103,10 @@ public class SidePanelTagAdapter extends
         // Applied indicator
         holder.appliedDot.setVisibility(applied ? View.VISIBLE : View.INVISIBLE);
 
-        holder.itemView.setOnClickListener(v -> {
-            if (listener != null) listener.onTagClick(tag, !applied);
+        holder.itemView.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (listener != null) listener.onTagClick(tag, !applied);
+            }
         });
     }
 

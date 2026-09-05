@@ -1,5 +1,6 @@
 package com.mediasorter.models;
 
+import com.mediasorter.TagText;
 import java.util.ArrayList;
 import java.util.List;
 import java.io.Serializable;
@@ -18,6 +19,12 @@ public class MediaFile implements Serializable {
     private byte[] partialHash;
     private int width;
     private int height;
+    private int manualOrder = -1;
+    // Enriched by the last analysis/index pass. These fields stay in the
+    // model so sorting and grouping never need to touch the UI thread.
+    private String colorFamily = "";
+    private boolean duplicate;
+    private boolean metadataPresent;
 
     public MediaFile(String path, long size) {
         this.path    = path;
@@ -60,28 +67,43 @@ public class MediaFile implements Serializable {
     public byte[]       getPartialHash() { return partialHash; }
     public int          getWidth()     { return width; }
     public int          getHeight()    { return height; }
+    public int          getManualOrder() { return manualOrder; }
+    public String       getColorFamily() { return colorFamily == null ? "" : colorFamily; }
+    public boolean      isDuplicate()    { return duplicate; }
+    public boolean      hasMetadata()    { return metadataPresent; }
 
     // Setters
     public void setDateAdded(long d)      { dateAdded    = d; }
-    public void setTags(List<String> t)   { tags         = t; }
+    public void setTags(List<String> t) {
+        tags = new ArrayList<>();
+        if (t != null) {
+            for (String tag : t) addTag(tag);
+        }
+    }
     public void setPartialHash(byte[] h)  { partialHash  = h; }
     public void setWidth(int w)           { width        = w; }
     public void setHeight(int h)          { height       = h; }
+    public void setManualOrder(int order) { manualOrder  = order; }
+    public void setColorFamily(String family) { colorFamily = family == null ? "" : family; }
+    public void setDuplicate(boolean value) { duplicate = value; }
+    public void setMetadataPresent(boolean value) { metadataPresent = value; }
 
     public void addTag(String tag) {
-        if (!tags.contains(tag)) tags.add(tag);
+        String plain = TagText.plain(tag);
+        if (!plain.isEmpty() && !tags.contains(plain)) tags.add(plain);
     }
 
     public void removeTag(String tag) {
-        tags.remove(tag);
+        tags.remove(TagText.plain(tag));
     }
 
     public boolean hasTag(String tag) {
-        return tags.contains(tag);
+        return tags.contains(TagText.plain(tag));
     }
 
     public void setPath(String path) {
         this.path = path;
+        if (path != null) this.name = path.substring(path.lastIndexOf('/') + 1);
     }
 
     public String getFormattedSize() {

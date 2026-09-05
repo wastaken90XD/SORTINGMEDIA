@@ -1,109 +1,305 @@
 package com.mediasorter;
 
 import com.mediasorter.models.Group;
+import com.mediasorter.TagText;
 import com.mediasorter.models.MediaFile;
+import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+/** Builds the grouping views used by the list and gallery. */
 public class GroupManager {
 
     private volatile Group.GroupBy current = Group.GroupBy.FILE_TYPE;
+    private volatile String watchedRoot = "";
+    private volatile String tagGroupMode = "all";
+    private volatile int tagGroupPosition = 1;
+    private volatile String tagGroupPattern = "";
+    private final Map<String, String> manualAssignments =
+            new java.util.concurrent.ConcurrentHashMap<String, String>();
+    private final SearchManager tagQueryParser = new SearchManager();
+    private volatile String lastError = "";
 
-    public void setGroupBy(Group.GroupBy g) { this.current = g; }
-    public Group.GroupBy getCurrent()        { return current; }
+    public void setGroupBy(Group.GroupBy value) {
+        current = value == null ? Group.GroupBy.FILE_TYPE : value;
+        lastError = "";
+    }
+
+    public Group.GroupBy getCurrent() { return current; }
+    public String getLastError() { return lastError; }
+
+    public void setTagGroupingConfiguration(String mode, int position, String pattern) {
+        if (!"first".equals(mode) && !"last".equals(mode)
+                && !"position".equals(mode) && !"pattern".equals(mode)) {
+            mode = "all";
+        }
+        tagGroupMode = mode;
+        tagGroupPosition = Math.max(1, Math.min(10, position));
+        tagGroupPattern = pattern == null ? "" : pattern.trim();
+    }
+
+    public String getTagGroupMode() { return tagGroupMode; }
+    public int getTagGroupPosition() { return tagGroupPosition; }
+    public String getTagGroupPattern() { return tagGroupPattern; }
+
+    public void setWatchedRoot(String root) { watchedRoot = root == null ? "" : root; }
+
+    public void setManualAssignments(Map<String, String> assignments) {
+        manualAssignments.clear();
+        if (assignments != null) manualAssignments.putAll(assignments);
+    }
+
+    public void assignManualGroup(String path, String groupName) {
+        if (path == null || groupName == null || groupName.trim().isEmpty()) return;
+        manualAssignments.put(path, groupName.trim());
+    }
+
+    public void removeManualAssignment(String path) {
+        if (path != null) manualAssignments.remove(path);
+    }
+
+    public void moveManualAssignment(String oldPath, String newPath) {
+        if (oldPath == null || newPath == null) return;
+        String group = manualAssignments.remove(oldPath);
+        if (group != null) manualAssignments.put(newPath, group);
+    }
+
+    public Map<String, String> getManualAssignments() {
+        return new java.util.HashMap<String, String>(manualAssignments);
+    }
+
+    public boolean hasColorProfiles(List<MediaFile> files) {
+        if (files == null || files.isEmpty()) return false;
+        for (MediaFile file : files) {
+            if (file != null && !file.getColorFamily().isEmpty()) return true;
+        }
+        return false;
+    }
 
     public List<Group> group(List<MediaFile> files) {
-        if (files == null || files.isEmpty()) return new ArrayList<>();
+        lastError = "";
+        if (files == null || files.isEmpty()) return new ArrayList<Group>();
         try {
             switch (current) {
                 case FILE_TYPE: return groupByType(files);
-                case TAG:       return groupByTag(files);
-                case DATE:      return groupByDate(files);
-                case FOLDER:    return groupByFolder(files);
-                default:        return groupByType(files);
+                case TAG: return groupByTag(files);
+                case DATE: return groupByDate(files);
+                case FOLDER: return groupByFolder(files);
+                case TAG_PREFIX: return groupByTagPrefix(files);
+                case SEQUENCE_GROUP: return groupBySequence(files);
+                case COLOR_PROFILE: return groupByColor(files);
+                case DIRECTORY_DEPTH: return groupByDepth(files);
+                case MANUAL_GROUP: return groupByManual(files);
+                default: return groupByType(files);
             }
-        } catch (Exception e) {
-            List<Group> fallback = new ArrayList<>();
-            Group g = new Group("All", Group.GroupBy.FILE_TYPE);
-            for (MediaFile f : files) g.addFile(f);
-            fallback.add(g);
+        } catch (Exception error) {
+            lastError = error.getMessage() == null ? "Unable to group files" : error.getMessage();
+            List<Group> fallback = new ArrayList<Group>();
+            Group all = new Group("All", Group.GroupBy.FILE_TYPE);
+            for (MediaFile file : files) if (file != null) all.addFile(file);
+            fallback.add(all);
             return fallback;
         }
     }
 
     private List<Group> groupByType(List<MediaFile> files) {
-        Map<String, Group> map = new LinkedHashMap<>();
-        for (MediaFile f : files) {
-            if (f == null) continue;
-            String key = f.getType() != null ? f.getType().name() : "UNKNOWN";
-            if (!map.containsKey(key)) {
-                map.put(key, new Group(key, Group.GroupBy.FILE_TYPE));
-            }
-            map.get(key).addFile(f);
+        Map<String, Group> map = new LinkedHashMap<String, Group>();
+        for (MediaFile file : files) {
+            if (file == null) continue;
+            String key = file.getType() == null ? "UNKNOWN" : file.getType().name();
+            add(map, key, Group.GroupBy.FILE_TYPE, file);
         }
-        return new ArrayList<>(map.values());
+        return new ArrayList<Group>(map.values());
     }
 
     private List<Group> groupByTag(List<MediaFile> files) {
-        Map<String, Group> map = new LinkedHashMap<>();
+        Map<String, Group> map = new LinkedHashMap<String, Group>();
         Group untagged = new Group("Untagged", Group.GroupBy.TAG);
-        for (MediaFile f : files) {
-            if (f == null) continue;
-            List<String> tags = f.getTags();
-            if (tags == null || tags.isEmpty()) {
-                untagged.addFile(f);
+        for (MediaFile file : files) {
+            if (file == null) continue;
+            List<String> tags = sanitizedTags(file);
+            boolean added = false;
+            if ("first".equals(tagGroupMode)) {
+                if (!tags.isEmpty()) {
+                    add(map, tags.get(0), Group.GroupBy.TAG, file);
+                    added = true;
+                }
+            } else if ("last".equals(tagGroupMode)) {
+                if (!tags.isEmpty()) {
+                    add(map, tags.get(tags.size() - 1), Group.GroupBy.TAG, file);
+                    added = true;
+                }
+            } else if ("position".equals(tagGroupMode)) {
+                int index = tagGroupPosition - 1;
+                if (index >= 0 && index < tags.size()) {
+                    add(map, tags.get(index), Group.GroupBy.TAG, file);
+                    added = true;
+                }
+            } else if ("pattern".equals(tagGroupMode)) {
+                for (String tag : tags) {
+                    if (tagQueryParser.matchesTagPattern(tag, tagGroupPattern)) {
+                        add(map, tag, Group.GroupBy.TAG, file);
+                        added = true;
+                    }
+                }
             } else {
                 for (String tag : tags) {
-                    if (!map.containsKey(tag)) {
-                        map.put(tag, new Group(tag, Group.GroupBy.TAG));
-                    }
-                    map.get(tag).addFile(f);
+                    add(map, tag, Group.GroupBy.TAG, file);
+                    added = true;
                 }
             }
+            if (!added) untagged.addFile(file);
         }
-        List<Group> result = new ArrayList<>(map.values());
-        if (!untagged.getFiles().isEmpty()) result.add(untagged);
+        List<Group> result = new ArrayList<Group>(map.values());
+        Collections.sort(result, new Comparator<Group>() {
+            @Override public int compare(Group left, Group right) {
+                int count = Integer.compare(right.getCount(), left.getCount());
+                return count != 0 ? count : left.getLabel().compareToIgnoreCase(right.getLabel());
+            }
+        });
+        // Untagged is intentionally appended after all tag groups, regardless
+        // of its count.
+        if (untagged.getCount() > 0) result.add(untagged);
+        return result;
+    }
+
+    private List<String> sanitizedTags(MediaFile file) {
+        List<String> result = new ArrayList<String>();
+        if (file == null || file.getTags() == null) return result;
+        for (String rawTag : file.getTags()) {
+            String tag = TagText.plain(rawTag);
+            if (!tag.isEmpty()) result.add(tag);
+        }
         return result;
     }
 
     private List<Group> groupByDate(List<MediaFile> files) {
-        Map<String, Group> map = new LinkedHashMap<>();
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM", Locale.getDefault());
-        for (MediaFile f : files) {
-            if (f == null) continue;
+        Map<String, Group> map = new LinkedHashMap<String, Group>();
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM", Locale.US);
+        for (MediaFile file : files) {
+            if (file == null) continue;
             String key;
-            try {
-                key = sdf.format(new Date(f.getDateAdded()));
-            } catch (Exception e) {
-                key = "Unknown";
-            }
-            if (!map.containsKey(key)) {
-                map.put(key, new Group(key, Group.GroupBy.DATE));
-            }
-            map.get(key).addFile(f);
+            try { key = format.format(new Date(file.getDateAdded())); }
+            catch (Exception ignored) { key = "Unknown"; }
+            add(map, key, Group.GroupBy.DATE, file);
         }
-        return new ArrayList<>(map.values());
+        return new ArrayList<Group>(map.values());
     }
 
     private List<Group> groupByFolder(List<MediaFile> files) {
-        Map<String, Group> map = new LinkedHashMap<>();
-        for (MediaFile f : files) {
-            if (f == null) continue;
-            String path = f.getPath();
-            if (path == null) continue;
-            java.io.File file = new java.io.File(path);
-            String folder = file.getParentFile() != null
-                ? file.getParentFile().getName() : "Unknown";
-            if (!map.containsKey(folder)) {
-                map.put(folder, new Group(folder, Group.GroupBy.FOLDER));
-            }
-            map.get(folder).addFile(f);
+        Map<String, Group> map = new LinkedHashMap<String, Group>();
+        for (MediaFile file : files) {
+            if (file == null) continue;
+            File parent = new File(file.getPath()).getParentFile();
+            add(map, parent == null ? "Unknown" : parent.getName(), Group.GroupBy.FOLDER, file);
         }
-        return new ArrayList<>(map.values());
+        return new ArrayList<Group>(map.values());
+    }
+
+    private List<Group> groupByTagPrefix(List<MediaFile> files) {
+        Map<String, Group> map = new LinkedHashMap<String, Group>();
+        for (MediaFile file : files) {
+            String first = firstTag(file);
+            int underscore = first.indexOf('_');
+            int hyphen = first.indexOf('-');
+            int cut = underscore < 0 ? hyphen : hyphen < 0 ? underscore : Math.min(underscore, hyphen);
+            String key = cut > 0 ? first.substring(0, cut) : (first.isEmpty() ? "Untagged" : first);
+            add(map, key, Group.GroupBy.TAG_PREFIX, file);
+        }
+        return new ArrayList<Group>(map.values());
+    }
+
+    private List<Group> groupBySequence(List<MediaFile> files) {
+        Map<String, Group> map = new LinkedHashMap<String, Group>();
+        for (MediaFile file : files) {
+            String key = sequenceGroup(file);
+            if (key.isEmpty()) key = "No sequence group";
+            add(map, key, Group.GroupBy.SEQUENCE_GROUP, file);
+        }
+        return new ArrayList<Group>(map.values());
+    }
+
+    private List<Group> groupByColor(List<MediaFile> files) {
+        if (!hasColorProfiles(files)) {
+            lastError = "Run color analysis first.";
+            return new ArrayList<Group>();
+        }
+        Map<String, Group> map = new LinkedHashMap<String, Group>();
+        for (MediaFile file : files) {
+            String key = file.getColorFamily();
+            if (key.isEmpty()) key = "Unknown";
+            add(map, key, Group.GroupBy.COLOR_PROFILE, file);
+        }
+        return new ArrayList<Group>(map.values());
+    }
+
+    private List<Group> groupByDepth(List<MediaFile> files) {
+        Map<String, Group> map = new LinkedHashMap<String, Group>();
+        for (MediaFile file : files) {
+            String key = String.valueOf(directoryDepth(file));
+            add(map, key, Group.GroupBy.DIRECTORY_DEPTH, file);
+        }
+        return new ArrayList<Group>(map.values());
+    }
+
+    private List<Group> groupByManual(List<MediaFile> files) {
+        Map<String, Group> map = new LinkedHashMap<String, Group>();
+        for (MediaFile file : files) {
+            String key = manualAssignments.get(file.getPath());
+            if (key == null || key.trim().isEmpty()) key = "Unassigned";
+            add(map, key, Group.GroupBy.MANUAL_GROUP, file);
+        }
+        return new ArrayList<Group>(map.values());
+    }
+
+    private void add(Map<String, Group> map, String key, Group.GroupBy mode, MediaFile file) {
+        if (key == null || key.isEmpty()) key = "Unknown";
+        Group group = map.get(key);
+        if (group == null) {
+            group = new Group(key, mode);
+            map.put(key, group);
+        }
+        group.addFile(file);
+    }
+
+    private String firstTag(MediaFile file) {
+        if (file == null || file.getTags() == null || file.getTags().isEmpty()) return "";
+        return file.getTags().get(0) == null ? "" : file.getTags().get(0).trim();
+    }
+
+    private String sequenceGroup(MediaFile file) {
+        if (file == null || file.getTags() == null) return "";
+        for (String value : file.getTags()) {
+            if (value == null) continue;
+            String tag = value.trim();
+            if (tag.startsWith("link_") || tag.startsWith("link-")) {
+                String group = tag.substring(5);
+                int sequence = group.indexOf("_seq_");
+                return sequence > 0 ? group.substring(0, sequence) : group;
+            }
+        }
+        return "";
+    }
+
+    private int directoryDepth(MediaFile file) {
+        if (file == null || file.getPath() == null) return 0;
+        String root = watchedRoot == null ? "" : watchedRoot.replace('\\', '/');
+        String path = file.getPath().replace('\\', '/');
+        if (!root.isEmpty() && path.startsWith(root)) {
+            String relative = path.substring(root.length());
+            while (relative.startsWith("/")) relative = relative.substring(1);
+            int depth = 0;
+            String[] parts = relative.split("/");
+            for (int i = 0; i < parts.length - 1; i++) if (!parts[i].isEmpty()) depth++;
+            return depth;
+        }
+        return path.split("/").length - 1;
     }
 }

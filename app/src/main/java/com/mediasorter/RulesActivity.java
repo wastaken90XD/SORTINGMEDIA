@@ -3,6 +3,7 @@ package com.mediasorter;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.ProgressDialog;
+import android.content.DialogInterface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -27,6 +28,7 @@ public class RulesActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setTitle(getString(R.string.app_name) + " Organizer");
 
         // Managers
         TagManager tagManager = new TagManager(this);
@@ -64,7 +66,12 @@ public class RulesActivity extends Activity {
             }
         };
         listView.setAdapter(adapter);
-        listView.setOnItemClickListener((parent, view, pos, id) -> showRuleOptions(pos));
+        listView.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
+            @Override public void onItemClick(android.widget.AdapterView<?> parent,
+                                              View view, int pos, long id) {
+                showRuleOptions(pos);
+            }
+        });
         root.addView(listView, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
 
@@ -74,15 +81,21 @@ public class RulesActivity extends Activity {
         btnRow1.setPadding(0, 8, 0, 4);
 
         Button addBtn = makeButton("+ Add Rule");
-        addBtn.setOnClickListener(v -> showRuleDialog(null, -1));
+        addBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showRuleDialog(null, -1); }
+        });
         btnRow1.addView(addBtn, rowParam());
 
         Button runBtn = makeButton("Run Now");
-        runBtn.setOnClickListener(v -> runOrganizerBackground());
+        runBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { runOrganizerBackground(); }
+        });
         btnRow1.addView(runBtn, rowParam());
 
         Button previewBtn = makeButton("Preview");
-        previewBtn.setOnClickListener(v -> showPreview());
+        previewBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showPreview(); }
+        });
         btnRow1.addView(previewBtn, rowParam());
 
         root.addView(btnRow1);
@@ -93,15 +106,21 @@ public class RulesActivity extends Activity {
         btnRow2.setPadding(0, 4, 0, 8);
 
         Button undoBtn = makeButton("Undo");
-        undoBtn.setOnClickListener(v -> doUndo());
+        undoBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { doUndo(); }
+        });
         btnRow2.addView(undoBtn, rowParam());
 
         Button logBtn = makeButton("Log");
-        logBtn.setOnClickListener(v -> showLog());
+        logBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showLog(); }
+        });
         btnRow2.addView(logBtn, rowParam());
 
         Button removeBtn = makeButton("Remove Rules");
-        removeBtn.setOnClickListener(v -> showRemoveRulesDialog());
+        removeBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showRemoveRulesDialog(); }
+        });
         btnRow2.addView(removeBtn, rowParam());
 
         root.addView(btnRow2);
@@ -165,16 +184,24 @@ public class RulesActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle("Remove rules")
                 .setMultiChoiceItems(names, selected,
-                        (dialog, which, checked) -> selected[which] = checked)
-                .setPositiveButton("Remove", (dialog, which) -> {
-                    int removed = 0;
-                    for (int i = selected.length - 1; i >= 0; i--) {
-                        if (selected[i]) { rules.remove(i); removed++; }
-                    }
-                    if (removed > 0) {
-                        organizer.setRules(rules);
-                        refreshList();
-                        Toast.makeText(this, "Removed " + removed + " rules", Toast.LENGTH_SHORT).show();
+                        new DialogInterface.OnMultiChoiceClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which, boolean checked) {
+                                selected[which] = checked;
+                            }
+                        })
+                .setPositiveButton("Remove", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        int removed = 0;
+                        for (int i = selected.length - 1; i >= 0; i--) {
+                            if (selected[i]) { rules.remove(i); removed++; }
+                        }
+                        if (removed > 0) {
+                            organizer.setRules(rules);
+                            refreshList();
+                            Toast.makeText(RulesActivity.this,
+                                    "Removed " + removed + " rules", Toast.LENGTH_SHORT).show();
+                        }
                     }
                 })
                 .setNegativeButton("Cancel", null)
@@ -191,14 +218,16 @@ public class RulesActivity extends Activity {
                 "Delete"};
         new AlertDialog.Builder(this)
             .setTitle(rule.name)
-            .setItems(options, (d, which) -> {
-                switch (which) {
-                    case 0: showRuleDialog(rule, pos); break;
-                    case 1: moveRuleUp(pos); break;
-                    case 2: moveRuleDown(pos); break;
-                    case 3: toggleRule(pos); break;
-                    case 4: toggleAutoApply(pos); break;
-                    case 5: deleteRule(pos); break;
+            .setItems(options, new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog, int which) {
+                    switch (which) {
+                        case 0: showRuleDialog(rule, pos); break;
+                        case 1: moveRuleUp(pos); break;
+                        case 2: moveRuleDown(pos); break;
+                        case 3: toggleRule(pos); break;
+                        case 4: toggleAutoApply(pos); break;
+                        case 5: deleteRule(pos); break;
+                    }
                 }
             })
             .show();
@@ -238,10 +267,12 @@ public class RulesActivity extends Activity {
         new AlertDialog.Builder(this)
             .setTitle("Delete rule?")
             .setMessage(rules.get(pos).name)
-            .setPositiveButton("Delete", (d, w) -> {
-                rules.remove(pos);
-                organizer.setRules(rules);
-                refreshList();
+            .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog, int which) {
+                    rules.remove(pos);
+                    organizer.setRules(rules);
+                    refreshList();
+                }
             })
             .setNegativeButton("Cancel", null)
             .show();
@@ -305,7 +336,11 @@ public class RulesActivity extends Activity {
 
         Button addCondBtn = new Button(this);
         addCondBtn.setText("+ Add Condition (AND)");
-        addCondBtn.setOnClickListener(v -> addConditionRow(condContainer, condEdits, null));
+        addCondBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                addConditionRow(condContainer, condEdits, null);
+            }
+        });
         layout.addView(addCondBtn);
 
         // ── Action section ───────────────────────────────────────────────
@@ -358,27 +393,29 @@ public class RulesActivity extends Activity {
         new AlertDialog.Builder(this)
             .setTitle(isNew ? "Add Rule" : "Edit Rule")
             .setView(sv)
-            .setPositiveButton("Save", (d, w) -> {
-                rule.name = nameEdit.getText().toString().trim();
-                if (rule.name.isEmpty()) rule.name = "Unnamed";
-                rule.enabled = enabledCheck.isChecked();
-                rule.autoApply = autoCheck.isChecked();
+            .setPositiveButton("Save", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog, int which) {
+                    rule.name = nameEdit.getText().toString().trim();
+                    if (rule.name.isEmpty()) rule.name = "Unnamed";
+                    rule.enabled = enabledCheck.isChecked();
+                    rule.autoApply = autoCheck.isChecked();
 
-                // Build conditions from edits
-                rule.conditions.clear();
-                for (ConditionEdit ce : condEdits) {
-                    Condition c = ce.buildCondition();
-                    if (c != null) rule.conditions.add(c);
+                    // Build conditions from edits
+                    rule.conditions.clear();
+                    for (ConditionEdit ce : condEdits) {
+                        Condition c = ce.buildCondition();
+                        if (c != null) rule.conditions.add(c);
+                    }
+
+                    // Build action
+                    rule.action = helper.buildAction(actSpinner.getSelectedItemPosition(), actHolder);
+
+                    if (isNew) {
+                        rules.add(rule);
+                    }
+                    organizer.setRules(rules);
+                    refreshList();
                 }
-
-                // Build action
-                rule.action = helper.buildAction(actSpinner.getSelectedItemPosition(), actHolder);
-
-                if (isNew) {
-                    rules.add(rule);
-                }
-                organizer.setRules(rules);
-                refreshList();
             })
             .setNegativeButton("Cancel", null)
             .show();
@@ -463,7 +500,18 @@ public class RulesActivity extends Activity {
         ce.paramEdit = new EditText(this);
         ce.paramEdit.setTextColor(0xFFFFFFFF);
         ce.paramEdit.setHint("parameter");
-        row.addView(ce.paramEdit);
+        LinearLayout parameterRow = new LinearLayout(this);
+        parameterRow.setOrientation(LinearLayout.HORIZONTAL);
+        ce.paramEdit.setLayoutParams(new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        parameterRow.addView(ce.paramEdit);
+        Button variableButton = makeButton("Variables");
+        variableButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { showVariablePicker(ce.paramEdit); }
+        });
+        parameterRow.addView(variableButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        row.addView(parameterRow);
 
         // Negate
         ce.negateCheck = new CheckBox(this);
@@ -565,9 +613,11 @@ public class RulesActivity extends Activity {
         // Remove button
         Button removeBtn = new Button(this);
         removeBtn.setText("Remove");
-        removeBtn.setOnClickListener(v -> {
-            container.removeView(row);
-            edits.remove(ce);
+        removeBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                container.removeView(row);
+                edits.remove(ce);
+            }
         });
         row.addView(removeBtn);
 
@@ -635,12 +685,18 @@ public class RulesActivity extends Activity {
         progress.setCancelable(false);
         progress.show();
 
-        new Thread(() -> {
-            final int affected = organizer.applyTo(files);
-            mainHandler.post(() -> {
-                progress.dismiss();
-                Toast.makeText(this, "Rules applied. Files affected: " + affected, Toast.LENGTH_SHORT).show();
-            });
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final int affected = organizer.applyTo(files);
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        progress.dismiss();
+                        Toast.makeText(RulesActivity.this,
+                                "Rules applied. Files affected: " + affected,
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
         }).start();
     }
 
@@ -654,9 +710,15 @@ public class RulesActivity extends Activity {
         new AlertDialog.Builder(this)
             .setTitle("Undo last run?")
             .setMessage("This will reverse the last batch of actions (move, delete, tags, status).")
-            .setPositiveButton("Undo", (d, w) -> {
-                int restored = organizer.undoLastRun();
-                Toast.makeText(this, "Undone: " + restored + " operations", Toast.LENGTH_SHORT).show();
+            .setPositiveButton("Undo", new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog, int which) {
+                    int restored = organizer.undoLastRun();
+                    Toast.makeText(RulesActivity.this,
+                            organizer.wasLastUndoPartial()
+                                    ? "Undo partially complete"
+                                    : "Undone: " + restored + " operations",
+                            Toast.LENGTH_SHORT).show();
+                }
             })
             .setNegativeButton("Cancel", null)
             .show();
@@ -680,6 +742,70 @@ public class RulesActivity extends Activity {
     }
 
     // ── UI helpers ──────────────────────────────────────────────────────
+
+    private void showVariablePicker(final EditText target) {
+        final String[] values = {
+                "{filename} — name without extension",
+                "{fullname} — name with extension",
+                "{ext} — file extension",
+                "{path} — full file path",
+                "{dir} — parent directory name",
+                "{dirpath} — parent directory path",
+                "{size} — file size in bytes",
+                "{size_kb} — file size in KB",
+                "{size_mb} — file size in MB",
+                "{width} — image width",
+                "{height} — image height",
+                "{ratio} — aspect ratio",
+                "{type} — image or video",
+                "{date} — modification date yyyyMMdd",
+                "{year} — modification year",
+                "{month} — modification month",
+                "{day} — modification day",
+                "{hour} — modification hour",
+                "{minute} — modification minute",
+                "{timestamp} — epoch milliseconds",
+                "{now} — current date yyyyMMdd",
+                "{now_time} — current time HHmmss",
+                "{tag:N} — Nth tag (zero based)",
+                "{tag_count} — total tag count",
+                "{first_tag} — first tag",
+                "{last_tag} — last tag",
+                "{tags} — tags joined by underscore",
+                "{tags_csv} — tags joined by comma",
+                "{seq} — next sequence label",
+                "{seq_index} — next sequence index",
+                "{group} — link group prefix",
+                "{manual_order} — manual order",
+                "{list_index} — active list index",
+                "{list_total} — active list total",
+                "{page} — current page",
+                "{page_total} — total pages",
+                "{flagged} — flagged status",
+                "{skipped} — skipped status",
+                "{done} — done status",
+                "{is_duplicate} — duplicate status",
+                "{has_metadata} — metadata status",
+                "{color} — dominant color",
+                "{color_hex} — dominant color hex",
+                "{random} — random syllable tag",
+                "{random_hex} — random hex",
+                "{random_seq} — random sequence",
+                "{uuid} — unique identifier",
+                "{session_date} — session date",
+                "{run_index} — session run index"
+        };
+        new AlertDialog.Builder(this).setTitle("Variables").setItems(values,
+                new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        String row = values[which];
+                        int space = row.indexOf(" ");
+                        String token = space > 0 ? row.substring(0, space) : row;
+                        int cursor = Math.max(0, target.getSelectionStart());
+                        target.getText().insert(cursor, token);
+                    }
+                }).setNegativeButton("Cancel", null).show();
+    }
 
     private TextView makeLabel(String text) {
         return makeLabel(this, text);

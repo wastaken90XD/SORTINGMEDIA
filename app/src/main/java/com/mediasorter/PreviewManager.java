@@ -34,7 +34,6 @@ public class PreviewManager {
     public interface ActionListener {
         void onSkip();
         void onFlag();
-        void onDone();
         void onNext();
         void onPrev();
         void onDpadUp();
@@ -43,6 +42,10 @@ public class PreviewManager {
         void onDpadRight();
         void onDpadCenter();
         void onTagListChanged(int index);
+    }
+
+    public interface GestureInputListener {
+        void onInput(String inputId);
     }
 
     private final Context         context;
@@ -58,9 +61,9 @@ public class PreviewManager {
     private TextView     detailMeta;
     private TextView     unsupportedText;
     private TextView     positionCounter;
+    private TextView     flagState;
     private Button       btnSkip;
     private Button       btnFlag;
-    private Button       btnDone;
     private Button       btnPrev;
     private Button       btnNext;
     private Button       btnTogglePanel;
@@ -85,6 +88,7 @@ public class PreviewManager {
     private boolean hasFlashedForCurrentSwipe = false;
 
     private ActionListener       actionListener;
+    private GestureInputListener gestureInputListener;
     private FileStatus           fileStatus;
     private GestureDetector      swipeDetector;
     private ScaleGestureDetector scaleDetector;
@@ -104,6 +108,10 @@ public class PreviewManager {
     private float translateY  = 0f;
     private float lastTouchX  = 0f;
     private float lastTouchY  = 0f;
+    private float multiFingerDownX = 0f;
+    private float multiFingerDownY = 0f;
+    private boolean multiFingerTouch;
+    private boolean multiFingerSwipeSent;
 
     private static final float MIN_ZOOM = 1.0f;
     private static final float MAX_ZOOM = 8.0f;
@@ -147,11 +155,11 @@ public class PreviewManager {
         unsupportedPreview = root.findViewById(R.id.unsupportedPreview);
         detailFileName     = root.findViewById(R.id.detailFileName);
         detailMeta         = root.findViewById(R.id.detailMeta);
+        flagState           = root.findViewById(R.id.flagState);
         unsupportedText    = root.findViewById(R.id.unsupportedText);
         positionCounter    = root.findViewById(R.id.positionCounter);
         btnSkip            = root.findViewById(R.id.btnSkip);
         btnFlag            = root.findViewById(R.id.btnFlag);
-        btnDone            = root.findViewById(R.id.btnDone);
         btnPrev            = root.findViewById(R.id.btnPrev);
         btnNext            = root.findViewById(R.id.btnNext);
         btnTogglePanel     = root.findViewById(R.id.btnTogglePanel);
@@ -299,9 +307,6 @@ public class PreviewManager {
         });
         btnFlag.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { if (actionListener != null) actionListener.onFlag(); }
-        });
-        btnDone.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { if (actionListener != null) actionListener.onDone(); }
         });
         btnPrev.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { if (actionListener != null) actionListener.onPrev(); }
@@ -456,9 +461,19 @@ public class PreviewManager {
 
     // ── Zoom ──────────────────────────────────────────────────────────────────
 
+    private void emitGestureInput(String inputId) {
+        if (gestureInputListener != null) gestureInputListener.onInput(inputId);
+    }
+
     private void setupZoom() {
         scaleDetector = new ScaleGestureDetector(context,
             new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                @Override
+                public boolean onScaleBegin(ScaleGestureDetector detector) {
+                    emitGestureInput(GestureConstants.INPUT_SCALE_PREVIEW);
+                    return true;
+                }
+
                 @Override
                 public boolean onScale(ScaleGestureDetector detector) {
                     scaleFactor *= detector.getScaleFactor();
@@ -478,6 +493,7 @@ public class PreviewManager {
                 boolean scaleHandled = scaleDetector.onTouchEvent(event);
 
                 boolean shouldHandleSwipe = swipeDetector != null
+                        && event.getPointerCount() <= 1
                         && !scaleDetector.isInProgress()
                         && scaleFactor <= MIN_ZOOM + 0.01f;
 
@@ -489,11 +505,38 @@ public class PreviewManager {
                     case MotionEvent.ACTION_DOWN:
                         lastTouchX = event.getX();
                         lastTouchY = event.getY();
+                        multiFingerTouch = false;
+                        multiFingerSwipeSent = false;
                         if (scaleFactor > 1.0f) {
                             imagePreview.setLayerType(View.LAYER_TYPE_HARDWARE, null);
                         }
                         break;
+                    case MotionEvent.ACTION_POINTER_DOWN:
+                        if (event.getPointerCount() > 1) {
+                            multiFingerTouch = true;
+                            multiFingerSwipeSent = false;
+                            multiFingerDownX = event.getX();
+                            multiFingerDownY = event.getY();
+                        }
+                        break;
                     case MotionEvent.ACTION_MOVE:
+                        if (multiFingerTouch && !multiFingerSwipeSent
+                                && event.getPointerCount() > 1) {
+                            float multiDx = event.getX() - multiFingerDownX;
+                            float multiDy = event.getY() - multiFingerDownY;
+                            if (Math.abs(multiDx) >= 100 || Math.abs(multiDy) >= 100) {
+                                if (Math.abs(multiDx) > Math.abs(multiDy)) {
+                                    emitGestureInput(multiDx < 0
+                                            ? GestureConstants.INPUT_SWIPE_LEFT_TWO_FINGER_PREVIEW
+                                            : GestureConstants.INPUT_SWIPE_RIGHT_TWO_FINGER_PREVIEW);
+                                } else {
+                                    emitGestureInput(multiDy < 0
+                                            ? GestureConstants.INPUT_SWIPE_UP_TWO_FINGER_PREVIEW
+                                            : GestureConstants.INPUT_SWIPE_DOWN_TWO_FINGER_PREVIEW);
+                                }
+                                multiFingerSwipeSent = true;
+                            }
+                        }
                         if (!scaleDetector.isInProgress() && scaleFactor > 1.0f) {
                             translateX += event.getX() - lastTouchX;
                             translateY += event.getY() - lastTouchY;
@@ -503,6 +546,9 @@ public class PreviewManager {
                         lastTouchY = event.getY();
                         break;
                     case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        multiFingerTouch = false;
+                        multiFingerSwipeSent = false;
                         if (scaleFactor <= MIN_ZOOM) {
                             resetZoom();
                             imagePreview.setLayerType(View.LAYER_TYPE_NONE, null);
@@ -532,8 +578,20 @@ public class PreviewManager {
         }
     }
 
+    public void rotatePreview(float degrees) {
+        if (imagePreview != null) imagePreview.setRotation(imagePreview.getRotation() + degrees);
+    }
+
+    public void zoomPreview(float factor) {
+        scaleFactor = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, scaleFactor * factor));
+        applyMatrix();
+    }
+
+    public void resetPreviewZoom() { resetZoom(); }
+
     public void setSwipeDetector(GestureDetector d) { this.swipeDetector = d; }
     public void setActionListener(ActionListener l) { this.actionListener = l; }
+    public void setGestureInputListener(GestureInputListener l) { this.gestureInputListener = l; }
 
     public void setThumbnailLoader(ThumbnailLoader loader) {
         if (loader != null) this.thumbnailLoader = loader;
@@ -569,6 +627,17 @@ public class PreviewManager {
         }
     }
 
+    /** Clear stale preview state when filtering removes the current file. */
+    public void clearCurrent() {
+        currentPath = null;
+        stopMedia();
+        hideAll();
+        if (detailFileName != null) detailFileName.setText("");
+        if (detailMeta != null) detailMeta.setText("");
+        if (flagState != null) flagState.setVisibility(View.GONE);
+        setPosition(0, 0);
+    }
+
     // ── Image ─────────────────────────────────────────────────────────────────
 
     private void loadImage(final MediaFile file) {
@@ -594,7 +663,6 @@ public class PreviewManager {
                         @Override
                         public void run() {
                             if (released || !path.equals(currentPath)) {
-                                if (bmp != null && !bmp.isRecycled()) bmp.recycle();
                                 return;
                             }
                             if (bmp != null) {
@@ -646,11 +714,7 @@ public class PreviewManager {
     }
 
     private void replaceOwnBitmap(Bitmap next) {
-        Bitmap old = ownBitmap;
         ownBitmap = next;
-        if (old != null && !old.isRecycled() && old != next) {
-            old.recycle();
-        }
     }
 
     private int calcSampleSize(BitmapFactory.Options opts, int reqW, int reqH) {
@@ -709,6 +773,22 @@ public class PreviewManager {
             file.getFormattedSize()
             + "  •  " + file.getType().name().toLowerCase()
             + "  •  " + file.getTags().size() + " tags");
+        updateStatusIndicator(file);
+    }
+
+    /** Refresh the visible flag indicator without reloading media or layout. */
+    public void updateStatusIndicator(MediaFile file) {
+        if (file == null || flagState == null || fileStatus == null) return;
+        boolean flagged = fileStatus.isFlagged(file.getPath());
+        flagState.setText(flagged ? "FLAGGED" : "Not flagged");
+        flagState.setVisibility(View.VISIBLE);
+        flagState.setTextColor(flagged ? 0xFFFFAA00 : 0xFFAAAAAA);
+    }
+
+    /** Repaint status controls without reloading the preview bitmap/video. */
+    public void updateStatus(MediaFile file) {
+        if (file == null) return;
+        updateButtonStates(file);
     }
 
     private void updateButtonStates(MediaFile file) {
@@ -720,9 +800,7 @@ public class PreviewManager {
         btnFlag.setBackgroundTintList(
             android.content.res.ColorStateList.valueOf(
                 fileStatus.isFlagged(path) ? 0xFFFFAA00 : 0xFFAA6600));
-        btnDone.setBackgroundTintList(
-            android.content.res.ColorStateList.valueOf(
-                fileStatus.isDone(path) ? 0xFF44AA44 : 0xFF226622));
+        updateStatusIndicator(file);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -751,9 +829,7 @@ public class PreviewManager {
         released = true;
         stopMedia();
         mainHandler.removeCallbacks(hideTintRunnable);
-        Bitmap old = ownBitmap;
         ownBitmap = null;
-        if (old != null && !old.isRecycled()) old.recycle();
         executor.shutdown();
     }
 }

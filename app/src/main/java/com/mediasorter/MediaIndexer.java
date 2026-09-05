@@ -6,6 +6,7 @@ import com.mediasorter.models.MediaFile;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -152,22 +153,24 @@ public class MediaIndexer {
 
         scanning.set(true);
         final String folderToScan = next;
-        scanExecutor.submit(() -> {
-            try {
-                doFullScan(folderToScan);
-            } catch (Throwable t) {
-                t.printStackTrace();
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
                 try {
-                    // Ensure we still notify completion to unblock UI
-                    if (listener != null) {
-                        listener.onScanComplete(new ArrayList<>(getIndex()));
-                    }
-                } catch (Exception ignored) {}
-            } finally {
-                scanning.set(false);
-                // Schedule next in queue on same executor thread to avoid stack overflow
-                // post a new check
-                scheduleNext();
+                    doFullScan(folderToScan);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                    try {
+                        // Ensure we still notify completion to unblock UI
+                        if (listener != null) {
+                            listener.onScanComplete(new ArrayList<>(getIndex()));
+                        }
+                    } catch (Exception ignored) {}
+                } finally {
+                    scanning.set(false);
+                    // Schedule next in queue on same executor thread to avoid stack overflow
+                    // post a new check
+                    scheduleNext();
+                }
             }
         });
     }
@@ -207,12 +210,18 @@ public class MediaIndexer {
             if (existingIndex != null && existingManifest != null
                     && existingManifest.size == size
                     && existingManifest.lastModified == mod) {
-                // Already indexed and up to date – skip
+                // Refresh XMP even for unchanged files so tags written by
+                // another application become visible without a file change.
+                if (refreshXmpMetadata(existingIndex, absPath)
+                        && listener != null) {
+                    try { listener.onFileChanged(existingIndex); } catch (Exception ignored) {}
+                }
                 continue;
             }
 
             try {
                 MediaFile mf = buildLight(f);
+                mergeIndexTags(mf, existingIndex);
                 if (mf.getType() == MediaFile.Type.UNSUPPORTED) continue;
 
                 scanned++;
@@ -275,16 +284,18 @@ public class MediaIndexer {
 
     public void rescan(String folderPath) {
         if (folderPath == null) return;
-        scanExecutor.submit(() -> {
-            // If a full scan is queued, we still run rescan; set scanning flag for UI
-            boolean prev = scanning.getAndSet(true);
-            try {
-                doRescan(folderPath);
-            } catch (Throwable t) {
-                t.printStackTrace();
-            } finally {
-                scanning.set(false);
-                scheduleNext();
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
+                // If a full scan is queued, we still run rescan; set scanning flag for UI
+                boolean prev = scanning.getAndSet(true);
+                try {
+                    doRescan(folderPath);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                } finally {
+                    scanning.set(false);
+                    scheduleNext();
+                }
             }
         });
     }
@@ -313,6 +324,7 @@ public class MediaIndexer {
             if (needsAdd) {
                 try {
                     MediaFile mf = buildLight(f);
+                    mergeIndexTags(mf, inIndex ? findInIndex(path) : null);
                     if (mf.getType() == MediaFile.Type.UNSUPPORTED) continue;
 
                     if (inIndex) {
@@ -335,6 +347,11 @@ public class MediaIndexer {
                     t.printStackTrace();
                 }
             } else {
+                MediaFile indexed = findInIndex(path);
+                if (indexed != null && refreshXmpMetadata(indexed, path)
+                        && listener != null) {
+                    try { listener.onFileChanged(indexed); } catch (Exception ignored) {}
+                }
                 if (existing.hash == null) {
                     byte[] hash = HashScanner.partialHash(path);
                     manifest.put(path, new ManifestEntry(size, mod, hash));
@@ -365,21 +382,28 @@ public class MediaIndexer {
                 try { listener.onFileRemoved(path); } catch (Exception ignored) {}
             }
         }
+
+        if (listener != null) {
+            try { listener.onScanComplete(new ArrayList<>(getIndex())); }
+            catch (Exception ignored) {}
+        }
     }
 
     // ── Clean rescan ──────────────────────────────────────────────────────────
 
     public void rescanClean(String folderPath) {
         if (folderPath == null) return;
-        scanExecutor.submit(() -> {
-            scanning.getAndSet(true);
-            try {
-                doRescanClean(folderPath);
-            } catch (Throwable t) {
-                t.printStackTrace();
-            } finally {
-                scanning.set(false);
-                scheduleNext();
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
+                scanning.getAndSet(true);
+                try {
+                    doRescanClean(folderPath);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                } finally {
+                    scanning.set(false);
+                    scheduleNext();
+                }
             }
         });
     }
@@ -411,6 +435,19 @@ public class MediaIndexer {
             removePersistedHash(path);
             if (listener != null) {
                 try { listener.onFileRemoved(path); } catch (Exception ignored) {}
+            }
+        }
+
+        // Refresh metadata for every indexed file, even when size and
+        // timestamp are unchanged. External tag editors often change XMP
+        // without changing either value.
+        for (File f : files) {
+            if (f.isDirectory() || !isMediaFile(f.getName())) continue;
+            String abs = f.getAbsolutePath();
+            MediaFile indexed = findInIndex(abs);
+            if (indexed != null && refreshXmpMetadata(indexed, abs)
+                    && listener != null) {
+                try { listener.onFileChanged(indexed); } catch (Exception ignored) {}
             }
         }
 
@@ -449,23 +486,25 @@ public class MediaIndexer {
     public void fullReset(List<String> folders) {
         // Stop queue
         synchronized (folderQueue) { folderQueue.clear(); }
-        scanExecutor.submit(() -> {
-            scanning.set(true);
-            try {
-                synchronized (index) { index.clear(); }
-                manifest.clear();
-                if (hashPrefs != null) {
-                    try { hashPrefs.edit().clear().apply(); } catch (Exception ignored) {}
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
+                scanning.set(true);
+                try {
+                    synchronized (index) { index.clear(); }
+                    manifest.clear();
+                    if (hashPrefs != null) {
+                        try { hashPrefs.edit().clear().apply(); } catch (Exception ignored) {}
+                    }
+                } finally {
+                    scanning.set(false);
                 }
-            } finally {
-                scanning.set(false);
-            }
-            // Re-queue folders after clearing
-            if (folders != null) {
-                synchronized (folderQueue) {
-                    folderQueue.addAll(folders);
+                // Re-queue folders after clearing
+                if (folders != null) {
+                    synchronized (folderQueue) {
+                        folderQueue.addAll(folders);
+                    }
+                    scheduleNext();
                 }
-                scheduleNext();
             }
         });
     }
@@ -476,35 +515,37 @@ public class MediaIndexer {
      */
     public void repairFolder(String folderPath) {
         if (folderPath == null) return;
-        scanExecutor.submit(() -> {
-            scanning.set(true);
-            try {
-                String norm = folderPath.endsWith("/") ? folderPath : folderPath + "/";
-                // Remove manifest entries for this folder
-                List<String> keysToRemove = new ArrayList<>();
-                for (String key : manifest.keySet()) {
-                    if (key.startsWith(norm)) keysToRemove.add(key);
-                }
-                for (String k : keysToRemove) {
-                    manifest.remove(k);
-                    removePersistedHash(k);
-                }
-                // Remove index entries for this folder (will be re-added)
-                List<String> idxToRemove = new ArrayList<>();
-                synchronized (index) {
-                    for (MediaFile mf : index) {
-                        if (mf.getPath().startsWith(norm)) idxToRemove.add(mf.getPath());
+        scanExecutor.submit(new Runnable() {
+            @Override public void run() {
+                scanning.set(true);
+                try {
+                    String norm = folderPath.endsWith("/") ? folderPath : folderPath + "/";
+                    // Remove manifest entries for this folder
+                    List<String> keysToRemove = new ArrayList<>();
+                    for (String key : manifest.keySet()) {
+                        if (key.startsWith(norm)) keysToRemove.add(key);
                     }
-                }
-                for (String p : idxToRemove) removeFromIndex(p);
+                    for (String k : keysToRemove) {
+                        manifest.remove(k);
+                        removePersistedHash(k);
+                    }
+                    // Remove index entries for this folder (will be re-added)
+                    List<String> idxToRemove = new ArrayList<>();
+                    synchronized (index) {
+                        for (MediaFile mf : index) {
+                            if (mf.getPath().startsWith(norm)) idxToRemove.add(mf.getPath());
+                        }
+                    }
+                    for (String p : idxToRemove) removeFromIndex(p);
 
-                // Now do a clean scan
-                doFullScan(folderPath);
-            } catch (Throwable t) {
-                t.printStackTrace();
-            } finally {
-                scanning.set(false);
-                scheduleNext();
+                    // Now do a clean scan
+                    doFullScan(folderPath);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                } finally {
+                    scanning.set(false);
+                    scheduleNext();
+                }
             }
         });
     }
@@ -542,12 +583,60 @@ public class MediaIndexer {
     private MediaFile buildLight(File f) {
         MediaFile mf = new MediaFile(f.getAbsolutePath(), f.length());
         mf.setDateAdded(f.lastModified());
+        if (appContext != null) {
+            String key = "manual_order:" + f.getAbsolutePath();
+            int order = appContext.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE)
+                    .getInt(key, -1);
+            mf.setManualOrder(order);
+        }
         try {
             List<String> existingTags = XmpReader.readTags(f.getAbsolutePath());
             for (String tag : existingTags) mf.addTag(tag);
+            mf.setMetadataPresent(XmpReader.hasMetadata(f.getAbsolutePath()));
+            String rememberedColor = ColorAnalyzer.getLastColorFamily(mf.getPath());
+            if (rememberedColor != null) mf.setColorFamily(rememberedColor);
         } catch (Exception ignored) {}
         readDimensions(mf);
         return mf;
+    }
+
+    private void mergeIndexTags(MediaFile target, MediaFile existing) {
+        if (target == null) return;
+        List<String> merged = new ArrayList<String>();
+        if (existing != null) {
+            for (String tag : existing.getTags()) addMergedTag(merged, tag);
+        }
+        for (String tag : target.getTags()) addMergedTag(merged, tag);
+        target.setTags(merged);
+    }
+
+    private boolean mergeXmpTags(MediaFile target, List<String> xmpTags) {
+        if (target == null) return false;
+        List<String> before = new ArrayList<String>(target.getTags());
+        List<String> merged = new ArrayList<String>();
+        for (String tag : before) addMergedTag(merged, tag);
+        if (xmpTags != null) {
+            for (String tag : xmpTags) addMergedTag(merged, tag);
+        }
+        target.setTags(merged);
+        return !before.equals(target.getTags());
+    }
+
+    private boolean refreshXmpMetadata(MediaFile target, String path) {
+        if (target == null || path == null) return false;
+        boolean beforeMetadata = target.hasMetadata();
+        boolean changed = mergeXmpTags(target, XmpReader.readTags(path));
+        boolean afterMetadata = XmpReader.hasMetadata(path);
+        if (beforeMetadata != afterMetadata) {
+            target.setMetadataPresent(afterMetadata);
+            changed = true;
+        }
+        return changed;
+    }
+
+    private void addMergedTag(List<String> tags, String rawTag) {
+        String tag = TagText.plain(rawTag);
+        if (!tag.isEmpty() && !tags.contains(tag)) tags.add(tag);
     }
 
     private void readDimensions(MediaFile mf) {
@@ -629,6 +718,35 @@ public class MediaIndexer {
         return findInIndex(path) != null;
     }
 
+    /**
+     * Stores the manual order on the existing in-memory index. Only paths whose
+     * integer position changed are written to SharedPreferences; the same
+     * settings preference file is already covered by SettingsExporter.
+     */
+    public void updateManualOrder(List<MediaFile> ordered) {
+        if (ordered == null || ordered.isEmpty()) return;
+        android.content.SharedPreferences prefs = appContext == null ? null
+                : appContext.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
+        android.content.SharedPreferences.Editor editor = prefs == null ? null : prefs.edit();
+        Map<String, Integer> positions = new LinkedHashMap<>();
+        for (int i = 0; i < ordered.size(); i++) {
+            MediaFile file = ordered.get(i);
+            if (file != null && file.getPath() != null) positions.put(file.getPath(), i);
+        }
+        synchronized (index) {
+            for (MediaFile file : index) {
+                Integer position = positions.get(file.getPath());
+                if (position != null && file.getManualOrder() != position) {
+                    file.setManualOrder(position);
+                    if (editor != null) {
+                        editor.putInt("manual_order:" + file.getPath(), position);
+                    }
+                }
+            }
+        }
+        if (editor != null) editor.apply();
+    }
+
     // ── Query helpers ─────────────────────────────────────────────────────────
 
     public List<String> getAllTagsFromIndex() {
@@ -645,5 +763,15 @@ public class MediaIndexer {
 
     public List<MediaFile> getIndex() {
         synchronized (index) { return new ArrayList<>(index); }
+    }
+
+    /**
+     * Snapshot of the complete unfiltered index. This intentionally bypasses
+     * WindowManager: that class owns only the current display window.
+     */
+    public synchronized List<MediaFile> getFullIndex() {
+        synchronized (index) {
+            return new ArrayList<MediaFile>(index);
+        }
     }
 }
