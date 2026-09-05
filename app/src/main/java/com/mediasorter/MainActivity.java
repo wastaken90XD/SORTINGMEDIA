@@ -1073,7 +1073,7 @@ public class MainActivity extends Activity
             @Override public void onTagsChanged() {
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
-                        if (tagAdapter != null) tagAdapter.setTags(tagManager.getAllTags());
+                        if (tagAdapter != null) tagAdapter.setTags(getOrderedTagChoices(getTagMenuTargets()));
                         boolean removedGhost = reconcileDeletedTagFilters();
                         refreshTagBar();
                         if (removedGhost) scheduleRefresh();
@@ -1425,7 +1425,8 @@ public class MainActivity extends Activity
                     @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
                     @Override public void afterTextChanged(Editable s) {}
                     @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
-                        tagAdapter.setTags(tagManager.searchTags(s.toString()));
+                        tagAdapter.setTags(getOrderedTagChoices(
+                                getTagMenuTargets(), s.toString()));
                     }
                 });
 
@@ -1469,7 +1470,7 @@ public class MainActivity extends Activity
                 String name = newTagInput.getText().toString().trim();
                 if (name.isEmpty()) return;
                 tagManager.createTag(name);
-                tagAdapter.setTags(tagManager.getAllTags());
+                tagAdapter.setTags(getOrderedTagChoices(getTagMenuTargets()));
                 newTagInput.setText("");
                 tagSuggestView.setText("");
             }
@@ -1637,7 +1638,7 @@ public class MainActivity extends Activity
             });
         }
 
-        tagAdapter.setTags(tagManager.getAllTags());
+        tagAdapter.setTags(getOrderedTagChoices(getTagMenuTargets()));
         setupGalleryMode();
         installExplorerWidthLayoutListener();
     }
@@ -1713,14 +1714,29 @@ public class MainActivity extends Activity
         return changed;
     }
 
+    private int compareCurrentTagPriority(Tag left, Tag right, Set<String> currentTags) {
+        boolean leftCurrent = currentTags.contains(left.getName());
+        boolean rightCurrent = currentTags.contains(right.getName());
+        if (leftCurrent == rightCurrent) return 0;
+        return leftCurrent ? -1 : 1;
+    }
+
     private void refreshTagBar() {
         if (tagBarAdapter == null || tagManager == null) return;
         String query = tagBarSearch == null ? "" : tagBarSearch.getText().toString().trim().toLowerCase();
-        List<Tag> all = tagManager.getAllTags();
+        final Set<String> currentTags = new java.util.HashSet<String>();
+        for (MediaFile file : getTagMenuTargets()) {
+            if (file != null) {
+                for (String tag : file.getTags()) currentTags.add(TagText.plain(tag));
+            }
+        }
+        List<Tag> all = getOrderedTagChoices(getTagMenuTargets());
         if (tagBarSortMode == TagBarSort.ALPHABETICAL) {
             java.util.Collections.sort(all, new java.util.Comparator<Tag>() {
                 @Override public int compare(Tag left, Tag right) {
-                    return left.getName().compareToIgnoreCase(right.getName());
+                    int priority = compareCurrentTagPriority(left, right, currentTags);
+                    return priority != 0 ? priority
+                            : left.getName().compareToIgnoreCase(right.getName());
                 }
             });
         } else if (tagBarSortMode == TagBarSort.RECENT) {
@@ -1729,6 +1745,8 @@ public class MainActivity extends Activity
             for (int i = 0; i < recent.size(); i++) order.put(recent.get(i).getName(), i);
             java.util.Collections.sort(all, new java.util.Comparator<Tag>() {
                 @Override public int compare(Tag left, Tag right) {
+                    int priority = compareCurrentTagPriority(left, right, currentTags);
+                    if (priority != 0) return priority;
                     Integer a = order.get(left.getName());
                     Integer b = order.get(right.getName());
                     if (a == null && b == null) return left.getName().compareToIgnoreCase(right.getName());
@@ -1740,6 +1758,8 @@ public class MainActivity extends Activity
         } else {
             java.util.Collections.sort(all, new java.util.Comparator<Tag>() {
                 @Override public int compare(Tag left, Tag right) {
+                    int priority = compareCurrentTagPriority(left, right, currentTags);
+                    if (priority != 0) return priority;
                     int result = Integer.compare(right.getUsageCount(), left.getUsageCount());
                     return result != 0 ? result : left.getName().compareToIgnoreCase(right.getName());
                 }
@@ -2445,7 +2465,7 @@ public class MainActivity extends Activity
         if (file == null) return;
         for (String tag : new ArrayList<String>(file.getTags())) tagManager.removeTag(file, tag);
         tagAdapter.setCurrentFile(file);
-        tagAdapter.setTags(tagManager.getAllTags());
+        tagAdapter.setTags(getOrderedTagChoices(getTagMenuTargets()));
         refreshSidePanel();
         refreshTagBar();
     }
@@ -2505,7 +2525,7 @@ public class MainActivity extends Activity
             tagManager.applyTag(file, tag);
             mediaAdapter.updateFileTags(file);
         }
-        if (tagAdapter != null) tagAdapter.setTags(tagManager.getAllTags());
+        if (tagAdapter != null) tagAdapter.setTags(getOrderedTagChoices(getTagMenuTargets()));
         syncUiAfterTagging(targets);
         refreshTagBar();
         Toast.makeText(this, "Tagged " + targets.size() + " files as " + tag,
@@ -2716,7 +2736,7 @@ public class MainActivity extends Activity
         mediaAdapter.updateFileTags(file);
         if (galleryAdapter != null) galleryAdapter.notifyDataSetChanged();
         tagAdapter.setCurrentFile(file);
-        tagAdapter.setTags(tagManager.getAllTags());
+        tagAdapter.setTags(getOrderedTagChoices(getTagMenuTargets()));
         refreshSidePanel();
         updateProgress();
     }
@@ -2781,7 +2801,7 @@ public class MainActivity extends Activity
         previewManager.load(file);
         previewManager.setPosition(absoluteIndex + 1, fullList.size());
         tagAdapter.setCurrentFile(file);
-        tagAdapter.setTags(tagManager.getAllTags());
+        tagAdapter.setTags(getOrderedTagChoices(getTagMenuTargets()));
         refreshSidePanel();
 
         if (galleryModeActive && galleryBrowser != null) {
@@ -2886,7 +2906,7 @@ public class MainActivity extends Activity
         final List<MediaFile> selectedFiles = getActiveSelectedFiles();
         if (selectedFiles.isEmpty()) return;
 
-        List<Tag> allTags = tagManager.getAllTags();
+        List<Tag> allTags = getOrderedTagChoices(selectedFiles);
         final List<QuickTagItem> items = new ArrayList<>();
         for (Tag choice : allTags) {
             String name = choice.getName();
@@ -2917,15 +2937,31 @@ public class MainActivity extends Activity
         listView.setBackgroundColor(0xFF161616); // match background color of dark theme
         listView.setDivider(new android.graphics.drawable.ColorDrawable(0xFF2A2A3E));
         listView.setDividerHeight((int) (1 * getResources().getDisplayMetrics().density));
-        listView.setAdapter(new QuickTagListAdapter(items));
+        final QuickTagListAdapter tagListAdapter = new QuickTagListAdapter(items);
+        listView.setAdapter(tagListAdapter);
 
         LinearLayout batchTagContent = new LinearLayout(this);
         batchTagContent.setOrientation(LinearLayout.VERTICAL);
+        final EditText tagSearchInput = new EditText(this);
+        tagSearchInput.setSingleLine(true);
+        tagSearchInput.setHint("Search all tags…");
+        tagSearchInput.setTextColor(0xFFFFFFFF);
+        tagSearchInput.setHintTextColor(0xFF666666);
+        batchTagContent.addView(tagSearchInput, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         final Button randomTagButton = makeSmallButton("🎲");
         randomTagButton.setContentDescription("Apply quick random tag");
         batchTagContent.addView(randomTagButton);
         batchTagContent.addView(listView, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (int) (360 * getResources().getDisplayMetrics().density + 0.5f)));
+        tagSearchInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                tagListAdapter.filter(s.toString());
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
 
         final AlertDialog batchTagDialog = new AlertDialog.Builder(this)
                 .setTitle("Tag " + selectedFiles.size() + " files")
@@ -2977,7 +3013,7 @@ public class MainActivity extends Activity
                     tagManager.applyTag(file, generated);
                     mediaAdapter.updateFileTags(file);
                 }
-                if (tagAdapter != null) tagAdapter.setTags(tagManager.getAllTags());
+                if (tagAdapter != null) tagAdapter.setTags(getOrderedTagChoices(getTagMenuTargets()));
                 refreshTagBar();
                 syncUiAfterTagging(selectedFiles);
                 Toast.makeText(MainActivity.this,
@@ -3811,21 +3847,15 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void showSortTagChoice(final List<String> rules, final Runnable render) {
-        List<Tag> tags = tagManager.getAllTags();
-        final String[] names = new String[tags.size()];
-        for (int i = 0; i < tags.size(); i++) names[i] = tags.get(i).getName();
-        new AlertDialog.Builder(this)
-                .setTitle("Add tag to rule")
-                .setItems(names, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface dialog, int which) {
-                        if (which >= 0 && which < names.length && !rules.contains(names[which])) {
-                            rules.add(names[which]);
+        showSearchableTagPicker("Add tag to rule", getOrderedTagChoices(getTagMenuTargets()),
+                new TagChoiceListener() {
+                    @Override public void onTagChosen(String tagName) {
+                        if (!rules.contains(tagName)) {
+                            rules.add(tagName);
                             render.run();
                         }
                     }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+                });
     }
 
     private void showFilterMenu(View anchor) {
@@ -4469,14 +4499,103 @@ private Spinner makeSpinner(String[] options) {
 
     // ── Quick tag toggle from file list (tags-tap popup) ────────────────────
 
-    /** Tags offered in the quick-tag popup: most recent first, then most used. */
-    private List<Tag> getQuickTagChoices() {
-        Map<String, Tag> merged = new java.util.LinkedHashMap<>();
-        for (Tag t : tagManager.getRecentTags(6)) merged.put(t.getName(), t);
-        for (Tag t : tagManager.getTopTags(10)) {
-            if (!merged.containsKey(t.getName())) merged.put(t.getName(), t);
+    /**
+     * Returns every known tag, placing tags already present on the target
+     * files first. Metadata/XMP tags that have not reached the database yet
+     * are included as well, so a file can always be edited immediately.
+     */
+    private List<Tag> getOrderedTagChoices(List<MediaFile> targets) {
+        List<Tag> global = tagManager.getAllTags();
+        Map<String, Tag> byName = new java.util.HashMap<String, Tag>();
+        for (Tag tag : global) byName.put(tag.getName(), tag);
+
+        List<Tag> ordered = new ArrayList<Tag>();
+        Set<String> added = new java.util.HashSet<String>();
+        if (targets != null) {
+            for (MediaFile file : targets) {
+                if (file == null || file.getTags() == null) continue;
+                for (String raw : file.getTags()) {
+                    String name = TagText.plain(raw);
+                    if (name.isEmpty() || !added.add(name)) continue;
+                    Tag existing = byName.get(name);
+                    ordered.add(existing == null ? new Tag(name) : existing);
+                }
+            }
         }
-        return new ArrayList<>(merged.values());
+        for (Tag tag : global) {
+            if (tag != null && added.add(tag.getName())) ordered.add(tag);
+        }
+        return ordered;
+    }
+
+    private List<Tag> getOrderedTagChoices(List<MediaFile> targets, String query) {
+        List<Tag> ordered = getOrderedTagChoices(targets);
+        String lower = query == null ? "" : query.trim().toLowerCase(java.util.Locale.US);
+        if (lower.isEmpty()) return ordered;
+        List<Tag> filtered = new ArrayList<Tag>();
+        for (Tag tag : ordered) {
+            if (tag.getName().toLowerCase(java.util.Locale.US).contains(lower)) filtered.add(tag);
+        }
+        return filtered;
+    }
+
+    private interface TagChoiceListener {
+        void onTagChosen(String tagName);
+    }
+
+    private void showSearchableTagPicker(String title, List<Tag> tags,
+                                         final TagChoiceListener listener) {
+        final List<String> allNames = new ArrayList<String>();
+        if (tags != null) {
+            for (Tag tag : tags) {
+                if (tag != null && !allNames.contains(tag.getName())) allNames.add(tag.getName());
+            }
+        }
+        final List<String> visibleNames = new ArrayList<String>(allNames);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        final EditText search = new EditText(this);
+        search.setSingleLine(true);
+        search.setHint("Search all tags…");
+        search.setTextColor(0xFFFFFFFF);
+        search.setHintTextColor(0xFF666666);
+        content.addView(search);
+        final ListView list = new ListView(this);
+        final ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_list_item_1, visibleNames);
+        list.setAdapter(adapter);
+        content.addView(list, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (int) (360 * getResources().getDisplayMetrics().density + 0.5f)));
+        final AlertDialog[] dialogHolder = new AlertDialog[1];
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                String query = s.toString().trim().toLowerCase(java.util.Locale.US);
+                visibleNames.clear();
+                for (String name : allNames) {
+                    if (query.isEmpty() || name.toLowerCase(java.util.Locale.US).contains(query)) {
+                        visibleNames.add(name);
+                    }
+                }
+                adapter.notifyDataSetChanged();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        list.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
+            @Override public void onItemClick(android.widget.AdapterView<?> parent,
+                                              View view, int position, long id) {
+                if (position < 0 || position >= visibleNames.size()) return;
+                if (listener != null) listener.onTagChosen(visibleNames.get(position));
+                if (dialogHolder[0] != null) dialogHolder[0].dismiss();
+            }
+        });
+        dialogHolder[0] = new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(content)
+                .setNegativeButton("Cancel", null)
+                .create();
+        dialogHolder[0].show();
     }
 
     /**
@@ -4498,7 +4617,7 @@ private Spinner makeSpinner(String[] options) {
             return;
         }
 
-        final List<Tag> choices = getQuickTagChoices();
+        final List<Tag> choices = getOrderedTagChoices(targets);
         if (choices.isEmpty()) {
             // Nothing to choose from yet — go straight to creating the first
             // tag. Only come back to the popup once a tag actually exists,
@@ -4550,11 +4669,31 @@ private Spinner makeSpinner(String[] options) {
         listView.setBackgroundColor(0xFF161616); // match background color of dark theme
         listView.setDivider(new android.graphics.drawable.ColorDrawable(0xFF2A2A3E));
         listView.setDividerHeight((int) (1 * getResources().getDisplayMetrics().density));
-        listView.setAdapter(new QuickTagListAdapter(items));
+        final QuickTagListAdapter tagListAdapter = new QuickTagListAdapter(items);
+        listView.setAdapter(tagListAdapter);
+        LinearLayout quickTagContent = new LinearLayout(this);
+        quickTagContent.setOrientation(LinearLayout.VERTICAL);
+        final EditText tagSearchInput = new EditText(this);
+        tagSearchInput.setSingleLine(true);
+        tagSearchInput.setHint("Search all tags…");
+        tagSearchInput.setTextColor(0xFFFFFFFF);
+        tagSearchInput.setHintTextColor(0xFF666666);
+        quickTagContent.addView(tagSearchInput, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        quickTagContent.addView(listView, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (int) (360 * getResources().getDisplayMetrics().density + 0.5f)));
+        tagSearchInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                tagListAdapter.filter(s.toString());
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
 
         new AlertDialog.Builder(this)
                 .setTitle(title)
-                .setView(listView)
+                .setView(quickTagContent)
                 .setPositiveButton("Apply", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         for (QuickTagItem item : items) {
@@ -6500,25 +6639,18 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void showGalleryTagFilterPicker() {
-        List<Tag> tags = tagManager.getAllTags();
+        List<Tag> tags = getOrderedTagChoices(getTagMenuTargets());
         if (tags.isEmpty()) return;
-        String[] names = new String[tags.size()];
-        for (int i = 0; i < tags.size(); i++) names[i] = tags.get(i).getName();
-        new AlertDialog.Builder(this)
-                .setTitle("Filter by tag")
-                .setItems(names, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface dialog, int which) {
-                        if (which < 0 || which >= names.length) return;
-                        activeTagFilters.clear();
-                        activeTagFilters.add(names[which]);
-                        filterManager.setTagFilters(activeTagFilters);
-                        refreshTagBar();
-                        refreshGalleryFilterChips();
-                        scheduleRefresh();
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+        showSearchableTagPicker("Filter by tag", tags, new TagChoiceListener() {
+            @Override public void onTagChosen(String tagName) {
+                activeTagFilters.clear();
+                activeTagFilters.add(tagName);
+                filterManager.setTagFilters(activeTagFilters);
+                refreshTagBar();
+                refreshGalleryFilterChips();
+                scheduleRefresh();
+            }
+        });
     }
 
     private void beginGalleryDrag(GalleryAdapter.ViewHolder holder) {
@@ -7075,21 +7207,61 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void showGalleryTagPickerForSelection() {
-        List<Tag> tags = tagManager.getAllTags();
-        String[] names = new String[tags.size()];
-        for (int i = 0; i < tags.size(); i++) names[i] = tags.get(i).getName();
+        final List<Tag> orderedTags = getOrderedTagChoices(
+                galleryAdapter == null ? new ArrayList<MediaFile>()
+                        : galleryAdapter.getSelectedFiles());
+        final List<String> allNames = new ArrayList<String>();
+        for (Tag tag : orderedTags) allNames.add(tag.getName());
+        final List<String> visibleNames = new ArrayList<String>(allNames);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        final EditText search = new EditText(this);
+        search.setSingleLine(true);
+        search.setHint("Search all tags…");
+        search.setTextColor(0xFFFFFFFF);
+        search.setHintTextColor(0xFF666666);
+        content.addView(search);
+
+        final ListView list = new ListView(this);
+        final ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_list_item_1, visibleNames);
+        list.setAdapter(adapter);
+        content.addView(list, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (int) (360 * getResources().getDisplayMetrics().density + 0.5f)));
+
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                String query = s.toString().trim().toLowerCase(java.util.Locale.US);
+                visibleNames.clear();
+                for (String name : allNames) {
+                    if (query.isEmpty() || name.toLowerCase(java.util.Locale.US).contains(query)) {
+                        visibleNames.add(name);
+                    }
+                }
+                adapter.notifyDataSetChanged();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+
+        list.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
+            @Override public void onItemClick(android.widget.AdapterView<?> parent,
+                                              View view, int position, long id) {
+                if (position < 0 || position >= visibleNames.size()) return;
+                String selectedName = visibleNames.get(position);
+                List<MediaFile> matches = new ArrayList<MediaFile>();
+                for (MediaFile file : fullList) {
+                    if (file.hasTag(selectedName)) matches.add(file);
+                }
+                galleryAdapter.selectMatching(matches);
+            }
+        });
+
         new AlertDialog.Builder(this)
                 .setTitle("Select by tag")
-                .setItems(names, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface dialog, int which) {
-                        if (which < 0 || which >= names.length) return;
-                        List<MediaFile> matches = new ArrayList<>();
-                        for (MediaFile file : fullList) {
-                            if (file.hasTag(names[which])) matches.add(file);
-                        }
-                        galleryAdapter.selectMatching(matches);
-                    }
-                })
+                .setView(content)
                 .setNegativeButton("Cancel", null)
                 .show();
     }
@@ -7274,19 +7446,33 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private class QuickTagListAdapter extends android.widget.BaseAdapter {
-        private final List<QuickTagItem> items;
+        private final List<QuickTagItem> allItems;
+        private final List<QuickTagItem> visibleItems = new ArrayList<QuickTagItem>();
         private final android.view.LayoutInflater inflater;
 
         QuickTagListAdapter(List<QuickTagItem> items) {
-            this.items = items;
+            this.allItems = items;
+            this.visibleItems.addAll(items);
             this.inflater = android.view.LayoutInflater.from(MainActivity.this);
         }
 
-        @Override
-        public int getCount() { return items.size(); }
+        void filter(String query) {
+            String lower = query == null ? "" : query.trim().toLowerCase(java.util.Locale.US);
+            visibleItems.clear();
+            for (QuickTagItem item : allItems) {
+                if (lower.isEmpty()
+                        || item.name.toLowerCase(java.util.Locale.US).contains(lower)) {
+                    visibleItems.add(item);
+                }
+            }
+            notifyDataSetChanged();
+        }
 
         @Override
-        public Object getItem(int position) { return items.get(position); }
+        public int getCount() { return visibleItems.size(); }
+
+        @Override
+        public Object getItem(int position) { return visibleItems.get(position); }
 
         @Override
         public long getItemId(int position) { return position; }
@@ -7297,7 +7483,7 @@ private Spinner makeSpinner(String[] options) {
                 convertView = inflater.inflate(R.layout.item_tag, parent, false);
             }
 
-            final QuickTagItem item = items.get(position);
+            final QuickTagItem item = visibleItems.get(position);
             android.widget.TextView tagName = convertView.findViewById(R.id.tagName);
             android.widget.TextView tagCount = convertView.findViewById(R.id.tagCount);
             android.widget.CheckBox tagCheck = convertView.findViewById(R.id.tagCheck);
