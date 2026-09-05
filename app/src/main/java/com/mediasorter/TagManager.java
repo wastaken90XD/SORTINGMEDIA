@@ -7,9 +7,11 @@ import com.mediasorter.models.Tag;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -293,14 +295,66 @@ public class TagManager {
     public void importTagsFromFiles(List<String> tagNames) {
         executor.submit(new Runnable() {
             @Override public void run() {
+                if (tagNames == null) return;
                 synchronized (tagMap) {
-                    if (tagNames == null) return;
                     for (String name : tagNames) {
                         String plain = TagText.plain(name);
                         if (plain.isEmpty() || tagMap.containsKey(plain)) continue;
                         Tag tag = new Tag(plain);
                         db.tagDao().insert(tag);
                         tagMap.put(plain, tag);
+                    }
+                }
+                notifyTagsChanged();
+            }
+        });
+    }
+
+    /**
+     * Synchronizes the global tag catalog with every indexed file. Tags found
+     * in XMP or another external source are first-class global tags just like
+     * tags created in the app. The usage count is rebuilt from the complete
+     * index so sorting and every tag picker agree on the same library state.
+     * Existing zero-use tags are retained because they may be user-created
+     * library tags that are not currently assigned to a file.
+     */
+    public void syncTagsFromFiles(List<MediaFile> files) {
+        final Map<String, Integer> usage = new HashMap<String, Integer>();
+        if (files != null) {
+            for (MediaFile file : files) {
+                if (file == null || file.getTags() == null) continue;
+                Set<String> seenInFile = new HashSet<String>();
+                for (String raw : file.getTags()) {
+                    String plain = TagText.plain(raw);
+                    if (plain.isEmpty() || !seenInFile.add(plain)) continue;
+                    Integer count = usage.get(plain);
+                    usage.put(plain, count == null ? 1 : count + 1);
+                }
+            }
+        }
+
+        executor.submit(new Runnable() {
+            @Override public void run() {
+                synchronized (tagMap) {
+                    for (Map.Entry<String, Integer> entry : usage.entrySet()) {
+                        String name = entry.getKey();
+                        int count = entry.getValue() == null ? 0 : entry.getValue();
+                        Tag tag = tagMap.get(name);
+                        boolean created = false;
+                        if (tag == null) {
+                            tag = new Tag(name);
+                            tagMap.put(name, tag);
+                            created = true;
+                        }
+                        if (tag.getUsageCount() != count) tag.setUsageCount(count);
+                        if (created) db.tagDao().insert(tag);
+                        else db.tagDao().update(tag);
+                    }
+                    for (Tag tag : tagMap.values()) {
+                        if (!usage.containsKey(tag.getName()) && tag.getUsageCount() != 0) {
+                            tag.setUsageCount(0);
+                            db.tagDao().update(tag);
+                        }
                     }
                 }
                 notifyTagsChanged();

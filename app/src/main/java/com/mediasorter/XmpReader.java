@@ -15,7 +15,7 @@ public class XmpReader {
     private static final String TAG = "XmpReader";
 
     private static final Pattern TAG_PATTERN =
-        Pattern.compile("<rdf:li[^>]*>([^<]+)</rdf:li>");
+        Pattern.compile("<rdf:li[^>]*>(.*?)</rdf:li>", Pattern.DOTALL);
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -46,9 +46,12 @@ public class XmpReader {
             String lower = filePath.toLowerCase(java.util.Locale.US);
             if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
                 return readJpeg(filePath);
-            } else if (lower.endsWith(".png")) {
+            } else if (lower.endsWith(".png") || lower.endsWith(".webp")
+                    || lower.endsWith(".bmp") || lower.endsWith(".gif")) {
                 return readGeneric(filePath, false);
-            } else if (lower.endsWith(".mp4") || lower.endsWith(".mov")) {
+            } else if (lower.endsWith(".mp4") || lower.endsWith(".mov")
+                    || lower.endsWith(".3gp") || lower.endsWith(".avi")
+                    || lower.endsWith(".mkv") || lower.endsWith(".webm")) {
                 return readGeneric(filePath, true);
             }
         } catch (Exception e) {
@@ -135,10 +138,24 @@ public class XmpReader {
 
         Matcher m = TAG_PATTERN.matcher(subject);
         while (m.find()) {
-            String tag = TagText.plain(m.group(1));
-            if (!tag.isEmpty()) tags.add(tag);
+            String tag = TagText.plain(unescapeXml(m.group(1)));
+            if (!tag.isEmpty() && !tags.contains(tag)) tags.add(tag);
         }
 
         return tags;
+    }
+
+    private static String unescapeXml(String value) {
+        if (value == null) return "";
+        String result = value.trim();
+        if (result.startsWith("<![CDATA[") && result.endsWith("]]>")
+                && result.length() >= 12) {
+            result = result.substring(9, result.length() - 3);
+        }
+        return result.replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&apos;", "'")
+                .replace("&amp;", "&");
     }
 }

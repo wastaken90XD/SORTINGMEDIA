@@ -1159,6 +1159,11 @@ public class MainActivity extends Activity
                 onTagToggled(tagName, applied);
             }
         });
+        tagAdapter.setOnTagLongPressListener(new TagAdapter.OnTagLongPressListener() {
+            @Override public void onTagLongPress(String tagName, View anchor) {
+                showTagBarContextMenu(tagName, anchor);
+            }
+        });
 
         // Tapping the tags line in the file list shows the quick tag popup;
         // with an active selection it targets every selected file at once.
@@ -1681,6 +1686,12 @@ public class MainActivity extends Activity
                     refreshTagBar();
                 }
             });
+            tagBarSort.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override public boolean onLongClick(View view) {
+                    showTagManagementMenu(view);
+                    return true;
+                }
+            });
         }
         refreshTagBar();
         updateStatsBarAsync();
@@ -1759,12 +1770,25 @@ public class MainActivity extends Activity
         menu.getMenu().add("Rename tag");
         menu.getMenu().add("Delete tag");
         menu.getMenu().add("Select all files with this tag");
+        menu.getMenu().add("Add tag to current file");
+        menu.getMenu().add(tagManager != null && tagManager.isTagsEnabled()
+                ? "Disable tag menus" : "Enable tag menus");
         menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
             @Override public boolean onMenuItemClick(android.view.MenuItem item) {
                 String title = item.getTitle().toString();
                 if ("Rename tag".equals(title)) showRenameTagDialog(tag);
                 else if ("Delete tag".equals(title)) deleteTagFromFiles(tag);
                 else if ("Select all files with this tag".equals(title)) selectFilesWithTag(tag);
+                else if ("Add tag to current file".equals(title)) {
+                    List<MediaFile> targets = getTagMenuTargets();
+                    showNewTagDialog(targets.isEmpty() ? null : targets, null);
+                } else if ("Enable tag menus".equals(title)) {
+                    tagManager.setTagsEnabled(true);
+                    applyUiToggles();
+                } else if ("Disable tag menus".equals(title)) {
+                    tagManager.setTagsEnabled(false);
+                    applyUiToggles();
+                }
                 return true;
             }
         });
@@ -1833,6 +1857,56 @@ public class MainActivity extends Activity
         }
     }
 
+    private List<MediaFile> getTagMenuTargets() {
+        List<MediaFile> targets = new ArrayList<MediaFile>();
+        MediaFile file = currentFileReference();
+        if (file != null) targets.add(file);
+        return targets;
+    }
+
+    private void showTagManagementMenu(View anchor) {
+        final List<MediaFile> targets = getTagMenuTargets();
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add("Add tag");
+        menu.getMenu().add(tagManager != null && tagManager.isTagsEnabled()
+                ? "Disable tag menus" : "Enable tag menus");
+        menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
+            @Override public boolean onMenuItemClick(android.view.MenuItem item) {
+                String title = item.getTitle().toString();
+                if ("Add tag".equals(title)) {
+                    showNewTagDialog(targets.isEmpty() ? null : targets, null);
+                } else if ("Enable tag menus".equals(title)) {
+                    tagManager.setTagsEnabled(true);
+                    applyUiToggles();
+                } else if ("Disable tag menus".equals(title)) {
+                    tagManager.setTagsEnabled(false);
+                    applyUiToggles();
+                }
+                return true;
+            }
+        });
+        menu.show();
+    }
+
+    private void showTagDisabledDialog(final List<MediaFile> targets) {
+        new AlertDialog.Builder(this)
+                .setTitle("Tag menus disabled")
+                .setItems(new String[]{"Enable tag menus", "Add tag"},
+                        new DialogInterface.OnClickListener() {
+                            @Override public void onClick(DialogInterface dialog, int which) {
+                                if (which == 0) {
+                                    tagManager.setTagsEnabled(true);
+                                    applyUiToggles();
+                                } else {
+                                    showNewTagDialog(targets == null || targets.isEmpty()
+                                            ? null : targets, null);
+                                }
+                            }
+                        })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
     private MediaFile findFileByPath(String path) {
         if (path == null) return null;
         for (MediaFile file : fullList) if (file != null && path.equals(file.getPath())) return file;
@@ -1893,9 +1967,7 @@ public class MainActivity extends Activity
         btnToggle.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 if (tagManager != null && !tagManager.isTagsEnabled()) {
-                    Toast.makeText(MainActivity.this,
-                            "Tags are disabled (Settings → Main Window)",
-                            Toast.LENGTH_SHORT).show();
+                    showTagManagementMenu(btnToggle);
                     return;
                 }
                 boolean visible = tagPanel.getVisibility() == View.VISIBLE;
@@ -1905,6 +1977,12 @@ public class MainActivity extends Activity
                     tagPanel.setVisibility(View.VISIBLE);
                 }
                 syncTagToggleButton(btnToggle, !visible);
+            }
+        });
+        btnToggle.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                showTagManagementMenu(v);
+                return true;
             }
         });
     }
@@ -2802,9 +2880,7 @@ public class MainActivity extends Activity
 
     private void showBatchTagDialog(final Map<String, Integer> pendingStates) {
         if (tagManager != null && !tagManager.isTagsEnabled()) {
-            Toast.makeText(this,
-                    "Tags are disabled (Settings → Main Window)",
-                    Toast.LENGTH_SHORT).show();
+            showTagDisabledDialog(getActiveSelectedFiles());
             return;
         }
         final List<MediaFile> selectedFiles = getActiveSelectedFiles();
@@ -4418,9 +4494,7 @@ private Spinner makeSpinner(String[] options) {
                                    final Map<String, Integer> pendingStates) {
         if (targets == null || targets.isEmpty()) return;
         if (tagManager != null && !tagManager.isTagsEnabled()) {
-            Toast.makeText(this,
-                    "Tags are disabled (Settings → Main Window)",
-                    Toast.LENGTH_SHORT).show();
+            showTagDisabledDialog(targets);
             return;
         }
 
@@ -5341,7 +5415,13 @@ private Spinner makeSpinner(String[] options) {
     // ── MediaIndexer callbacks ───────────────────────────────────────────────
 
     @Override
-    public void onFileFound(MediaFile file) {}
+    public void onFileFound(MediaFile file) {
+        if (file != null && tagManager != null) {
+            // New files discovered by an automatic/rescan path must populate
+            // the same global catalog as files found by the full scan.
+            tagManager.importTagsFromFiles(file.getTags());
+        }
+    }
 
     @Override
     public void onScanProgress(int scanned, int total, String currentFile) {
@@ -5381,11 +5461,11 @@ private Spinner makeSpinner(String[] options) {
                 }
                 if (scanProgress != null) scanProgress.setVisibility(View.GONE);
 
-                // Import all tags found in scanned files into TagManager
-                List<String> allTagsFromFiles = indexer.getAllTagsFromIndex();
-                if (!allTagsFromFiles.isEmpty()) {
-                    tagManager.importTagsFromFiles(allTagsFromFiles);
-                }
+                // Rebuild the global catalog from the complete index. This is
+                // intentionally not limited to the current window or current
+                // file, so XMP/external tags are available in every tag menu.
+                tagManager.syncTagsFromFiles(allFiles != null
+                        ? allFiles : indexer.getFullIndex());
 
                 executeRefresh();
             }

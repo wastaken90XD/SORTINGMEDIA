@@ -212,7 +212,7 @@ public class MediaIndexer {
                     && existingManifest.lastModified == mod) {
                 // Refresh XMP even for unchanged files so tags written by
                 // another application become visible without a file change.
-                if (mergeXmpTags(existingIndex, XmpReader.readTags(absPath))
+                if (refreshXmpMetadata(existingIndex, absPath)
                         && listener != null) {
                     try { listener.onFileChanged(existingIndex); } catch (Exception ignored) {}
                 }
@@ -347,6 +347,11 @@ public class MediaIndexer {
                     t.printStackTrace();
                 }
             } else {
+                MediaFile indexed = findInIndex(path);
+                if (indexed != null && refreshXmpMetadata(indexed, path)
+                        && listener != null) {
+                    try { listener.onFileChanged(indexed); } catch (Exception ignored) {}
+                }
                 if (existing.hash == null) {
                     byte[] hash = HashScanner.partialHash(path);
                     manifest.put(path, new ManifestEntry(size, mod, hash));
@@ -376,6 +381,11 @@ public class MediaIndexer {
             if (listener != null) {
                 try { listener.onFileRemoved(path); } catch (Exception ignored) {}
             }
+        }
+
+        if (listener != null) {
+            try { listener.onScanComplete(new ArrayList<>(getIndex())); }
+            catch (Exception ignored) {}
         }
     }
 
@@ -425,6 +435,19 @@ public class MediaIndexer {
             removePersistedHash(path);
             if (listener != null) {
                 try { listener.onFileRemoved(path); } catch (Exception ignored) {}
+            }
+        }
+
+        // Refresh metadata for every indexed file, even when size and
+        // timestamp are unchanged. External tag editors often change XMP
+        // without changing either value.
+        for (File f : files) {
+            if (f.isDirectory() || !isMediaFile(f.getName())) continue;
+            String abs = f.getAbsolutePath();
+            MediaFile indexed = findInIndex(abs);
+            if (indexed != null && refreshXmpMetadata(indexed, abs)
+                    && listener != null) {
+                try { listener.onFileChanged(indexed); } catch (Exception ignored) {}
             }
         }
 
@@ -597,6 +620,18 @@ public class MediaIndexer {
         }
         target.setTags(merged);
         return !before.equals(target.getTags());
+    }
+
+    private boolean refreshXmpMetadata(MediaFile target, String path) {
+        if (target == null || path == null) return false;
+        boolean beforeMetadata = target.hasMetadata();
+        boolean changed = mergeXmpTags(target, XmpReader.readTags(path));
+        boolean afterMetadata = XmpReader.hasMetadata(path);
+        if (beforeMetadata != afterMetadata) {
+            target.setMetadataPresent(afterMetadata);
+            changed = true;
+        }
+        return changed;
     }
 
     private void addMergedTag(List<String> tags, String rawTag) {

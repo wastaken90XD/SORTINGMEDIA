@@ -20,12 +20,21 @@ public class TagAdapter extends RecyclerView.Adapter<TagAdapter.ViewHolder> {
         void onTagToggle(String tagName, boolean applied);
     }
 
+    public interface OnTagLongPressListener {
+        void onTagLongPress(String tagName, View anchor);
+    }
+
     private List<Tag>         tags     = new ArrayList<>();
     private MediaFile         current  = null;
     private OnTagToggleListener listener;
+    private OnTagLongPressListener longPressListener;
 
     public TagAdapter(OnTagToggleListener listener) {
         this.listener = listener;
+    }
+
+    public void setOnTagLongPressListener(OnTagLongPressListener listener) {
+        this.longPressListener = listener;
     }
 
     public void setTags(List<Tag> tags) {
@@ -89,6 +98,15 @@ public class TagAdapter extends RecyclerView.Adapter<TagAdapter.ViewHolder> {
         holder.itemView.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 holder.tagCheck.toggle();
+            }
+        });
+        holder.itemView.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                if (longPressListener != null) {
+                    longPressListener.onTagLongPress(tagName, v);
+                    return true;
+                }
+                return false;
             }
         });
     }
