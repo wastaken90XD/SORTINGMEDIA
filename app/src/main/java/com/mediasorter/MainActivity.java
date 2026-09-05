@@ -5816,6 +5816,11 @@ private Spinner makeSpinner(String[] options) {
         for (int i = 0; i < toolbar.getChildCount(); i++) {
             toolbar.getChildAt(i).setVisibility(View.GONE);
         }
+        // Keep the primary scan controls visible when the customizable
+        // toolbar replaces the fixed toolbar buttons. These are also the
+        // selection entry point for the batch-actions dialog.
+        if (btnScan != null) btnScan.setVisibility(View.VISIBLE);
+        if (btnRescanButton != null) btnRescanButton.setVisibility(View.VISIBLE);
         if (searchBar != null) {
             searchBar.setVisibility(getSharedPreferences("settings_prefs", MODE_PRIVATE)
                     .getBoolean("show_search_bar", true) ? View.VISIBLE : View.GONE);
