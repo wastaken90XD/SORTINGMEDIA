@@ -750,11 +750,8 @@ public class SettingsActivity extends Activity {
     }
 
     private String comboAssignmentLabel(GestureCombo combo) {
-        if (combo != null && combo.isMacro()) {
-            GestureSettings.GestureMacro macro = gestureSettings.getMacro(combo.macroId);
-            return macro == null ? "Macro (" + combo.macroId + ")" : macro.name;
-        }
-        return combo == null ? "None" : GestureConstants.label(combo.actionId);
+        if (combo == null) return "None";
+        return gestureSettings.getSummary(combo.getActionSteps());
     }
 
     private void deleteCombo(String id) {
@@ -816,9 +813,19 @@ public class SettingsActivity extends Activity {
         timeoutInput.setSingleLine(true);
         content.addView(timeoutInput);
 
-        content.addView(makeLabel("Assignment:"));
-        final Button actionButton = makeButton(comboAssignmentLabel(working));
-        content.addView(actionButton);
+        content.addView(makeLabel("Actions (in order):"));
+        final List<GestureSettings.GestureStep> workingActions =
+                new ArrayList<GestureSettings.GestureStep>(working.getActionSteps());
+        final View actionStepsEditor = makeMultiGestureRow("Combo actions", workingActions,
+                new MultiGestureCallback() {
+                    @Override public void set(List<GestureSettings.GestureStep> steps) {
+                        workingActions.clear();
+                        workingActions.addAll(steps);
+                        working.setActionSteps(workingActions);
+                    }
+                });
+        comboActionButton = actionStepsEditor;
+        content.addView(actionStepsEditor);
 
         recordButton.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
@@ -828,7 +835,7 @@ public class SettingsActivity extends Activity {
                 comboRecordButton = recordButton;
                 comboStopButton = stopButton;
                 comboInputButton = addInputButton;
-                comboActionButton = actionButton;
+                comboActionButton = actionStepsEditor;
                 comboLastTapTime = 0;
                 updateComboRecordingView();
                 Toast.makeText(SettingsActivity.this,
@@ -852,12 +859,6 @@ public class SettingsActivity extends Activity {
                 showComboInputPicker();
             }
         });
-        actionButton.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View view) {
-                showComboActionPicker(working, actionButton);
-            }
-        });
-
         final AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Combo Builder")
                 .setView(content)
@@ -885,8 +886,14 @@ public class SettingsActivity extends Activity {
                                     Toast.LENGTH_SHORT).show();
                             return;
                         }
+                        if (workingActions.isEmpty()) {
+                            Toast.makeText(SettingsActivity.this, "Add at least one action.",
+                                    Toast.LENGTH_SHORT).show();
+                            return;
+                        }
                         working.name = name;
                         working.timeoutMs = timeout;
+                        working.setActionSteps(workingActions);
                         working.sequence.clear();
                         working.sequence.addAll(comboRecordingSequence);
                         if (!working.hasValidSequence()) {
@@ -1068,25 +1075,12 @@ public class SettingsActivity extends Activity {
         root.addView(makeTitle(title));
         for (String inputId : inputIds) {
             final String id = inputId;
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            TextView input = makeLabel(GestureConstants.inputLabel(id));
-            input.setLayoutParams(new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f));
-            row.addView(input);
-            final TextView assignment = makeLabel(gestureAssignmentLabel(id));
-            assignment.setLayoutParams(new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT, 1.5f));
-            row.addView(assignment);
-            Button edit = makeSmallButton("Edit");
-            edit.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View view) {
-                    showGestureActionPicker(id, assignment);
-                }
-            });
-            row.addView(edit);
-            root.addView(row);
+            root.addView(makeMultiGestureRow(GestureConstants.inputLabel(id),
+                    gestureSettings.getSteps(id), new MultiGestureCallback() {
+                        @Override public void set(List<GestureSettings.GestureStep> steps) {
+                            gestureSettings.setSteps(id, steps);
+                        }
+                    }));
         }
     }
 
@@ -1472,41 +1466,6 @@ public class SettingsActivity extends Activity {
         // ── 5. Gesture settings ───────────────────────────────────────────────
         addGestureSettingsSection(root);
         addComboSettingsSection(root);
-
-        // ── Macros ────────────────────────────────────────────────────────────
-        root.addView(makeTitle("Gesture Macros"));
-        final LinearLayout macrosContainer = new LinearLayout(this);
-        macrosContainer.setOrientation(LinearLayout.VERTICAL);
-        root.addView(macrosContainer);
-
-        renderMacros(macrosContainer);
-
-        Button btnAddMacro = makeSmallButton("+ Add Macro");
-        btnAddMacro.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                List<GestureSettings.GestureMacro> mList = gestureSettings.loadMacros();
-                if (mList.size() >= 10) {
-                    Toast.makeText(SettingsActivity.this, "Maximum of 10 macros allowed", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                GestureSettings.GestureMacro newM = new GestureSettings.GestureMacro();
-                int maxId = 0;
-                for (GestureSettings.GestureMacro m : mList) {
-                    try {
-                        int parsed = Integer.parseInt(m.id);
-                        if (parsed > maxId) maxId = parsed;
-                    } catch (Exception ignored) {}
-                }
-                newM.id = String.valueOf(maxId + 1);
-                newM.name = "Macro " + newM.id;
-                newM.actions = new ArrayList<>();
-                mList.add(newM);
-                gestureSettings.saveMacros(mList);
-                renderMacros(macrosContainer);
-            }
-        });
-        root.addView(btnAddMacro);
 
         // ── Tag lists ─────────────────────────────────────────────────────────
         root.addView(makeTitle("Tag Lists"));
@@ -2407,7 +2366,8 @@ public class SettingsActivity extends Activity {
         col.setBackgroundColor(0xFF1A1A2E);
         col.setPadding(8, 8, 8, 8);
 
-        final TextView lbl = makeLabel(label + ": " + gestureSettings.getSummary(current));
+        final TextView lbl = makeLabel(label + " (" + current.size() + " steps): "
+                + gestureSettings.getSummary(current));
         col.addView(lbl);
 
         final LinearLayout stepsList = new LinearLayout(this);
@@ -2422,6 +2382,11 @@ public class SettingsActivity extends Activity {
         btnAdd.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                if (steps.size() >= gestureSettings.getMaxGestureSteps()) {
+                    Toast.makeText(SettingsActivity.this, "Maximum 10 steps reached.",
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 steps.add(new GestureSettings.GestureStep(
                     GestureSettings.GestureAction.NOTHING, ""));
                 callback.set(steps);
@@ -2542,13 +2507,39 @@ public class SettingsActivity extends Activity {
                 }
             });
 
+            Button btnUp = makeSmallButton("Up");
+            btnUp.setEnabled(idx > 0);
+            btnUp.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (idx <= 0) return;
+                    GestureSettings.GestureStep moved = steps.remove(idx);
+                    steps.add(idx - 1, moved);
+                    callback.set(steps);
+                    renderSteps(container, steps, summaryLabel, gestureLabel, callback);
+                }
+            });
+            row.addView(btnUp);
+
+            Button btnDown = makeSmallButton("Down");
+            btnDown.setEnabled(idx < steps.size() - 1);
+            btnDown.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (idx >= steps.size() - 1) return;
+                    GestureSettings.GestureStep moved = steps.remove(idx);
+                    steps.add(idx + 1, moved);
+                    callback.set(steps);
+                    renderSteps(container, steps, summaryLabel, gestureLabel, callback);
+                }
+            });
+            row.addView(btnDown);
+
             Button btnRemove = makeSmallButton("✕");
             btnRemove.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     steps.remove(idx);
                     callback.set(steps);
-                    summaryLabel.setText(gestureLabel + ": "
+                    summaryLabel.setText(gestureLabel + " (" + steps.size() + " steps): "
                         + gestureSettings.getSummary(steps));
                     renderSteps(container, steps, summaryLabel, gestureLabel, callback);
                 }
@@ -2571,7 +2562,7 @@ public class SettingsActivity extends Activity {
                     tagSpin.setVisibility(show ? View.VISIBLE : View.GONE);
                     steps.get(idx).action = action;
                     callback.set(steps);
-                    summaryLabel.setText(gestureLabel + ": "
+                    summaryLabel.setText(gestureLabel + " (" + steps.size() + " steps): "
                         + gestureSettings.getSummary(steps));
                 }
                 @Override public void onNothingSelected(AdapterView<?> p) {}
@@ -2589,7 +2580,7 @@ public class SettingsActivity extends Activity {
                     String tag = pos > 0 ? p.getItemAtPosition(pos).toString() : "";
                     steps.get(idx).tag = tag;
                     callback.set(steps);
-                    summaryLabel.setText(gestureLabel + ": "
+                    summaryLabel.setText(gestureLabel + " (" + steps.size() + " steps): "
                         + gestureSettings.getSummary(steps));
                 }
                 @Override public void onNothingSelected(AdapterView<?> p) {}
@@ -2919,86 +2910,6 @@ public class SettingsActivity extends Activity {
         return btn;
     }
 
-    private void renderMacros(final LinearLayout container) {
-        container.removeAllViews();
-        List<GestureSettings.GestureMacro> mList = gestureSettings.loadMacros();
-        for (int i = 0; i < mList.size(); i++) {
-            final int idx = i;
-            final GestureSettings.GestureMacro m = mList.get(i);
-
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.VERTICAL);
-            row.setBackgroundColor(0xFF1A1A2E);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-            lp.bottomMargin = 8;
-            row.setLayoutParams(lp);
-            row.setPadding(8, 8, 8, 8);
-
-            LinearLayout header = new LinearLayout(this);
-            header.setOrientation(LinearLayout.HORIZONTAL);
-            header.setGravity(Gravity.CENTER_VERTICAL);
-
-            EditText nameEdit = new EditText(this);
-            nameEdit.setText(m.name);
-            nameEdit.setTextColor(0xFFFFFFFF);
-            nameEdit.setLayoutParams(new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
-            nameEdit.addTextChangedListener(new TextWatcher() {
-                @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
-                @Override public void onTextChanged(CharSequence s, int st, int b, int c) {}
-                @Override public void afterTextChanged(Editable s) {
-                    if (isInitializing) return;
-                    m.name = s.toString().trim();
-                    List<GestureSettings.GestureMacro> currentList = gestureSettings.loadMacros();
-                    for (GestureSettings.GestureMacro currentM : currentList) {
-                        if (currentM.id.equals(m.id)) {
-                            currentM.name = m.name;
-                            break;
-                        }
-                    }
-                    gestureSettings.saveMacros(currentList);
-                }
-            });
-            header.addView(nameEdit);
-
-            TextView stepCount = makeLabel(m.actions.isEmpty()
-                    ? "No steps" : "Steps: " + m.actions.size());
-            stepCount.setPadding(8, 0, 8, 0);
-            header.addView(stepCount);
-
-            Button btnEdit = makeSmallButton("Edit");
-            btnEdit.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    showMacroStepBuilder(m, container);
-                }
-            });
-            header.addView(btnEdit);
-
-            Button btnDelete = makeSmallButton("Delete");
-            btnDelete.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    List<GestureSettings.GestureMacro> currentList = gestureSettings.loadMacros();
-                    for (int j = 0; j < currentList.size(); j++) {
-                        if (currentList.get(j).id.equals(m.id)) {
-                            currentList.remove(j);
-                            break;
-                        }
-                    }
-                    gestureSettings.saveMacros(currentList);
-                    renderMacros(container);
-                }
-            });
-            header.addView(btnDelete);
-
-            row.addView(header);
-            container.addView(row);
-        }
-    }
-
     private void showMacroStepBuilder(final GestureSettings.GestureMacro macro,
                                       final LinearLayout macrosContainer) {
         final List<com.mediasorter.organizer.Action> tempActions =
@@ -3164,7 +3075,6 @@ public class SettingsActivity extends Activity {
                             }
                         }
                         gestureSettings.saveMacros(macros);
-                        renderMacros(macrosContainer);
                     }
                 })
                 .setNegativeButton("Cancel", null)

@@ -924,14 +924,23 @@ public class MainActivity extends Activity
 
     private void executeCombo(GestureCombo combo) {
         if (combo == null) return;
-        if (combo.isMacro()) {
-            executeMacro(combo.macroId);
-            return;
-        }
-        if (combo.actionId == null || combo.actionId.isEmpty()) return;
+        List<GestureSettings.GestureStep> steps = combo.getActionSteps();
+        if (steps == null || steps.isEmpty()) return;
+        isGestureExecuting = true;
         try {
-            executeAction(GestureSettings.GestureAction.valueOf(combo.actionId));
-        } catch (Exception ignored) {}
+            for (int i = 0; i < steps.size(); i++) {
+                try {
+                    executeGestureStep(steps.get(i));
+                } catch (Throwable error) {
+                    Toast.makeText(this, "Combo step " + (i + 1) + " failed: "
+                            + (error.getMessage() == null ? "operation error" : error.getMessage()),
+                            Toast.LENGTH_LONG).show();
+                    break;
+                }
+            }
+        } finally {
+            isGestureExecuting = false;
+        }
     }
 
     private boolean dispatchSimpleGesture(String inputId) {
@@ -2309,31 +2318,27 @@ public class MainActivity extends Activity
         if (steps == null || steps.isEmpty() || isGestureExecuting) return;
         isGestureExecuting = true;
         try {
-            for (GestureSettings.GestureStep step : steps) {
-                if (step == null) continue;
-                if (step.action == GestureSettings.GestureAction.APPLY_TAG
-                    && step.tag != null && !step.tag.isEmpty()) {
-                applyQuickTagToCurrent(step.tag);
-            } else if (step.action == GestureSettings.GestureAction.MACRO) {
-                if (isGestureTextInputFocused()) continue;
-                if (currentFileReference() == null) {
-                    Toast.makeText(this, "No file selected", Toast.LENGTH_SHORT).show();
-                    continue;
-                }
-                executeMacro(step.tag);
-            } else if (step.action == GestureSettings.GestureAction.REPEAT_LAST_MACRO) {
-                if (isGestureTextInputFocused()) continue;
-                if (currentFileReference() == null) {
-                    Toast.makeText(this, "No file selected", Toast.LENGTH_SHORT).show();
-                    continue;
-                }
-                executeRepeatLastMacro();
-            } else {
-                executeAction(step.action);
-            }
-            }
+            for (GestureSettings.GestureStep step : steps) executeGestureStep(step);
         } finally {
             isGestureExecuting = false;
+        }
+    }
+
+    private void executeGestureStep(GestureSettings.GestureStep step) {
+        if (step == null || step.action == null) return;
+        if (step.action == GestureSettings.GestureAction.APPLY_TAG
+                && step.tag != null && !step.tag.isEmpty()) {
+            applyQuickTagToCurrent(step.tag);
+        } else if (step.action == GestureSettings.GestureAction.MACRO) {
+            if (isGestureTextInputFocused()) return;
+            if (currentFileReference() == null) throw new IllegalStateException("No file selected");
+            executeMacro(step.tag);
+        } else if (step.action == GestureSettings.GestureAction.REPEAT_LAST_MACRO) {
+            if (isGestureTextInputFocused()) return;
+            if (currentFileReference() == null) throw new IllegalStateException("No file selected");
+            executeRepeatLastMacro();
+        } else {
+            executeAction(step.action);
         }
     }
 
@@ -2903,7 +2908,9 @@ public class MainActivity extends Activity
             showTagDisabledDialog(getActiveSelectedFiles());
             return;
         }
-        final List<MediaFile> selectedFiles = getActiveSelectedFiles();
+        final List<String> selectionPaths = getActiveSelectedPaths();
+        final List<MediaFile> selectedFiles = resolveSelectedFiles(selectionPaths,
+                indexer.getFullIndex(), null);
         if (selectedFiles.isEmpty()) return;
 
         List<Tag> allTags = getOrderedTagChoices(selectedFiles);
@@ -2968,26 +2975,46 @@ public class MainActivity extends Activity
                 .setView(batchTagContent)
                 .setPositiveButton("Apply", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) {
-                        for (QuickTagItem item : items) {
-                            if (item.currentType == item.initialType) continue;
-                            for (MediaFile file : selectedFiles) {
-                                if (item.currentType == 1) {
-                                    tagManager.applyTag(file, item.name);
-                                } else if (item.currentType == 0) {
-                                    tagManager.removeTag(file, item.name);
+                        new Thread(new Runnable() {
+                            @Override public void run() {
+                                int[] skipped = new int[1];
+                                final List<MediaFile> executionFiles = resolveSelectedFiles(
+                                        selectionPaths, indexer.getFullIndex(), skipped);
+                                if (executionFiles.isEmpty()) {
+                                    mainHandler.post(new Runnable() {
+                                        @Override public void run() {
+                                            Toast.makeText(MainActivity.this,
+                                                    "No selected files remain in the index",
+                                                    Toast.LENGTH_SHORT).show();
+                                        }
+                                    });
+                                    return;
                                 }
+                                for (QuickTagItem item : items) {
+                                    if (item.currentType == item.initialType) continue;
+                                    for (MediaFile file : executionFiles) {
+                                        if (item.currentType == 1) tagManager.applyTag(file, item.name);
+                                        else if (item.currentType == 0) tagManager.removeTag(file, item.name);
+                                    }
+                                }
+                                final int missing = skipped[0];
+                                mainHandler.post(new Runnable() {
+                                    @Override public void run() {
+                                        for (MediaFile file : executionFiles) mediaAdapter.updateFile(file);
+                                        exitActiveSelectMode();
+                                        btnScan.setText("SCAN");
+                                        btnScan.setOnClickListener(new View.OnClickListener() {
+                                            @Override public void onClick(View v) { startScan(); }
+                                        });
+                                        scheduleRefresh();
+                                        Toast.makeText(MainActivity.this,
+                                                "Tagged " + executionFiles.size() + " files"
+                                                        + (missing > 0 ? " (" + missing + " skipped)" : ""),
+                                                Toast.LENGTH_SHORT).show();
+                                    }
+                                });
                             }
-                        }
-                        for (MediaFile file : selectedFiles) mediaAdapter.updateFile(file);
-                        exitActiveSelectMode();
-                        btnScan.setText("SCAN");
-                        btnScan.setOnClickListener(new View.OnClickListener() {
-                            @Override public void onClick(View v) { startScan(); }
-                        });
-                        scheduleRefresh();
-                        Toast.makeText(MainActivity.this,
-                                "Tagged " + selectedFiles.size() + " files",
-                                Toast.LENGTH_SHORT).show();
+                        }).start();
                     }
                 })
                 .setNeutralButton("＋ New tag", new DialogInterface.OnClickListener() {
@@ -3008,16 +3035,20 @@ public class MainActivity extends Activity
                 for (Tag tag : tagManager.getAllTags()) existing.add(tag.getName());
                 String generated = RandomGenerator.uniqueSuffixTag(
                         RandomGenerator.randomSyllableTag(), existing);
+                int[] skipped = new int[1];
+                List<MediaFile> executionFiles = resolveSelectedFiles(
+                        selectionPaths, indexer.getFullIndex(), skipped);
                 tagManager.createTag(generated);
-                for (MediaFile file : selectedFiles) {
+                for (MediaFile file : executionFiles) {
                     tagManager.applyTag(file, generated);
                     mediaAdapter.updateFileTags(file);
                 }
                 if (tagAdapter != null) tagAdapter.setTags(getOrderedTagChoices(getTagMenuTargets()));
                 refreshTagBar();
-                syncUiAfterTagging(selectedFiles);
+                syncUiAfterTagging(executionFiles);
                 Toast.makeText(MainActivity.this,
-                        "Tagged " + selectedFiles.size() + " files as " + generated,
+                        "Tagged " + executionFiles.size() + " files as " + generated
+                                + (skipped[0] > 0 ? " (" + skipped[0] + " skipped)" : ""),
                         Toast.LENGTH_SHORT).show();
                 batchTagDialog.dismiss();
             }
@@ -3026,7 +3057,9 @@ public class MainActivity extends Activity
     }
 
     private void showBatchRenameDialog() {
-    List<MediaFile> selectedFiles = getActiveSelectedFiles();
+    final List<String> selectionPaths = getActiveSelectedPaths();
+    List<MediaFile> selectedFiles = resolveSelectedFiles(selectionPaths,
+            indexer.getFullIndex(), null);
     if (selectedFiles.isEmpty()) return;
 
     // Save current settings to restore if cancelled
@@ -3271,17 +3304,32 @@ public class MainActivity extends Activity
         .setView(sv)
         .setPositiveButton("Rename", new DialogInterface.OnClickListener() {
             @Override public void onClick(DialogInterface d, int w) {
-                // The preview updater has already applied the settings, so just commit
-                List<BatchRenameManager.RenamePreview> previews = batchRenameManager.preview(selectedFiles);
-                BatchRenameManager.RenameResult result = batchRenameManager.apply(previews);
-                Toast.makeText(MainActivity.this, "Renamed: " + result.succeeded
-                    + (result.failed > 0 ? "  Failed: " + result.failed : ""), Toast.LENGTH_SHORT).show();
-                exitActiveSelectMode();
-                btnScan.setText("SCAN");
-                btnScan.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View v) { startScan(); }
-                });
-                scheduleRefresh();
+                new Thread(new Runnable() {
+                    @Override public void run() {
+                        int[] skipped = new int[1];
+                        List<MediaFile> executionFiles = resolveSelectedFiles(
+                                selectionPaths, indexer.getFullIndex(), skipped);
+                        List<BatchRenameManager.RenamePreview> previews =
+                                batchRenameManager.preview(executionFiles);
+                        final BatchRenameManager.RenameResult result =
+                                batchRenameManager.apply(previews);
+                        final int missing = skipped[0];
+                        mainHandler.post(new Runnable() {
+                            @Override public void run() {
+                                Toast.makeText(MainActivity.this, "Renamed: " + result.succeeded
+                                    + (result.failed > 0 ? "  Failed: " + result.failed : "")
+                                    + (missing > 0 ? "  Skipped: " + missing : ""),
+                                    Toast.LENGTH_SHORT).show();
+                                exitActiveSelectMode();
+                                btnScan.setText("SCAN");
+                                btnScan.setOnClickListener(new View.OnClickListener() {
+                                    @Override public void onClick(View v) { startScan(); }
+                                });
+                                scheduleRefresh();
+                            }
+                        });
+                    }
+                }).start();
             }
         })
         .setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
@@ -3380,7 +3428,9 @@ private Spinner makeSpinner(String[] options) {
     // ── Color analysis dialog ────────────────────────────────────────────────
 
     private void showColorAnalysisDialog() {
-        List<MediaFile> colorTargets = getActiveSelectedFiles();
+        final List<String> selectionPaths = getActiveSelectedPaths();
+        List<MediaFile> colorTargets = resolveSelectedFiles(selectionPaths,
+                indexer.getFullIndex(), null);
         if (colorTargets.isEmpty() && currentIndex >= 0 && currentIndex < fullList.size()) {
             colorTargets = new ArrayList<MediaFile>();
             colorTargets.add(fullList.get(currentIndex));
@@ -3472,8 +3522,14 @@ private Spinner makeSpinner(String[] options) {
                         folderWatcher.pauseAll();
                         new Thread(new Runnable() {
                             @Override public void run() {
+                                List<MediaFile> executionFiles = resolveSelectedFiles(
+                                        selectionPaths, indexer.getFullIndex(), null);
+                                if (executionFiles.isEmpty() && selectedFiles.size() == 1
+                                        && selectionPaths.isEmpty()) {
+                                    executionFiles = selectedFiles;
+                                }
                                 final List<ColorAnalyzer.Result> results =
-                                        ColorAnalyzer.analyze(selectedFiles, finalTopN,
+                                        ColorAnalyzer.analyze(executionFiles, finalTopN,
                                                 finalThreshold, finalMode, tagManager, batchRenameManager);
                                 mainHandler.post(new Runnable() {
                                     @Override public void run() {
@@ -4150,44 +4206,74 @@ private Spinner makeSpinner(String[] options) {
     // ── Batch delete ─────────────────────────────────────────────────────────
 
     private void showBatchDeleteDialog() {
-        List<MediaFile> selectedFiles = getActiveSelectedFiles();
+        final List<String> selectionPaths = getActiveSelectedPaths();
+        final List<MediaFile> selectedFiles = resolveSelectedFiles(selectionPaths,
+                indexer.getFullIndex(), null);
         if (selectedFiles.isEmpty()) return;
 
         new AlertDialog.Builder(this)
-            .setTitle("Delete " + selectedFiles.size() + " files?")
+            .setTitle("Delete " + selectionPaths.size() + " files?")
             .setMessage("\"Move to trash\u00a0\" moves them to a .trash folder "
                     + "inside your first watched folder, so you can restore "
                     + "them later with any file manager.\n\n"
                     + "\"Delete permanently\" cannot be undone.")
             .setNeutralButton("Move to trash", new DialogInterface.OnClickListener() {
                 @Override public void onClick(DialogInterface d, int w) {
-                    int moved = moveSelectionToTrash(selectedFiles);
-                    exitActiveSelectMode();
-                    btnScan.setText("SCAN");
-                    btnScan.setOnClickListener(new View.OnClickListener() {
-                        @Override public void onClick(View v) { startScan(); }
-                    });
-                    scheduleRefresh();
-                    Toast.makeText(MainActivity.this,
-                            moved > 0 ? moved + " file(s) moved to trash"
-                                      : "Trash failed (no watched folder?)",
-                            Toast.LENGTH_SHORT).show();
+                    new Thread(new Runnable() {
+                        @Override public void run() {
+                            int[] skipped = new int[1];
+                            List<MediaFile> executionFiles = resolveSelectedFiles(
+                                    selectionPaths, indexer.getFullIndex(), skipped);
+                            final int moved = moveSelectionToTrash(executionFiles);
+                            final int missing = skipped[0];
+                            mainHandler.post(new Runnable() {
+                                @Override public void run() {
+                                    exitActiveSelectMode();
+                                    btnScan.setText("SCAN");
+                                    btnScan.setOnClickListener(new View.OnClickListener() {
+                                        @Override public void onClick(View v) { startScan(); }
+                                    });
+                                    scheduleRefresh();
+                                    Toast.makeText(MainActivity.this,
+                                            (moved > 0 ? moved + " file(s) moved to trash"
+                                                      : "Trash failed (no watched folder?)")
+                                                    + (missing > 0 ? " (" + missing + " skipped)" : ""),
+                                            Toast.LENGTH_SHORT).show();
+                                }
+                            });
+                        }
+                    }).start();
                 }
             })
             .setPositiveButton("Delete permanently", new DialogInterface.OnClickListener() {
                 @Override public void onClick(DialogInterface d, int w) {
-                    int deleted = 0;
-                    for (MediaFile file : selectedFiles) {
-                        if (indexer.deleteFile(file.getPath())) deleted++;
-                    }
-                    exitActiveSelectMode();
-                    btnScan.setText("SCAN");
-                    btnScan.setOnClickListener(new View.OnClickListener() {
-                        @Override public void onClick(View v) { startScan(); }
-                    });
-                    scheduleRefresh();
-                    Toast.makeText(MainActivity.this,
-                            "Deleted " + deleted + " files", Toast.LENGTH_SHORT).show();
+                    new Thread(new Runnable() {
+                        @Override public void run() {
+                            int[] skipped = new int[1];
+                            List<MediaFile> executionFiles = resolveSelectedFiles(
+                                    selectionPaths, indexer.getFullIndex(), skipped);
+                            int deleted = 0;
+                            for (MediaFile file : executionFiles) {
+                                if (indexer.deleteFile(file.getPath())) deleted++;
+                            }
+                            final int result = deleted;
+                            final int missing = skipped[0];
+                            mainHandler.post(new Runnable() {
+                                @Override public void run() {
+                                    exitActiveSelectMode();
+                                    btnScan.setText("SCAN");
+                                    btnScan.setOnClickListener(new View.OnClickListener() {
+                                        @Override public void onClick(View v) { startScan(); }
+                                    });
+                                    scheduleRefresh();
+                                    Toast.makeText(MainActivity.this,
+                                            "Deleted " + result + " files"
+                                                    + (missing > 0 ? " (" + missing + " skipped)" : ""),
+                                            Toast.LENGTH_SHORT).show();
+                                }
+                            });
+                        }
+                    }).start();
                 }
             })
             .setNegativeButton("Cancel", null)
@@ -4292,8 +4378,9 @@ private Spinner makeSpinner(String[] options) {
     private void clearSearchFocusAndHideKeyboard() {
         if (searchBar == null) return;
         searchBar.clearFocus();
-        searchBar.setFocusable(false);
         searchBar.setFocusable(true);
+        searchBar.setFocusableInTouchMode(true);
+        searchBar.setEnabled(true);
         hideKeyboard(searchBar);
     }
 
@@ -4843,7 +4930,9 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void showAutoLinkSequentialDialog() {
-        final List<MediaFile> selectedFiles = getActiveSelectedFiles();
+        final List<String> selectionPaths = getActiveSelectedPaths();
+        final List<MediaFile> selectedFiles = resolveSelectedFiles(selectionPaths,
+                indexer.getFullIndex(), null);
         if (selectedFiles.isEmpty()) return;
 
         LinearLayout container = new LinearLayout(this);
@@ -4970,6 +5059,14 @@ private Spinner makeSpinner(String[] options) {
                 }
 
                 final String groupTag = "link_" + prefix;
+                int[] skipped = new int[1];
+                final List<MediaFile> executionFiles = resolveSelectedFiles(
+                        selectionPaths, indexer.getFullIndex(), skipped);
+                if (executionFiles.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "No selected files remain in the index",
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 tagManager.createTag(groupTag);
 
                 java.util.Set<String> existingTags = new java.util.HashSet<String>();
@@ -4977,10 +5074,11 @@ private Spinner makeSpinner(String[] options) {
                     existingTags.add(t.getName());
                 }
 
-                java.util.List<String> sequenceTags = RandomGenerator.allocateSequenceTags(groupTag, selectedFiles.size(), existingTags);
+                java.util.List<String> sequenceTags = RandomGenerator.allocateSequenceTags(
+                        groupTag, executionFiles.size(), existingTags);
 
-                for (int i = 0; i < selectedFiles.size(); i++) {
-                    MediaFile file = selectedFiles.get(i);
+                for (int i = 0; i < executionFiles.size(); i++) {
+                    MediaFile file = executionFiles.get(i);
                     String seqTag = sequenceTags.get(i);
 
                     tagManager.createTag(seqTag);
@@ -4989,7 +5087,7 @@ private Spinner makeSpinner(String[] options) {
                     tagManager.applyTag(file, seqTag);
                 }
 
-                for (MediaFile file : selectedFiles) {
+                for (MediaFile file : executionFiles) {
                     mediaAdapter.updateFile(file);
                 }
                 exitActiveSelectMode();
@@ -5013,7 +5111,10 @@ private Spinner makeSpinner(String[] options) {
                     return;
                 }
 
-                Toast.makeText(MainActivity.this, "Linked " + selectedFiles.size() + " files as link_" + prefix, Toast.LENGTH_LONG).show();
+                Toast.makeText(MainActivity.this, "Linked " + executionFiles.size()
+                        + " files as link_" + prefix
+                        + (skipped[0] > 0 ? " (" + skipped[0] + " skipped)" : ""),
+                        Toast.LENGTH_LONG).show();
 
                 final String searchPrefix = groupTag;
                 final java.lang.ref.WeakReference<MainActivity> activityRef = new java.lang.ref.WeakReference<MainActivity>(MainActivity.this);
@@ -5129,7 +5230,9 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void showRenameSequenceDialog() {
-        final List<MediaFile> selectedFiles = getActiveSelectedFiles();
+        final List<String> selectionPaths = getActiveSelectedPaths();
+        final List<MediaFile> selectedFiles = resolveSelectedFiles(selectionPaths,
+                indexer.getFullIndex(), null);
         if (selectedFiles.isEmpty()) return;
 
         LinearLayout container = new LinearLayout(this);
@@ -5243,9 +5346,12 @@ private Spinner makeSpinner(String[] options) {
                     return;
                 }
 
+                int[] skipped = new int[1];
+                final List<MediaFile> executionFiles = resolveSelectedFiles(
+                        selectionPaths, indexer.getFullIndex(), skipped);
                 int successCount = 0;
-                for (int i = 0; i < selectedFiles.size(); i++) {
-                    MediaFile file = selectedFiles.get(i);
+                for (int i = 0; i < executionFiles.size(); i++) {
+                    MediaFile file = executionFiles.get(i);
                     java.io.File src = new java.io.File(file.getPath());
                     java.io.File parent = src.getParentFile();
 
@@ -5302,7 +5408,10 @@ private Spinner makeSpinner(String[] options) {
                     return;
                 }
 
-                Toast.makeText(MainActivity.this, "Sequence renamed: " + successCount + " files with prefix " + prefix, Toast.LENGTH_LONG).show();
+                Toast.makeText(MainActivity.this, "Sequence renamed: " + successCount
+                        + " files with prefix " + prefix
+                        + (skipped[0] > 0 ? " (" + skipped[0] + " skipped)" : ""),
+                        Toast.LENGTH_LONG).show();
 
                 final String searchPrefix = prefix;
                 final java.lang.ref.WeakReference<MainActivity> activityRef = new java.lang.ref.WeakReference<MainActivity>(MainActivity.this);
@@ -6268,8 +6377,7 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private int activeSelectionCount() {
-        if (galleryModeActive && galleryAdapter != null) return galleryAdapter.getSelectedCount();
-        return mediaAdapter == null ? 0 : mediaAdapter.getSelectedCount();
+        return getActiveSelectedPaths().size();
     }
 
     private void selectAllActiveFiles() {
@@ -7122,18 +7230,39 @@ private Spinner makeSpinner(String[] options) {
         }
     }
 
-    private List<MediaFile> getActiveSelectedFiles() {
-        List<MediaFile> result;
+    private List<String> getActiveSelectedPaths() {
         if (galleryModeActive && galleryAdapter != null) {
-            result = galleryAdapter.getSelectedFiles();
-        } else {
-            result = mediaAdapter != null
-                    ? mediaAdapter.getSelectedFiles() : new ArrayList<MediaFile>();
+            return galleryAdapter.getSelectedPaths();
         }
-        // Do not sort here: this helper is called by dialogs on the UI
-        // thread. Full list sorting is performed by refreshExecutor; selection
-        // order is already deterministic in each adapter.
+        return mediaAdapter == null
+                ? new ArrayList<String>() : mediaAdapter.getSelectedPaths();
+    }
+
+    private List<MediaFile> resolveSelectedFiles(List<String> paths,
+                                                  List<MediaFile> fullSnapshot,
+                                                  int[] skipped) {
+        List<MediaFile> result = new ArrayList<MediaFile>();
+        java.util.HashMap<String, MediaFile> byPath = new java.util.HashMap<String, MediaFile>();
+        if (fullSnapshot != null) {
+            for (MediaFile file : fullSnapshot) {
+                if (file != null && file.getPath() != null) byPath.put(file.getPath(), file);
+            }
+        }
+        int missing = 0;
+        if (paths != null) {
+            for (String path : paths) {
+                MediaFile file = byPath.get(path);
+                if (file == null) missing++;
+                else result.add(file);
+            }
+        }
+        if (skipped != null && skipped.length > 0) skipped[0] = missing;
         return result;
+    }
+
+    /** Resolves the current selection against the complete index, never the window. */
+    private List<MediaFile> getActiveSelectedFiles() {
+        return resolveSelectedFiles(getActiveSelectedPaths(), indexer.getFullIndex(), null);
     }
 
     private boolean isActiveSelectMode() {
@@ -7309,7 +7438,8 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void setGalleryStatus(FileStatus.Status status) {
-        List<MediaFile> selected = galleryAdapter.getSelectedFiles();
+        List<MediaFile> selected = resolveSelectedFiles(getActiveSelectedPaths(),
+                indexer.getFullIndex(), null);
         for (MediaFile file : selected) {
             if (status == FileStatus.Status.FLAGGED) fileStatus.setFlagged(file.getPath());
             else if (status == FileStatus.Status.SKIPPED) fileStatus.setSkipped(file.getPath());
@@ -7322,9 +7452,11 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void stripGalleryMetadata() {
-        final List<MediaFile> selected = galleryAdapter.getSelectedFiles();
+        final List<String> selectionPaths = getActiveSelectedPaths();
         new Thread(new Runnable() {
             @Override public void run() {
+                List<MediaFile> selected = resolveSelectedFiles(selectionPaths,
+                        indexer.getFullIndex(), null);
                 for (MediaFile file : selected) {
                     String lower = file.getPath().toLowerCase(java.util.Locale.US);
                     if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
@@ -7362,6 +7494,7 @@ private Spinner makeSpinner(String[] options) {
     }
 
     private void showGalleryCopyMoveDialog(final boolean copy) {
+        final List<String> selectionPaths = getActiveSelectedPaths();
         final EditText input = new EditText(this);
         input.setHint("Destination folder");
         input.setTextColor(0xFFFFFFFF);
@@ -7371,16 +7504,20 @@ private Spinner makeSpinner(String[] options) {
                 .setPositiveButton("Run", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         final String destination = input.getText().toString().trim();
-                        final List<MediaFile> selected = galleryAdapter.getSelectedFiles();
                         new Thread(new Runnable() {
                             @Override public void run() {
+                                int[] skipped = new int[1];
+                                final List<MediaFile> selected = resolveSelectedFiles(
+                                        selectionPaths, indexer.getFullIndex(), skipped);
                                 int count = copyOrMoveGalleryFiles(selected, destination, copy);
                                 final int result = count;
+                                final int missing = skipped[0];
                                 mainHandler.post(new Runnable() {
                                     @Override public void run() {
                                         scheduleRefresh();
                                         Toast.makeText(MainActivity.this,
-                                                (copy ? "Copied " : "Moved ") + result + " files",
+                                                (copy ? "Copied " : "Moved ") + result + " files"
+                                                        + (missing > 0 ? " (" + missing + " skipped)" : ""),
                                                 Toast.LENGTH_SHORT).show();
                                     }
                                 });

@@ -415,6 +415,10 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         return result;
     }
 
+    public List<String> getSelectedPaths() {
+        return new ArrayList<String>(selectedActualPaths());
+    }
+
     public void selectAll() {
         if (groupedMode) {
             for (DisplayItem item : displayItems) {

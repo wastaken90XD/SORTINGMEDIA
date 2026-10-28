@@ -103,6 +103,8 @@ public class GestureSettings {
     private static final String KEY_TAGS_PROMPT = "tags_prompt_enabled";
     public static final String KEY_LAST_MACRO = "last_macro_id";
     public static final String KEY_COMBOS = "gesture_combos";
+    public static final String KEY_MAX_GESTURE_STEPS = "gesture_max_steps";
+    public static final int DEFAULT_MAX_GESTURE_STEPS = 10;
     private static final String KEY_COMBO_MIGRATED = "macro_gesture_combo_migrated_v1";
     private static final String KEY_COMBO_NOTICE = "macro_gesture_combo_notice";
 
@@ -117,6 +119,11 @@ public class GestureSettings {
         ensureVolumeDefaults();
         migrateLegacyControlKeys();
         migrateMacroGesturesToCombos();
+    }
+
+    public int getMaxGestureSteps() {
+        int value = settingsPrefs.getInt(KEY_MAX_GESTURE_STEPS, DEFAULT_MAX_GESTURE_STEPS);
+        return Math.max(1, Math.min(20, value));
     }
 
     private void migrateLegacyControlKeys() {
@@ -249,9 +256,15 @@ public class GestureSettings {
 
     private String serialize(List<GestureStep> steps) {
         StringBuilder sb = new StringBuilder();
-        for (GestureStep step : steps) {
-            if (sb.length() > 0) sb.append(",");
-            sb.append(step.serialize());
+        int max = getMaxGestureSteps();
+        int count = 0;
+        if (steps != null) {
+            for (GestureStep step : steps) {
+                if (step == null || count >= max) break;
+                if (sb.length() > 0) sb.append(",");
+                sb.append(step.serialize());
+                count++;
+            }
         }
         return sb.toString();
     }
@@ -507,6 +520,11 @@ public class GestureSettings {
             org.json.JSONArray array = new org.json.JSONArray(raw);
             for (int i = 0; i < array.length() && result.size() < 20; i++) {
                 GestureCombo combo = GestureCombo.fromJson(array.optJSONObject(i));
+                if (combo != null && combo.actions.size() > getMaxGestureSteps()) {
+                    while (combo.actions.size() > getMaxGestureSteps()) {
+                        combo.actions.remove(combo.actions.size() - 1);
+                    }
+                }
                 if (combo != null && combo.hasValidSequence()) result.add(combo);
             }
         } catch (Exception ignored) {}
@@ -536,6 +554,9 @@ public class GestureSettings {
                 }
                 ids.add(combo.id);
                 combo.clampTimeout();
+                while (combo.actions.size() > getMaxGestureSteps()) {
+                    combo.actions.remove(combo.actions.size() - 1);
+                }
                 try {
                     array.put(combo.toJson());
                 } catch (Exception ignored) {}
