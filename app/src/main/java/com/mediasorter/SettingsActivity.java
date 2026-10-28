@@ -599,6 +599,21 @@ public class SettingsActivity extends Activity {
             @Override public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 String row = String.valueOf(parent.getItemAtPosition(position));
                 if (row.startsWith("[")) return;
+                if ("New macro".equals(row)) {
+                    final GestureSettings.GestureMacro draft = newMacroDraft();
+                    showMacroStepBuilder(draft, null, new MacroSaveCallback() {
+                        @Override public void onSaved(GestureSettings.GestureMacro macro) {
+                            String macroId = "MACRO:" + macro.id;
+                            if (!assigned.contains(macroId)) {
+                                assigned.add(macroId);
+                                saveToolbarSlotList(assigned);
+                                render.run();
+                            }
+                            dialog.dismiss();
+                        }
+                    });
+                    return;
+                }
                 GestureSettings.GestureAction action = gestureSettings.fromLabel(row);
                 if (action == GestureSettings.GestureAction.MACRO) {
                     showToolbarMacroPicker(assigned, render, dialog);
@@ -971,6 +986,19 @@ public class SettingsActivity extends Activity {
             @Override public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 String row = String.valueOf(parent.getItemAtPosition(position));
                 if (row.startsWith("[")) return;
+                if ("New macro".equals(row)) {
+                    final GestureSettings.GestureMacro draft = newMacroDraft();
+                    showMacroStepBuilder(draft, null, new MacroSaveCallback() {
+                        @Override public void onSaved(GestureSettings.GestureMacro macro) {
+                            combo.setActionSteps(java.util.Collections.singletonList(
+                                    new GestureSettings.GestureStep(
+                                            GestureSettings.GestureAction.MACRO, macro.id)));
+                            assignmentView.setText(comboAssignmentLabel(combo));
+                            dialog.dismiss();
+                        }
+                    });
+                    return;
+                }
                 if (row.startsWith("✓ ")) row = row.substring(2);
                 GestureSettings.GestureAction action = gestureSettings.fromLabel(row);
                 if (action == GestureSettings.GestureAction.MACRO) {
@@ -1125,6 +1153,20 @@ public class SettingsActivity extends Activity {
             @Override public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 String row = String.valueOf(parent.getItemAtPosition(position));
                 if (row.startsWith("[")) return;
+                if ("New macro".equals(row)) {
+                    final GestureSettings.GestureMacro draft = newMacroDraft();
+                    showMacroStepBuilder(draft, null, new MacroSaveCallback() {
+                        @Override public void onSaved(GestureSettings.GestureMacro macro) {
+                            List<GestureSettings.GestureStep> steps = new ArrayList<GestureSettings.GestureStep>();
+                            steps.add(new GestureSettings.GestureStep(
+                                    GestureSettings.GestureAction.MACRO, macro.id));
+                            gestureSettings.setSteps(inputId, steps);
+                            assignment.setText(macro.name);
+                            dialog.dismiss();
+                        }
+                    });
+                    return;
+                }
                 if (row.startsWith("✓ ")) row = row.substring(2);
                 GestureSettings.GestureAction action = gestureSettings.fromLabel(row);
                 if (action == GestureSettings.GestureAction.MACRO) {
@@ -1143,8 +1185,9 @@ public class SettingsActivity extends Activity {
 
     private List<String> buildGesturePickerRows(String currentAction, String query) {
         List<String> rows = new ArrayList<String>();
-        rows.add(GestureConstants.label(GestureConstants.ACTION_NOTHING));
         String lower = query == null ? "" : query.trim().toLowerCase();
+        if (lower.isEmpty() || "new macro".contains(lower)) rows.add("New macro");
+        rows.add(GestureConstants.label(GestureConstants.ACTION_NOTHING));
         for (GestureConstants.Category category : GestureConstants.Category.values()) {
             List<String> ids = GestureConstants.getActionIds(category);
             boolean headerAdded = false;
@@ -2428,7 +2471,11 @@ public class SettingsActivity extends Activity {
 
             // Action spinner
             Spinner actionSpin = new Spinner(this);
-            final String[] actionLabels = gestureSettings.getAllLabels();
+            final String[] baseActionLabels = gestureSettings.getAllLabels();
+            final String[] actionLabels = new String[baseActionLabels.length + 1];
+            actionLabels[0] = "New macro";
+            System.arraycopy(baseActionLabels, 0, actionLabels, 1,
+                    baseActionLabels.length);
             ArrayAdapter<String> actionAd = new ArrayAdapter<>(this,
                 android.R.layout.simple_spinner_item, actionLabels);
             actionAd.setDropDownViewResource(
@@ -2553,6 +2600,20 @@ public class SettingsActivity extends Activity {
                     if (isInitializing) return;
                     if (!actionSpinnerInitialized[0]) {
                         actionSpinnerInitialized[0] = true;
+                        return;
+                    }
+                    if (pos == 0) {
+                        final GestureSettings.GestureMacro draft = newMacroDraft();
+                        showMacroStepBuilder(draft, null, new MacroSaveCallback() {
+                            @Override public void onSaved(GestureSettings.GestureMacro macro) {
+                                steps.get(idx).action = GestureSettings.GestureAction.MACRO;
+                                steps.get(idx).tag = macro.id;
+                                callback.set(steps);
+                                summaryLabel.setText(gestureLabel + " (" + steps.size()
+                                        + " steps): " + gestureSettings.getSummary(steps));
+                                renderSteps(container, steps, summaryLabel, gestureLabel, callback);
+                            }
+                        });
                         return;
                     }
                     GestureSettings.GestureAction action =
@@ -2910,8 +2971,33 @@ public class SettingsActivity extends Activity {
         return btn;
     }
 
+    private interface MacroSaveCallback {
+        void onSaved(GestureSettings.GestureMacro macro);
+    }
+
+    private GestureSettings.GestureMacro newMacroDraft() {
+        List<GestureSettings.GestureMacro> macros = gestureSettings.loadMacros();
+        int maxId = 0;
+        for (GestureSettings.GestureMacro existing : macros) {
+            try {
+                maxId = Math.max(maxId, Integer.parseInt(existing.id));
+            } catch (Exception ignored) {}
+        }
+        GestureSettings.GestureMacro macro = new GestureSettings.GestureMacro();
+        macro.id = String.valueOf(maxId + 1);
+        macro.name = "Macro " + macro.id;
+        macro.actions = new ArrayList<com.mediasorter.organizer.Action>();
+        return macro;
+    }
+
     private void showMacroStepBuilder(final GestureSettings.GestureMacro macro,
                                       final LinearLayout macrosContainer) {
+        showMacroStepBuilder(macro, macrosContainer, null);
+    }
+
+    private void showMacroStepBuilder(final GestureSettings.GestureMacro macro,
+                                      final LinearLayout macrosContainer,
+                                      final MacroSaveCallback saveCallback) {
         final List<com.mediasorter.organizer.Action> tempActions =
                 new ArrayList<com.mediasorter.organizer.Action>(macro.actions);
 
@@ -3066,15 +3152,19 @@ public class SettingsActivity extends Activity {
                         macro.name = name;
                         macro.actions = new ArrayList<com.mediasorter.organizer.Action>(tempActions);
                         List<GestureSettings.GestureMacro> macros = gestureSettings.loadMacros();
+                        boolean replaced = false;
                         for (GestureSettings.GestureMacro existing : macros) {
                             if (existing.id.equals(macro.id)) {
                                 existing.name = macro.name;
                                 existing.actions = new ArrayList<com.mediasorter.organizer.Action>(
                                         tempActions);
+                                replaced = true;
                                 break;
                             }
                         }
+                        if (!replaced) macros.add(macro);
                         gestureSettings.saveMacros(macros);
+                        if (saveCallback != null) saveCallback.onSaved(macro);
                     }
                 })
                 .setNegativeButton("Cancel", null)
