@@ -5332,92 +5332,60 @@ private Spinner makeSpinner(String[] options) {
                     return;
                 }
 
-                int[] skipped = new int[1];
-                final List<MediaFile> executionFiles = resolveSelectedFiles(
-                        selectionPaths, indexer.getFullIndex(), skipped);
-                int successCount = 0;
-                for (int i = 0; i < executionFiles.size(); i++) {
-                    MediaFile file = executionFiles.get(i);
-                    java.io.File src = new java.io.File(file.getPath());
-                    java.io.File parent = src.getParentFile();
-
-                    java.util.Set<String> existingFilenames = new java.util.HashSet<String>();
-                    if (parent != null && parent.exists() && parent.isDirectory()) {
-                        String[] list = parent.list();
-                        if (list != null) {
-                            for (String s : list) {
-                                existingFilenames.add(s);
-                            }
-                        }
-                    }
-
-                    String name = src.getName();
-                    int dot = name.lastIndexOf('.');
-                    String ext = dot >= 0 ? name.substring(dot) : "";
-
-                    int idx = i;
-                    String newName;
-                    while (true) {
-                        String seqLabel = RandomGenerator.sequenceLabel(idx);
-                        newName = prefix + "_seq_" + seqLabel + ext;
-                        if (!existingFilenames.contains(newName)) {
-                            break;
-                        }
-                        idx++;
-                    }
-
-                    java.io.File dst = new java.io.File(parent, newName);
-                    if (src.renameTo(dst)) {
-                        file.setPath(dst.getAbsolutePath());
-                        successCount++;
-                    }
-                }
-
-                exitActiveSelectMode();
-                btnScan.setText("SCAN");
-                btnScan.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v2) {
-                        startScan();
-                    }
-                });
-                scheduleRefresh();
-
-                dialog.dismiss();
-
-                if (prefix == null || prefix.trim().isEmpty()) {
-                    Toast.makeText(MainActivity.this, "Operation complete", Toast.LENGTH_LONG).show();
-                    return;
-                }
-
-                if (MainActivity.this.isFinishing()) {
-                    return;
-                }
-
-                Toast.makeText(MainActivity.this, "Sequence renamed: " + successCount
-                        + " files with prefix " + prefix
-                        + (skipped[0] > 0 ? " (" + skipped[0] + " skipped)" : ""),
-                        Toast.LENGTH_LONG).show();
-
-                final String searchPrefix = prefix;
-                final java.lang.ref.WeakReference<MainActivity> activityRef = new java.lang.ref.WeakReference<MainActivity>(MainActivity.this);
-
-                new AlertDialog.Builder(MainActivity.this)
-                        .setPositiveButton("View", new DialogInterface.OnClickListener() {
-                            @Override
-                            public void onClick(DialogInterface d, int w) {
-                                MainActivity act = activityRef.get();
-                                if (act != null && !act.isFinishing()) {
-                                    if (act.searchBar != null) {
-                                        act.searchBar.setText(searchPrefix);
-                                    } else {
-                                        android.util.Log.w("MainActivity", "searchBar is null when View action fired");
-                                    }
+                new Thread(new Runnable() {
+                    @Override public void run() {
+                        int[] skipped = new int[1];
+                        final List<MediaFile> executionFiles = resolveSelectedFiles(
+                                selectionPaths, indexer.getFullIndex(), skipped);
+                        int successCount = 0;
+                        for (int i = 0; i < executionFiles.size(); i++) {
+                            MediaFile file = executionFiles.get(i);
+                            java.io.File src = new java.io.File(file.getPath());
+                            java.io.File parent = src.getParentFile();
+                            java.util.Set<String> existingFilenames = new java.util.HashSet<String>();
+                            if (parent != null && parent.exists() && parent.isDirectory()) {
+                                String[] list = parent.list();
+                                if (list != null) {
+                                    for (String s : list) existingFilenames.add(s);
                                 }
                             }
-                        })
-                        .setNegativeButton("Dismiss", null)
-                        .show();
+                            String name = src.getName();
+                            int dot = name.lastIndexOf('.');
+                            String ext = dot >= 0 ? name.substring(dot) : "";
+                            int idx = i;
+                            String newName;
+                            while (true) {
+                                newName = prefix + "_seq_"
+                                        + RandomGenerator.sequenceLabel(idx) + ext;
+                                if (!existingFilenames.contains(newName)) break;
+                                idx++;
+                            }
+                            java.io.File dst = new java.io.File(parent, newName);
+                            if (src.renameTo(dst)) {
+                                file.setPath(dst.getAbsolutePath());
+                                successCount++;
+                            }
+                        }
+                        final int result = successCount;
+                        final int missing = skipped[0];
+                        mainHandler.post(new Runnable() {
+                            @Override public void run() {
+                                exitActiveSelectMode();
+                                btnScan.setText("SCAN");
+                                btnScan.setOnClickListener(new View.OnClickListener() {
+                                    @Override public void onClick(View v2) { startScan(); }
+                                });
+                                scheduleRefresh();
+                                dialog.dismiss();
+                                Toast.makeText(MainActivity.this,
+                                        "Sequence renamed: " + result + " files with prefix "
+                                                + prefix
+                                                + (missing > 0 ? " (" + missing + " skipped)" : ""),
+                                        Toast.LENGTH_LONG).show();
+                            }
+                        });
+                    }
+                }).start();
             }
         });
     }
