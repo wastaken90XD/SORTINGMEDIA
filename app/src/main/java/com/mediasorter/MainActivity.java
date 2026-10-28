@@ -5059,82 +5059,68 @@ private Spinner makeSpinner(String[] options) {
                 }
 
                 final String groupTag = "link_" + prefix;
-                int[] skipped = new int[1];
-                final List<MediaFile> executionFiles = resolveSelectedFiles(
-                        selectionPaths, indexer.getFullIndex(), skipped);
-                if (executionFiles.isEmpty()) {
-                    Toast.makeText(MainActivity.this, "No selected files remain in the index",
-                            Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                tagManager.createTag(groupTag);
-
-                java.util.Set<String> existingTags = new java.util.HashSet<String>();
-                for (Tag t : tagManager.getAllTags()) {
-                    existingTags.add(t.getName());
-                }
-
-                java.util.List<String> sequenceTags = RandomGenerator.allocateSequenceTags(
-                        groupTag, executionFiles.size(), existingTags);
-
-                for (int i = 0; i < executionFiles.size(); i++) {
-                    MediaFile file = executionFiles.get(i);
-                    String seqTag = sequenceTags.get(i);
-
-                    tagManager.createTag(seqTag);
-
-                    tagManager.applyTag(file, groupTag);
-                    tagManager.applyTag(file, seqTag);
-                }
-
-                for (MediaFile file : executionFiles) {
-                    mediaAdapter.updateFile(file);
-                }
-                exitActiveSelectMode();
-                btnScan.setText("SCAN");
-                btnScan.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v2) {
-                        startScan();
-                    }
-                });
-                scheduleRefresh();
-
-                dialog.dismiss();
-
-                if (prefix == null || prefix.trim().isEmpty()) {
-                    Toast.makeText(MainActivity.this, "Operation complete", Toast.LENGTH_LONG).show();
-                    return;
-                }
-
-                if (MainActivity.this.isFinishing()) {
-                    return;
-                }
-
-                Toast.makeText(MainActivity.this, "Linked " + executionFiles.size()
-                        + " files as link_" + prefix
-                        + (skipped[0] > 0 ? " (" + skipped[0] + " skipped)" : ""),
-                        Toast.LENGTH_LONG).show();
-
-                final String searchPrefix = groupTag;
-                final java.lang.ref.WeakReference<MainActivity> activityRef = new java.lang.ref.WeakReference<MainActivity>(MainActivity.this);
-
-                new AlertDialog.Builder(MainActivity.this)
-                        .setPositiveButton("View", new DialogInterface.OnClickListener() {
-                            @Override
-                            public void onClick(DialogInterface d, int w) {
-                                MainActivity act = activityRef.get();
-                                if (act != null && !act.isFinishing()) {
-                                    if (act.searchBar != null) {
-                                        act.searchBar.setText(searchPrefix);
-                                    } else {
-                                        android.util.Log.w("MainActivity", "searchBar is null when View action fired");
-                                    }
+                new Thread(new Runnable() {
+                    @Override public void run() {
+                        int[] skipped = new int[1];
+                        final List<MediaFile> executionFiles = resolveSelectedFiles(
+                                selectionPaths, indexer.getFullIndex(), skipped);
+                        if (executionFiles.isEmpty()) {
+                            mainHandler.post(new Runnable() {
+                                @Override public void run() {
+                                    Toast.makeText(MainActivity.this,
+                                            "No selected files remain in the index",
+                                            Toast.LENGTH_SHORT).show();
                                 }
+                            });
+                            return;
+                        }
+                        tagManager.createTag(groupTag);
+                        java.util.Set<String> existingTags = new java.util.HashSet<String>();
+                        for (Tag t : tagManager.getAllTags()) existingTags.add(t.getName());
+                        java.util.List<String> sequenceTags = RandomGenerator.allocateSequenceTags(
+                                groupTag, executionFiles.size(), existingTags);
+                        for (int i = 0; i < executionFiles.size(); i++) {
+                            MediaFile file = executionFiles.get(i);
+                            String seqTag = sequenceTags.get(i);
+                            tagManager.createTag(seqTag);
+                            tagManager.applyTag(file, groupTag);
+                            tagManager.applyTag(file, seqTag);
+                        }
+                        final int count = executionFiles.size();
+                        final int missing = skipped[0];
+                        mainHandler.post(new Runnable() {
+                            @Override public void run() {
+                                for (MediaFile file : executionFiles) mediaAdapter.updateFile(file);
+                                exitActiveSelectMode();
+                                btnScan.setText("SCAN");
+                                btnScan.setOnClickListener(new View.OnClickListener() {
+                                    @Override public void onClick(View v2) { startScan(); }
+                                });
+                                scheduleRefresh();
+                                dialog.dismiss();
+                                Toast.makeText(MainActivity.this, "Linked " + count
+                                        + " files as link_" + prefix
+                                        + (missing > 0 ? " (" + missing + " skipped)" : ""),
+                                        Toast.LENGTH_LONG).show();
+                                final String searchPrefix = groupTag;
+                                final java.lang.ref.WeakReference<MainActivity> activityRef =
+                                        new java.lang.ref.WeakReference<MainActivity>(MainActivity.this);
+                                new AlertDialog.Builder(MainActivity.this)
+                                        .setPositiveButton("View", new DialogInterface.OnClickListener() {
+                                            @Override public void onClick(DialogInterface d, int w) {
+                                                MainActivity act = activityRef.get();
+                                                if (act != null && !act.isFinishing()
+                                                        && act.searchBar != null) {
+                                                    act.searchBar.setText(searchPrefix);
+                                                }
+                                            }
+                                        })
+                                        .setNegativeButton("Dismiss", null)
+                                        .show();
                             }
-                        })
-                        .setNegativeButton("Dismiss", null)
-                        .show();
+                        });
+                    }
+                }).start();
             }
         });
     }
@@ -7437,18 +7423,28 @@ private Spinner makeSpinner(String[] options) {
         }).start();
     }
 
-    private void setGalleryStatus(FileStatus.Status status) {
-        List<MediaFile> selected = resolveSelectedFiles(getActiveSelectedPaths(),
-                indexer.getFullIndex(), null);
-        for (MediaFile file : selected) {
-            if (status == FileStatus.Status.FLAGGED) fileStatus.setFlagged(file.getPath());
-            else if (status == FileStatus.Status.SKIPPED) fileStatus.setSkipped(file.getPath());
-            if (currentIndex >= 0 && currentIndex < fullList.size()
-                    && file.getPath().equals(fullList.get(currentIndex).getPath())
-                    && previewManager != null) previewManager.updateStatus(file);
-        }
-        galleryAdapter.notifyDataSetChanged();
-        scheduleRefresh();
+    private void setGalleryStatus(final FileStatus.Status status) {
+        final List<String> selectionPaths = getActiveSelectedPaths();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                int[] skipped = new int[1];
+                List<MediaFile> selected = resolveSelectedFiles(selectionPaths,
+                        indexer.getFullIndex(), skipped);
+                for (MediaFile file : selected) {
+                    if (status == FileStatus.Status.FLAGGED) fileStatus.setFlagged(file.getPath());
+                    else if (status == FileStatus.Status.SKIPPED) fileStatus.setSkipped(file.getPath());
+                }
+                final int missing = skipped[0];
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        galleryAdapter.notifyDataSetChanged();
+                        scheduleRefresh();
+                        if (missing > 0) Toast.makeText(MainActivity.this,
+                                missing + " selected file(s) skipped", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        }).start();
     }
 
     private void stripGalleryMetadata() {
