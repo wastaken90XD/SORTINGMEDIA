@@ -177,12 +177,6 @@ public class AutoOrganizer {
         resolved = resolved.replace("{session_date}", new SimpleDateFormat("yyyyMMdd", Locale.US)
                 .format(new Date(sessionStartMillis)));
         resolved = resolved.replace("{run_index}", String.valueOf(runIndex));
-        // Smart values are session-derived and intentionally empty when no
-        // Smart pass has published a value for this file.
-        resolved = resolved.replace("{smart_confidence}", "");
-        resolved = resolved.replace("{smart_suggested_tag}", "");
-        resolved = resolved.replace("{smart_group_pos}", "");
-        resolved = resolved.replace("{smart_group_total}", "");
         Matcher tagMatcher = Pattern.compile("\\{tag:(\\d+)\\}").matcher(resolved);
         StringBuffer buffer = new StringBuffer();
         while (tagMatcher.find()) {

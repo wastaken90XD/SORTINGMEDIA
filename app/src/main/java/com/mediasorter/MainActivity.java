@@ -8,7 +8,6 @@ import android.content.Intent;
 import android.content.DialogInterface;
 import android.graphics.Rect;
 import com.mediasorter.features.RandomGenerator;
-import com.mediasorter.features.SurpriseEngine;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -90,8 +89,6 @@ public class MainActivity extends Activity
     private GestureSettings gestureSettings;
     private WindowManager   windowManager;
     private AutoOrganizer autoOrganizer;
-    private com.mediasorter.features.SurpriseEngine surpriseEngine;
-    private com.mediasorter.features.SmartSortEngine smartSortEngine;
     private SearchHistory searchHistory;
     private MediaAdapter mediaAdapter;
     private TagAdapter   tagAdapter;
@@ -241,15 +238,6 @@ public class MainActivity extends Activity
     @Override
     protected void onResume() {
         super.onResume();
-        if (smartSortEngine != null) {
-            smartSortEngine.setEnabled(getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                    .getBoolean("smart_enabled", false));
-            smartSortEngine.onResume();
-            if (getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                    .getBoolean("smart_enabled", false)) {
-                smartSortEngine.request(indexer.getFullIndex());
-            }
-        }
         applyUiToggles();
         if (tagListManager != null) {
             tagListManager = new TagListManager(this);
@@ -447,17 +435,10 @@ public class MainActivity extends Activity
     }
 
     @Override
-    protected void onPause() {
-        if (smartSortEngine != null) smartSortEngine.onPause();
-        super.onPause();
-    }
-
-    @Override
     protected void onDestroy() {
         synchronized (IMPORT_RECREATE_LOCK) {
             if (activeInstance != null && activeInstance.get() == this) activeInstance = null;
         }
-        if (smartSortEngine != null) smartSortEngine.close();
         super.onDestroy();
         folderWatcher.unwatchAll();
         if (previewManager != null) previewManager.release();
@@ -1092,15 +1073,6 @@ public class MainActivity extends Activity
         migrateDuplicateWindowSetting();
         windowManager   = new WindowManager(getWindowSize());
         autoOrganizer = new AutoOrganizer(this, tagManager, batchRenameManager, fileStatus);
-        surpriseEngine = new com.mediasorter.features.SurpriseEngine(this);
-        smartSortEngine = new com.mediasorter.features.SmartSortEngine(this, mainHandler,
-                new com.mediasorter.features.SmartSortEngine.Listener() {
-                    @Override public void onSmartResult(
-                            com.mediasorter.features.SmartSortEngine.Result result) {
-                        sortManager.setSmartRanks(result.ranks);
-                        scheduleRefresh();
-                    }
-                });
         searchHistory  = new SearchHistory(this);
         indexer.init(this);
         indexer.setListener(this);
@@ -1621,19 +1593,14 @@ public class MainActivity extends Activity
                 }
                 final int previousVisiblePos = firstVisible;
 
-                android.content.SharedPreferences surprisePrefs = getSharedPreferences(
-                        "settings_prefs", MODE_PRIVATE);
-                SurpriseEngine.Mode surpriseMode = surpriseEngine == null
-                        ? SurpriseEngine.Mode.UNIFORM
-                        : surpriseEngine.getMode(surprisePrefs);
-                MediaFile pickedFile = surpriseEngine == null
-                        ? fullList.get(RandomGenerator.pick(fullList.size()))
-                        : surpriseEngine.pick(fullList, surpriseMode, fileStatus, refreshSequence);
-                if (pickedFile == null) return;
-                final int pickedIndex = findIndexByPath(fullList, pickedFile.getPath());
+                int pickedIndex = RandomGenerator.pick(fullList.size());
                 if (pickedIndex < 0) return;
-                final MediaFile finalPickedFile = pickedFile;
-                java.io.File fileObj = new java.io.File(finalPickedFile.getPath());
+                if (pickedIndex >= fullList.size()) {
+                    pickedIndex = fullList.size() - 1;
+                }
+
+                final MediaFile pickedFile = fullList.get(pickedIndex);
+                java.io.File fileObj = new java.io.File(pickedFile.getPath());
                 if (!fileObj.exists() || !fileObj.canRead()) {
                     if (previousVisiblePos >= 0) {
                         fileBrowser.scrollToPosition(previousVisiblePos);
@@ -2390,23 +2357,6 @@ public class MainActivity extends Activity
                 View surprise = findViewById(R.id.btnSurprise);
                 if (surprise != null) surprise.performClick();
                 break;
-            case SURPRISE_CYCLE_MODE:
-                if (surpriseEngine != null) {
-                    surpriseEngine.cycleMode(getSharedPreferences("settings_prefs", MODE_PRIVATE));
-                    Toast.makeText(this, "Surprise mode: "
-                            + surpriseEngine.getMode(getSharedPreferences("settings_prefs", MODE_PRIVATE)),
-                            Toast.LENGTH_SHORT).show();
-                }
-                break;
-            case SMART_TOGGLE:
-            case SMART_LOCK_ORDER:
-            case SMART_ACCEPT_SUGGESTIONS:
-            case SMART_ACCEPT_GROUP:
-            case SMART_NEXT_UNCERTAIN:
-            case SMART_RERANK_NOW:
-            case SMART_PAUSE:
-                toggleSmartSetting(action);
-                break;
             case OPEN_GALLERY: setGalleryMode(true, true); break;
             case TOGGLE_GALLERY: setGalleryMode(!galleryModeActive, true); break;
             case OPEN_DASHBOARD: openDashboard(); break;
@@ -2494,29 +2444,6 @@ public class MainActivity extends Activity
         preview.setVisibility(show ? View.VISIBLE : View.GONE);
         applyExplorerWidth(getSharedPreferences("settings_prefs", MODE_PRIVATE)
                 .getInt("explorer_width_percent", 40), show);
-    }
-
-    private void toggleSmartSetting(GestureSettings.GestureAction action) {
-        android.content.SharedPreferences prefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
-        if (action == GestureSettings.GestureAction.SMART_TOGGLE) {
-            boolean enabled = !prefs.getBoolean("smart_enabled", false);
-            prefs.edit().putBoolean("smart_enabled", enabled).apply();
-            if (smartSortEngine != null) {
-                smartSortEngine.setEnabled(enabled);
-                if (enabled) smartSortEngine.request(indexer.getFullIndex());
-            }
-            Toast.makeText(this, enabled ? "Smart Sort enabled" : "Smart Sort disabled",
-                    Toast.LENGTH_SHORT).show();
-        } else if (action == GestureSettings.GestureAction.SMART_PAUSE) {
-            boolean paused = !prefs.getBoolean("smart_paused", false);
-            prefs.edit().putBoolean("smart_paused", paused).apply();
-            Toast.makeText(this, paused ? "Smart Sort paused" : "Smart Sort resumed",
-                    Toast.LENGTH_SHORT).show();
-        } else if (action == GestureSettings.GestureAction.SMART_RERANK_NOW) {
-            Toast.makeText(this, "Smart Sort rerank requested", Toast.LENGTH_SHORT).show();
-        } else {
-            Toast.makeText(this, "Smart Sort is not ready for this action", Toast.LENGTH_SHORT).show();
-        }
     }
 
     private void writeMetadataNow() {
@@ -3810,7 +3737,7 @@ private Spinner makeSpinner(String[] options) {
                 "First tag value", "Tag rule match", "Flagged status",
                 "Skip status", "Done status", "Manual order", "Random shuffle",
                 "Path depth", "Color family", "Sequence group", "Random within group",
-                "Duplicate status", "Metadata presence", "Filename word count", "Smart Sort"
+                "Duplicate status", "Metadata presence", "Filename word count"
         };
         new AlertDialog.Builder(this)
                 .setTitle("Add criterion")
@@ -3855,7 +3782,6 @@ private Spinner makeSpinner(String[] options) {
             case 16: return SortManager.DUPLICATE_STATUS;
             case 17: return SortManager.METADATA_PRESENCE;
             case 18: return SortManager.WORD_COUNT;
-            case 19: return SortManager.SMART;
             default: return SortManager.NAME;
         }
     }

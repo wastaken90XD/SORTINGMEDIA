@@ -54,16 +54,7 @@ public final class SettingsExporter {
             "show_preview", "explorer_width_percent", "random_tag_format",
             "random_tag_custom_pattern", "toolbar_slots", "manual_groups",
             "group_tag_mode", "group_tag_position", "group_tag_pattern", "tag_bar_width",
-            GestureSettings.KEY_MAX_GESTURE_STEPS,
-            "smart_enabled", "smart_paused", "smart_order_mode", "smart_k_neighbors",
-            "smart_suggest_threshold", "smart_min_labeled", "smart_random_fraction",
-            "smart_ignore_tag_patterns", "smart_w_hash", "smart_w_folder", "smart_w_name",
-            "smart_w_date", "smart_w_color", "smart_w_shape", "smart_date_tau_hours",
-            "smart_use_video_frames", "smart_rerank_debounce_ms", "rerank_idle_ms",
-            "smart_chunk_ms", "smart_pass_budget_ms", "smart_max_pool", "smart_show_position_badge",
-            "surprise_mode", "surprise_history_size", "surprise_w_untagged", "surprise_w_stale",
-            "surprise_w_flagged", "surprise_w_uncertain", "surprise_diversity_soft",
-            "surprise_candidate_cap", "nav_accel_enabled", "nav_accel_steps", "nav_accel_times_ms"
+            GestureSettings.KEY_MAX_GESTURE_STEPS
     ));
 
     private static final Set<String> GESTURE_KEYS = new HashSet<String>(Arrays.asList(
