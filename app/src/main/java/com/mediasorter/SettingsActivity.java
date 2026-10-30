@@ -455,6 +455,93 @@ public class SettingsActivity extends Activity {
                 }));
     }
 
+    private void addSmartSettingsSection(LinearLayout root) {
+        root.addView(makeTitle("Smart Sort"));
+        root.addView(makeLabel("Tags are the only Smart Sort labels; suggestions are never applied automatically."));
+        root.addView(makeCheckBoxRow("Enable Smart Sort",
+                settingsPrefs.getBoolean("smart_enabled", false), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("smart_enabled", value); }
+                }));
+        root.addView(makeCheckBoxRow("Show Smart position badge",
+                settingsPrefs.getBoolean("smart_show_position_badge", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("smart_show_position_badge", value); }
+                }));
+        root.addView(makeNumericInputRow("Neighbors (1-15):",
+                settingsPrefs.getInt("smart_k_neighbors", 5), 1, 15,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_k_neighbors", value); }
+                }));
+        root.addView(makeNumericInputRow("Suggestion threshold (30-95):",
+                settingsPrefs.getInt("smart_suggest_threshold", 60), 30, 95,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_suggest_threshold", value); }
+                }));
+        root.addView(makeNumericInputRow("Minimum labeled files (1-50):",
+                settingsPrefs.getInt("smart_min_labeled", 5), 1, 50,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_min_labeled", value); }
+                }));
+        root.addView(makeNumericInputRow("Smart chunk time (5-50ms):",
+                settingsPrefs.getInt("smart_chunk_ms", 20), 5, 50,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_chunk_ms", value); }
+                }));
+        root.addView(makeNumericInputRow("Rerank idle delay (100-2000ms):",
+                settingsPrefs.getInt("rerank_idle_ms", 400), 100, 2000,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("rerank_idle_ms", value); }
+                }));
+        root.addView(makeTextInputRow("Ignore tag patterns:",
+                settingsPrefs.getString("smart_ignore_tag_patterns", "link_*,*_seq_*"),
+                new OnTextChangeListener() {
+                    @Override public void onChange(String value) { saveString("smart_ignore_tag_patterns", value); }
+                }));
+    }
+
+    private void addSurpriseSettingsSection(LinearLayout root) {
+        root.addView(makeTitle("Surprise Me"));
+        root.addView(makeLabel("Choose how Surprise Me selects from the full filtered list."));
+        final String[] modes = {"uniform", "deck", "stride", "weighted", "diversity", "group_first", "least_sure"};
+        final Spinner spinner = makeSpinner(modes);
+        String saved = settingsPrefs.getString("surprise_mode", "uniform");
+        for (int i = 0; i < modes.length; i++) if (modes[i].equals(saved)) spinner.setSelection(i);
+        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (!isInitializing) saveString("surprise_mode", modes[position]);
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        root.addView(spinner);
+        root.addView(makeNumericInputRow("Surprise history size (5-500):",
+                settingsPrefs.getInt("surprise_history_size", 50), 5, 500,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("surprise_history_size", value); }
+                }));
+        root.addView(makeCheckBoxRow("Soft diversity selection",
+                settingsPrefs.getBoolean("surprise_diversity_soft", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("surprise_diversity_soft", value); }
+                }));
+        root.addView(makeNumericInputRow("Diversity candidate cap (20-1000):",
+                settingsPrefs.getInt("surprise_candidate_cap", 200), 20, 1000,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("surprise_candidate_cap", value); }
+                }));
+        root.addView(makeCheckBoxRow("Volume navigation acceleration",
+                settingsPrefs.getBoolean("nav_accel_enabled", false), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("nav_accel_enabled", value); }
+                }));
+        root.addView(makeTextInputRow("Acceleration steps:",
+                settingsPrefs.getString("nav_accel_steps", "1,2,5,10"),
+                new OnTextChangeListener() {
+                    @Override public void onChange(String value) { saveString("nav_accel_steps", value); }
+                }));
+        root.addView(makeTextInputRow("Acceleration times ms:",
+                settingsPrefs.getString("nav_accel_times_ms", "400,1200,2500"),
+                new OnTextChangeListener() {
+                    @Override public void onChange(String value) { saveString("nav_accel_times_ms", value); }
+                }));
+    }
+
     private void addToolbarSection(LinearLayout root) {
         root.addView(makeTitle("Toolbar"));
         root.addView(makeLabel("Assigned actions appear on the toolbar; all other actions remain in overflow."));
@@ -1401,6 +1488,8 @@ public class SettingsActivity extends Activity {
         // UI controls are kept together at the top. MainActivity applies them
         // when this Activity closes, avoiding an initialization/recreate loop.
         addUiCustomizationSection(root);
+        addSmartSettingsSection(root);
+        addSurpriseSettingsSection(root);
         addToolbarSection(root);
 
         // ── 1. Cache ──────────────────────────────────────────────────────────
