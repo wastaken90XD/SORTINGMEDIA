@@ -59,9 +59,12 @@ jobs:
         run: |
           if [ -f build.log ]; then
             tail -n 160 build.log
-            while IFS= read -r line; do
+            grep -iE "error:|what went wrong|execution failed|cannot find|cannot be applied|failed" build.log | head -n 80 | while IFS= read -r line; do
               echo "::error::${line}"
-            done < <(tail -n 80 build.log)
+            done
+            tail -n 80 build.log | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
           fi
 
       - name: Upload Magnus APK
