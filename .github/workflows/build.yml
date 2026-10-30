@@ -53,6 +53,17 @@ jobs:
           set -o pipefail
           gradle :app:assembleRelease --stacktrace --warning-mode all 2>&1 | tee build.log
 
+      - name: Print build failure details
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f build.log ]; then
+            tail -n 160 build.log
+            while IFS= read -r line; do
+              echo "::error::${line}"
+            done < <(tail -n 80 build.log)
+          fi
+
       - name: Upload Magnus APK
         if: success()
         uses: actions/upload-artifact@v4
