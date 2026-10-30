@@ -502,7 +502,11 @@ public class SettingsActivity extends Activity {
         root.addView(makeTitle("Surprise Me"));
         root.addView(makeLabel("Choose how Surprise Me selects from the full filtered list."));
         final String[] modes = {"uniform", "deck", "stride", "weighted", "diversity", "group_first", "least_sure"};
-        final Spinner spinner = makeSpinner(modes);
+        final Spinner spinner = new Spinner(this);
+        ArrayAdapter<String> modeAdapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_item, modes);
+        modeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(modeAdapter);
         String saved = settingsPrefs.getString("surprise_mode", "uniform");
         for (int i = 0; i < modes.length; i++) if (modes[i].equals(saved)) spinner.setSelection(i);
         spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {

@@ -1628,7 +1628,8 @@ public class MainActivity extends Activity
                         : surpriseEngine.getMode(surprisePrefs);
                 MediaFile pickedFile = surpriseEngine == null
                         ? fullList.get(RandomGenerator.pick(fullList.size()))
-                        : surpriseEngine.pick(fullList, surpriseMode, fileStatus, refreshSequence);
+                        : surpriseEngine.pick(fullList, surpriseMode, fileStatus,
+                                (int) (refreshSequence & 0x7fffffff));
                 if (pickedFile == null) return;
                 final int pickedIndex = findIndexByPath(fullList, pickedFile.getPath());
                 if (pickedIndex < 0) return;
