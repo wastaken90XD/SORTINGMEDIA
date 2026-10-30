@@ -63,7 +63,9 @@ public final class SettingsExporter {
             "smart_chunk_ms", "smart_pass_budget_ms", "smart_max_pool", "smart_show_position_badge",
             "surprise_mode", "surprise_history_size", "surprise_w_untagged", "surprise_w_stale",
             "surprise_w_flagged", "surprise_w_uncertain", "surprise_diversity_soft",
-            "surprise_candidate_cap", "nav_accel_enabled", "nav_accel_steps", "nav_accel_times_ms"
+            "surprise_candidate_cap", "nav_accel_enabled", "nav_accel_steps", "nav_accel_times_ms",
+            "smart_pile_mode", "smart_pile_tag_patterns", "smart_pile_child_format",
+            "smart_pile_autoretire", "smart_pile_split_naming", "smart_active_pile"
     ));
 
     private static final Set<String> GESTURE_KEYS = new HashSet<String>(Arrays.asList(

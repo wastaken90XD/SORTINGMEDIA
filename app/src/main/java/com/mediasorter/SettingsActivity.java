@@ -496,6 +496,21 @@ public class SettingsActivity extends Activity {
                 new OnTextChangeListener() {
                     @Override public void onChange(String value) { saveString("smart_ignore_tag_patterns", value); }
                 }));
+        root.addView(makeTitle("Smart Piles"));
+        root.addView(makeTextInputRow("Pile tag patterns:",
+                settingsPrefs.getString("smart_pile_tag_patterns", ""),
+                new OnTextChangeListener() {
+                    @Override public void onChange(String value) { saveString("smart_pile_tag_patterns", value); }
+                }));
+        root.addView(makeTextInputRow("Child pile format:",
+                settingsPrefs.getString("smart_pile_child_format", "{parent}_{n}"),
+                new OnTextChangeListener() {
+                    @Override public void onChange(String value) { saveString("smart_pile_child_format", value); }
+                }));
+        root.addView(makeCheckBoxRow("Automatically retire parent pile",
+                settingsPrefs.getBoolean("smart_pile_autoretire", false), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("smart_pile_autoretire", value); }
+                }));
     }
 
     private void addSurpriseSettingsSection(LinearLayout root) {

@@ -187,6 +187,8 @@ public class MainActivity extends Activity
     private boolean volumeDownLongSent;
     private Runnable volumeUpLongRunnable;
     private Runnable volumeDownLongRunnable;
+    private int pendingVolumeNavigation;
+    private boolean volumeNavigationPosted;
     private int dpadLongKeyCode = -1;
     private boolean backLongSent;
     private int lastSweepSelectedIndex = RecyclerView.NO_POSITION;
@@ -517,6 +519,7 @@ public class MainActivity extends Activity
     public boolean onKeyDown(int keyCode, android.view.KeyEvent event) {
         if (isVolumeKey(keyCode)) {
             if (isTextInputFocused()) return super.onKeyDown(keyCode, event);
+            if (smartSortEngine != null) smartSortEngine.noteActivity();
             android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
             if (!sp.getBoolean("volume_keys_enabled", true)) return super.onKeyDown(keyCode, event);
             if (event == null || event.getRepeatCount() == 0) {
@@ -743,6 +746,10 @@ public class MainActivity extends Activity
 
     private void executeVolumeMapping(int keyCode, boolean longPress) {
         List<GestureSettings.GestureStep> steps = getVolumeSteps(keyCode, longPress);
+        if (!longPress && isPureVolumeNavigation(steps)) {
+            queueVolumeNavigation(keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP ? 1 : -1);
+            return;
+        }
         if (steps == null || steps.isEmpty()) {
             if (!longPress) {
                 if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) navigateNext();
@@ -766,6 +773,27 @@ public class MainActivity extends Activity
                 executeAction(step.action);
             }
         }
+    }
+
+    private boolean isPureVolumeNavigation(List<GestureSettings.GestureStep> steps) {
+        return steps == null || steps.isEmpty() || (steps.size() == 1
+                && (steps.get(0).action == GestureSettings.GestureAction.NEXT_FILE
+                || steps.get(0).action == GestureSettings.GestureAction.PREV_FILE));
+    }
+
+    private void queueVolumeNavigation(final int direction) {
+        pendingVolumeNavigation += direction;
+        if (volumeNavigationPosted) return;
+        volumeNavigationPosted = true;
+        mainHandler.post(new Runnable() {
+            @Override public void run() {
+                int pending = pendingVolumeNavigation;
+                pendingVolumeNavigation = 0;
+                volumeNavigationPosted = false;
+                while (pending > 0) { navigateNext(); pending--; }
+                while (pending < 0) { navigatePrev(); pending++; }
+            }
+        });
     }
 
     private boolean isTextInputFocused() {
@@ -2408,6 +2436,10 @@ public class MainActivity extends Activity
             case SMART_PAUSE:
                 toggleSmartSetting(action);
                 break;
+            case SMART_SPLIT_PILE: showSmartSplitPileDialog(); break;
+            case SMART_RETIRE_PILE: retireSmartPile(); break;
+            case SMART_MOVE_PILE: openQuickTagAction(); break;
+            case SMART_NEXT_UNFINISHED_PILE: nextUnfinishedSmartPile(); break;
             case OPEN_GALLERY: setGalleryMode(true, true); break;
             case TOGGLE_GALLERY: setGalleryMode(!galleryModeActive, true); break;
             case OPEN_DASHBOARD: openDashboard(); break;
@@ -2495,6 +2527,98 @@ public class MainActivity extends Activity
         preview.setVisibility(show ? View.VISIBLE : View.GONE);
         applyExplorerWidth(getSharedPreferences("settings_prefs", MODE_PRIVATE)
                 .getInt("explorer_width_percent", 40), show);
+    }
+
+    private String activeSmartPile() {
+        return getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("smart_active_pile", "");
+    }
+
+    private void showSmartSplitPileDialog() {
+        final MediaFile current = currentFileReference();
+        if (current == null || current.getTags().isEmpty()) {
+            Toast.makeText(this, "Select a tagged file to split its pile", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final String parent = current.getTags().get(0);
+        final EditText input = new EditText(this);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        input.setSingleLine(true);
+        input.setText("2");
+        new AlertDialog.Builder(this).setTitle("Split Smart pile: " + parent)
+                .setMessage("How many child piles? (2-10)")
+                .setView(input)
+                .setPositiveButton("Create", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        int count;
+                        try { count = Integer.parseInt(input.getText().toString().trim()); }
+                        catch (Exception ignored) { count = 2; }
+                        count = Math.max(2, Math.min(10, count));
+                        String format = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getString("smart_pile_child_format", "{parent}_{n}");
+                        for (int i = 1; i <= count; i++) {
+                            String child = format.replace("{parent}", parent)
+                                    .replace("{n}", String.valueOf(i));
+                            tagManager.createTag(child);
+                        }
+                        getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
+                                .putString("smart_active_pile", parent)
+                                .putString("smart_pile_mode", "scope").apply();
+                        Toast.makeText(MainActivity.this,
+                                "Created " + count + " child piles", Toast.LENGTH_SHORT).show();
+                    }
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void retireSmartPile() {
+        final String pile = activeSmartPile();
+        if (pile.isEmpty()) {
+            Toast.makeText(this, "No active Smart pile", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final List<MediaFile> snapshot = indexer.getFullIndex();
+        new AlertDialog.Builder(this).setTitle("Retire pile tag?")
+                .setMessage("Remove '" + pile + "' from files already sorted further?")
+                .setPositiveButton("Retire", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        new Thread(new Runnable() {
+                            @Override public void run() {
+                                int count = 0;
+                                for (MediaFile file : snapshot) {
+                                    if (!file.hasTag(pile)) continue;
+                                    if (file.getTags().size() > 1) {
+                                        tagManager.removeTag(file, pile);
+                                        count++;
+                                    }
+                                }
+                                final int result = count;
+                                mainHandler.post(new Runnable() {
+                                    @Override public void run() {
+                                        scheduleRefresh();
+                                        Toast.makeText(MainActivity.this,
+                                                "Retired pile tag from " + result + " files",
+                                                Toast.LENGTH_SHORT).show();
+                                    }
+                                });
+                            }
+                        }).start();
+                    }
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void nextUnfinishedSmartPile() {
+        List<MediaFile> snapshot = indexer.getFullIndex();
+        for (MediaFile file : snapshot) {
+            if (file != null && !file.getTags().isEmpty()) {
+                String pile = file.getTags().get(0);
+                if (pile.equals(activeSmartPile()) && file.getTags().size() <= 1) {
+                    int index = findIndexByPath(fullList, file.getPath());
+                    if (index >= 0) loadFileAtIndex(index);
+                    return;
+                }
+            }
+        }
+        Toast.makeText(this, "No unfinished Smart pile found", Toast.LENGTH_SHORT).show();
     }
 
     private void toggleSmartSetting(GestureSettings.GestureAction action) {

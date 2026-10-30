@@ -51,6 +51,10 @@ public final class GestureConstants {
     public static final String ACTION_SMART_NEXT_UNCERTAIN = "SMART_NEXT_UNCERTAIN";
     public static final String ACTION_SMART_RERANK_NOW = "SMART_RERANK_NOW";
     public static final String ACTION_SMART_PAUSE = "SMART_PAUSE";
+    public static final String ACTION_SMART_SPLIT_PILE = "SMART_SPLIT_PILE";
+    public static final String ACTION_SMART_RETIRE_PILE = "SMART_RETIRE_PILE";
+    public static final String ACTION_SMART_MOVE_PILE = "SMART_MOVE_PILE";
+    public static final String ACTION_SMART_NEXT_UNFINISHED_PILE = "SMART_NEXT_UNFINISHED_PILE";
     public static final String ACTION_CYCLE_TAG_PRESETS = "CYCLE_TAG_PRESETS";
     public static final String ACTION_NEXT_PAGE = "NEXT_PAGE";
     public static final String ACTION_PREVIOUS_PAGE = "PREVIOUS_PAGE";
@@ -204,6 +208,10 @@ public final class GestureConstants {
         add(ACTION_SMART_NEXT_UNCERTAIN, "Next uncertain Smart file", Category.NAVIGATION);
         add(ACTION_SMART_RERANK_NOW, "Rerank Smart Sort", Category.VIEWING);
         add(ACTION_SMART_PAUSE, "Pause Smart Sort", Category.VIEWING);
+        add(ACTION_SMART_SPLIT_PILE, "Split Smart pile", Category.TAGGING);
+        add(ACTION_SMART_RETIRE_PILE, "Retire Smart pile", Category.TAGGING);
+        add(ACTION_SMART_MOVE_PILE, "Move to Smart pile", Category.TAGGING);
+        add(ACTION_SMART_NEXT_UNFINISHED_PILE, "Next unfinished Smart pile", Category.NAVIGATION);
         add(ACTION_CYCLE_TAG_PRESETS, "Cycle tag presets", Category.TAGGING);
         add(ACTION_TOGGLE_TAG_PANEL, "Toggle tag bar", Category.TAGGING);
         add(ACTION_CYCLE_TAG_BAR_SORT, "Cycle tag bar sort", Category.TAGGING);
