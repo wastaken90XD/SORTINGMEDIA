@@ -1302,6 +1302,23 @@ public class MainActivity extends Activity
         });
     }
 
+    private void applySurprisePick(MediaFile pickedFile, int previousVisiblePos) {
+        if (pickedFile == null) return;
+        int pickedIndex = findIndexByPath(fullList, pickedFile.getPath());
+        if (pickedIndex < 0) return;
+        java.io.File fileObj = new java.io.File(pickedFile.getPath());
+        if (!fileObj.exists() || !fileObj.canRead()) {
+            if (previousVisiblePos >= 0 && fileBrowser != null) fileBrowser.scrollToPosition(previousVisiblePos);
+            Toast.makeText(this, "Failed to load picked file", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        currentIndex = pickedIndex;
+        currentFile = pickedFile;
+        loadFileAtIndex(currentIndex);
+        centerScrollToPosition(currentIndex, previousVisiblePos);
+        Toast.makeText(this, "Surprise! Picked a random file.", Toast.LENGTH_SHORT).show();
+    }
+
     private void initViews() {
         fileBrowser = findViewById(R.id.fileBrowser);
         fileBrowser.setLayoutManager(new LinearLayoutManager(this));
@@ -1642,13 +1659,11 @@ public class MainActivity extends Activity
         });
 
         findViewById(R.id.btnSurprise).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
+            @Override public void onClick(View v) {
                 if (fullList == null || fullList.isEmpty()) {
                     Toast.makeText(MainActivity.this, "Nothing to pick from", Toast.LENGTH_SHORT).show();
                     return;
                 }
-
                 RecyclerView.LayoutManager lm = galleryModeActive && galleryBrowser != null
                         ? galleryBrowser.getLayoutManager() : fileBrowser.getLayoutManager();
                 int firstVisible = -1;
@@ -1658,34 +1673,30 @@ public class MainActivity extends Activity
                     firstVisible = ((GridLayoutManager) lm).findFirstVisibleItemPosition();
                 }
                 final int previousVisiblePos = firstVisible;
-
-                android.content.SharedPreferences surprisePrefs = getSharedPreferences(
-                        "settings_prefs", MODE_PRIVATE);
-                SurpriseEngine.Mode surpriseMode = surpriseEngine == null
+                final List<MediaFile> pool = new ArrayList<MediaFile>(fullList);
+                final int generation = (int) (refreshSequence & 0x7fffffff);
+                final SurpriseEngine.Mode mode = surpriseEngine == null
                         ? SurpriseEngine.Mode.UNIFORM
-                        : surpriseEngine.getMode(surprisePrefs);
-                MediaFile pickedFile = surpriseEngine == null
-                        ? fullList.get(RandomGenerator.pick(fullList.size()))
-                        : surpriseEngine.pick(fullList, surpriseMode, fileStatus,
-                                (int) (refreshSequence & 0x7fffffff));
-                if (pickedFile == null) return;
-                final int pickedIndex = findIndexByPath(fullList, pickedFile.getPath());
-                if (pickedIndex < 0) return;
-                final MediaFile finalPickedFile = pickedFile;
-                java.io.File fileObj = new java.io.File(finalPickedFile.getPath());
-                if (!fileObj.exists() || !fileObj.canRead()) {
-                    if (previousVisiblePos >= 0) {
-                        fileBrowser.scrollToPosition(previousVisiblePos);
-                    }
-                    Toast.makeText(MainActivity.this, "Failed to load picked file", Toast.LENGTH_SHORT).show();
-                    return;
+                        : surpriseEngine.getMode(getSharedPreferences("settings_prefs", MODE_PRIVATE));
+                if (mode == SurpriseEngine.Mode.UNIFORM || mode == SurpriseEngine.Mode.DECK
+                        || mode == SurpriseEngine.Mode.STRIDE) {
+                    MediaFile picked = surpriseEngine == null
+                            ? pool.get(RandomGenerator.pick(pool.size()))
+                            : surpriseEngine.pick(pool, mode, fileStatus, generation);
+                    applySurprisePick(picked, previousVisiblePos);
+                } else {
+                    new Thread(new Runnable() {
+                        @Override public void run() {
+                            final MediaFile picked = surpriseEngine == null ? null
+                                    : surpriseEngine.pick(pool, mode, fileStatus, generation);
+                            mainHandler.post(new Runnable() {
+                                @Override public void run() {
+                                    applySurprisePick(picked, previousVisiblePos);
+                                }
+                            });
+                        }
+                    }).start();
                 }
-
-                currentIndex = pickedIndex;
-                loadFileAtIndex(currentIndex);
-
-                centerScrollToPosition(currentIndex, previousVisiblePos);
-                Toast.makeText(MainActivity.this, "Surprise! Picked a random file.", Toast.LENGTH_SHORT).show();
             }
         });
 

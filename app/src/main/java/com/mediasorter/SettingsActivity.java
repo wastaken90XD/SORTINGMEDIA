@@ -506,6 +506,55 @@ public class SettingsActivity extends Activity {
                 new OnNumericChangeListener() {
                     @Override public void onChange(int value) { saveInt("smart_min_labeled", value); }
                 }));
+        root.addView(makeNumericInputRow("Random queue fraction (0-50%):",
+                settingsPrefs.getInt("smart_random_fraction", 15), 0, 50,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_random_fraction", value); }
+                }));
+        root.addView(makeNumericInputRow("Date tau (1-720 hours):",
+                settingsPrefs.getInt("smart_date_tau_hours", 24), 1, 720,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_date_tau_hours", value); }
+                }));
+        root.addView(makeNumericInputRow("Pool cap (500-20000):",
+                settingsPrefs.getInt("smart_max_pool", 5000), 500, 20000,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_max_pool", value); }
+                }));
+        root.addView(makeCheckBoxRow("Use video frames", settingsPrefs.getBoolean("smart_use_video_frames", false),
+                new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("smart_use_video_frames", value); }
+                }));
+        root.addView(makeNumericInputRow("Image hash weight (0-100):",
+                settingsPrefs.getInt("smart_w_hash", 35), 0, 100,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_w_hash", value); }
+                }));
+        root.addView(makeNumericInputRow("Folder weight (0-100):",
+                settingsPrefs.getInt("smart_w_folder", 15), 0, 100,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_w_folder", value); }
+                }));
+        root.addView(makeNumericInputRow("Name weight (0-100):",
+                settingsPrefs.getInt("smart_w_name", 15), 0, 100,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_w_name", value); }
+                }));
+        root.addView(makeNumericInputRow("Date weight (0-100):",
+                settingsPrefs.getInt("smart_w_date", 15), 0, 100,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_w_date", value); }
+                }));
+        root.addView(makeNumericInputRow("Color weight (0-100):",
+                settingsPrefs.getInt("smart_w_color", 10), 0, 100,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_w_color", value); }
+                }));
+        root.addView(makeNumericInputRow("Shape weight (0-100):",
+                settingsPrefs.getInt("smart_w_shape", 10), 0, 100,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_w_shape", value); }
+                }));
         root.addView(makeNumericInputRow("Smart chunk time (5-50ms):",
                 settingsPrefs.getInt("smart_chunk_ms", 20), 5, 50,
                 new OnNumericChangeListener() {
@@ -516,12 +565,30 @@ public class SettingsActivity extends Activity {
                 new OnNumericChangeListener() {
                     @Override public void onChange(int value) { saveInt("rerank_idle_ms", value); }
                 }));
+        root.addView(makeNumericInputRow("Pass budget (200-10000ms):",
+                settingsPrefs.getInt("smart_pass_budget_ms", 1500), 200, 10000,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_pass_budget_ms", value); }
+                }));
+        root.addView(makeNumericInputRow("Rerank debounce (100-3000ms):",
+                settingsPrefs.getInt("smart_rerank_debounce_ms", 400), 100, 3000,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("smart_rerank_debounce_ms", value); }
+                }));
         root.addView(makeTextInputRow("Ignore tag patterns:",
                 settingsPrefs.getString("smart_ignore_tag_patterns", "link_*,*_seq_*"),
                 new OnTextChangeListener() {
                     @Override public void onChange(String value) { saveString("smart_ignore_tag_patterns", value); }
                 }));
         root.addView(makeTitle("Smart Piles"));
+        root.addView(makeSpinnerRow("Pile mode:",
+                new String[]{"scope", "label"},
+                "label".equals(settingsPrefs.getString("smart_pile_mode", "scope")) ? 1 : 0,
+                new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) {
+                        saveString("smart_pile_mode", value);
+                    }
+                }));
         root.addView(makeTextInputRow("Pile tag patterns:",
                 settingsPrefs.getString("smart_pile_tag_patterns", ""),
                 new OnTextChangeListener() {
@@ -531,6 +598,14 @@ public class SettingsActivity extends Activity {
                 settingsPrefs.getString("smart_pile_child_format", "{parent}_{n}"),
                 new OnTextChangeListener() {
                     @Override public void onChange(String value) { saveString("smart_pile_child_format", value); }
+                }));
+        root.addView(makeSpinnerRow("Pile split naming:",
+                new String[]{"child", "reuse"},
+                "reuse".equals(settingsPrefs.getString("smart_pile_split_naming", "child")) ? 1 : 0,
+                new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) {
+                        saveString("smart_pile_split_naming", value);
+                    }
                 }));
         root.addView(makeCheckBoxRow("Automatically retire parent pile",
                 settingsPrefs.getBoolean("smart_pile_autoretire", false), new OnCheckedChangeListener() {
@@ -569,6 +644,21 @@ public class SettingsActivity extends Activity {
                 settingsPrefs.getInt("surprise_candidate_cap", 200), 20, 1000,
                 new OnNumericChangeListener() {
                     @Override public void onChange(int value) { saveInt("surprise_candidate_cap", value); }
+                }));
+        root.addView(makeNumericInputRow("Untagged weight (1-20):",
+                settingsPrefs.getInt("surprise_w_untagged", 3), 1, 20,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("surprise_w_untagged", value); }
+                }));
+        root.addView(makeNumericInputRow("Stale weight (1-20):",
+                settingsPrefs.getInt("surprise_w_stale", 2), 1, 20,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("surprise_w_stale", value); }
+                }));
+        root.addView(makeNumericInputRow("Flagged weight (1-20):",
+                settingsPrefs.getInt("surprise_w_flagged", 1), 1, 20,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("surprise_w_flagged", value); }
                 }));
         root.addView(makeCheckBoxRow("Volume navigation acceleration",
                 settingsPrefs.getBoolean("nav_accel_enabled", false), new OnCheckedChangeListener() {

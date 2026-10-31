@@ -163,6 +163,12 @@ public class SmartSortEngine {
         }
         java.util.Collections.sort(predictions, new java.util.Comparator<Prediction>() {
             @Override public int compare(Prediction left, Prediction right) {
+                if ("arranged".equals(orderMode)) {
+                    String a = left.tag == null ? "~" : left.tag;
+                    String b = right.tag == null ? "~" : right.tag;
+                    int group = a.compareToIgnoreCase(b);
+                    if (group != 0) return group;
+                }
                 return Float.compare(left.confidence, right.confidence);
             }
         });
