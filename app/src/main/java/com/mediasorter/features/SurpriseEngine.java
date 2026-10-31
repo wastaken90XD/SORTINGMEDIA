@@ -362,15 +362,22 @@ public class SurpriseEngine {
             }
         }
         if (best != null) return best;
+        if (smartResult != null && smartResult.ranks != null
+                && !smartResult.ranks.isEmpty()) return null;
         float confidence = Float.MAX_VALUE;
+        boolean foundConfidence = false;
         for (MediaFile file : pool) {
-            float value = SmartState.confidence(file.getPath());
-            if (value < confidence) {
-                confidence = value;
-                best = file;
+            if (!SmartState.suggestedTag(file.getPath()).isEmpty()
+                    || SmartState.confidence(file.getPath()) > 0f) {
+                float value = SmartState.confidence(file.getPath());
+                if (value < confidence) {
+                    confidence = value;
+                    best = file;
+                    foundConfidence = true;
+                }
             }
         }
-        return best;
+        return foundConfidence ? best : null;
     }
 
     private MediaFile find(List<MediaFile> pool, String path) {

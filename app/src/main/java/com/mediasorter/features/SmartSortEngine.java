@@ -301,7 +301,7 @@ public class SmartSortEngine {
         result.arranged = useArranged;
         if (useArranged) {
             buildArrangedResult(result, files, labeledMask, predictions, byPath,
-                    requestGeneration);
+                    requestGeneration, ignore, activePile, pilePatterns);
         } else {
             List<Prediction> ordered = predictions;
             if (labeled.size() < minLabeled && !skipDiversityOrdering) {
@@ -730,7 +730,8 @@ public class SmartSortEngine {
 
     private void buildArrangedResult(Result result, List<MediaFile> files,
                                      boolean[] labeledMask, List<Prediction> predictions,
-                                     Map<String, Prediction> byPath, int requestGeneration) {
+                                     Map<String, Prediction> byPath, int requestGeneration,
+                                     Pattern ignore, String activePile, Pattern pilePatterns) {
         Map<String, SmartGroupData> groups = new LinkedHashMap<String, SmartGroupData>();
         String groupMode = prefs.getString("group_tag_mode", "all");
         int groupPosition = Math.max(1, prefs.getInt("group_tag_position", 1));
@@ -740,7 +741,8 @@ public class SmartSortEngine {
             if (files.get(i) == null || (!labeledMask[i] && !byPath.containsKey(files.get(i).getPath()))) continue;
             MediaFile file = files.get(i);
             Prediction prediction = byPath.get(file.getPath());
-            String label = labeledMask[i] ? primaryTag(file, groupMode, groupPosition, groupPattern) : null;
+            String label = labeledMask[i] ? primaryTag(file, groupMode, groupPosition,
+                    groupPattern, ignore, activePile, pilePatterns) : null;
             boolean confirmed = labeledMask[i];
             float confidence = prediction == null ? 1f : prediction.confidence;
             if (!confirmed && prediction != null && prediction.suggested) label = prediction.tag;
@@ -794,23 +796,31 @@ public class SmartSortEngine {
         }
     }
 
-    private String primaryTag(MediaFile file, String mode, int position, String pattern) {
-        List<String> tags = file.getTags();
-        if (tags == null || tags.isEmpty()) return "";
-        if ("first".equals(mode)) return tags.get(0);
-        if ("last".equals(mode)) return tags.get(tags.size() - 1);
+    private String primaryTag(MediaFile file, String mode, int position, String pattern,
+                              Pattern ignore, String activePile, Pattern pilePatterns) {
+        List<String> usable = new ArrayList<String>();
+        if (file != null && file.getTags() != null) {
+            for (String tag : file.getTags()) {
+                if (isLabelTag(tag == null ? "" : tag.trim(), ignore, activePile, pilePatterns)) {
+                    usable.add(tag.trim());
+                }
+            }
+        }
+        if (usable.isEmpty()) return "";
+        if ("first".equals(mode)) return usable.get(0);
+        if ("last".equals(mode)) return usable.get(usable.size() - 1);
         if ("position".equals(mode)) {
             int index = position - 1;
-            return index >= 0 && index < tags.size() ? tags.get(index) : "";
+            return index >= 0 && index < usable.size() ? usable.get(index) : "";
         }
         if ("pattern".equals(mode) && pattern != null) {
             Pattern compiled = compilePatterns(pattern);
             if (compiled != null) {
-                for (String tag : tags) if (compiled.matcher(tag).matches()) return tag;
+                for (String tag : usable) if (compiled.matcher(tag).matches()) return tag;
             }
             return "";
         }
-        return tags.get(0); // "all" uses the first tag for Smart's single group key.
+        return usable.get(0); // "all" uses the first usable label for Smart's group key.
     }
 
     private String sequenceLabel(MediaFile file) {
