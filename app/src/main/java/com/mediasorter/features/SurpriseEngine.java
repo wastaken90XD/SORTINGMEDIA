@@ -134,6 +134,10 @@ public class SurpriseEngine {
             if (status != null && status.isFlagged(file.getPath())) {
                 weight += Math.max(0, prefs.getInt(KEY_W_FLAGGED, 1) - 1);
             }
+            float confidence = SmartState.confidence(file.getPath());
+            if (confidence > 0f && confidence < .5f) {
+                weight += Math.max(0, prefs.getInt(KEY_W_UNCERTAIN, 2) - 1);
+            }
             double u = Math.max(0.000001, random.nextDouble());
             double key = -Math.log(u) / Math.max(0.001, weight);
             if (key < best) { best = key; selected = file; }
@@ -144,15 +148,58 @@ public class SurpriseEngine {
     private MediaFile pickDiversity(List<MediaFile> pool) {
         int cap = Math.min(pool.size(), Math.max(20,
                 Math.min(1000, prefs.getInt(KEY_CANDIDATE_CAP, 200))));
-        MediaFile selected = null;
-        int bestScore = -1;
+        List<MediaFile> candidates = new ArrayList<MediaFile>();
         for (int i = 0; i < cap; i++) {
             MediaFile file = pool.get(random.nextInt(pool.size()));
             if (history.contains(file.getPath()) && pool.size() > history.size()) continue;
-            int score = file.getTags().isEmpty() ? 2 : 1;
-            if (score > bestScore) { bestScore = score; selected = file; }
+            if (!candidates.contains(file)) candidates.add(file);
         }
-        return selected == null ? pickWeighted(pool, null) : selected;
+        if (candidates.isEmpty()) return pickWeighted(pool, null);
+        double total = 0.0;
+        MediaFile best = null;
+        double bestScore = -1.0;
+        for (MediaFile file : candidates) {
+            double distance = minimumHistoryDistance(file, pool);
+            if (distance > bestScore) { bestScore = distance; best = file; }
+            total += Math.max(0.001, distance);
+        }
+        if (prefs.getBoolean(KEY_DIVERSITY_SOFT, true) && total > 0.0) {
+            double target = random.nextDouble() * total;
+            double seen = 0.0;
+            for (MediaFile file : candidates) {
+                seen += Math.max(0.001, minimumHistoryDistance(file, pool));
+                if (seen >= target) return file;
+            }
+        }
+        return best == null ? pickWeighted(pool, null) : best;
+    }
+
+    private double minimumHistoryDistance(MediaFile file, List<MediaFile> pool) {
+        if (history.isEmpty()) return 1.0;
+        double best = Double.MAX_VALUE;
+        int checked = 0;
+        for (String path : history) {
+            MediaFile previous = find(pool, path);
+            if (previous != null) {
+                best = Math.min(best, featureDistance(file, previous));
+                if (++checked >= 10) break;
+            }
+        }
+        return best == Double.MAX_VALUE ? 1.0 : Math.min(1.0, best);
+    }
+
+    private double featureDistance(MediaFile a, MediaFile b) {
+        if (a == null || b == null) return 1.0;
+        double value = 0.0;
+        int components = 0;
+        if (a.getType() != null && b.getType() != null) {
+            value += a.getType() == b.getType() ? 0.0 : 1.0; components++;
+        }
+        value += a.getTags().isEmpty() == b.getTags().isEmpty() ? 0.0 : 1.0; components++;
+        value += a.getName().equalsIgnoreCase(b.getName()) ? 0.0 : .5; components++;
+        value += Math.min(1.0, Math.abs(a.getSize() - (double) b.getSize())
+                / Math.max(1.0, Math.max(a.getSize(), b.getSize()))); components++;
+        return components == 0 ? 1.0 : value / components;
     }
 
     private MediaFile pickGroup(List<MediaFile> pool) {

@@ -535,7 +535,14 @@ public class MainActivity extends Activity
                 }
                 scheduleVolumeLongPress(keyCode);
             }
-            executeVolumeMapping(keyCode, false);
+            int acceleration = getVolumeAccelerationSteps(event == null ? 0 : event.getRepeatCount());
+            List<GestureSettings.GestureStep> volumeSteps = getVolumeSteps(keyCode, false);
+            if (acceleration > 1 && isPureVolumeNavigation(volumeSteps)) {
+                int direction = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP ? 1 : -1;
+                for (int i = 0; i < acceleration; i++) queueVolumeNavigation(direction);
+            } else {
+                executeVolumeMapping(keyCode, false);
+            }
             return true;
         }
         if (isGestureInputKey(keyCode) && isGestureExecuting) return true;
@@ -745,6 +752,19 @@ public class MainActivity extends Activity
             return longPress ? gestureSettings.getVolumeUpLong() : gestureSettings.getVolumeUp();
         }
         return longPress ? gestureSettings.getVolumeDownLong() : gestureSettings.getVolumeDown();
+    }
+
+    private int getVolumeAccelerationSteps(int repeatCount) {
+        if (!getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getBoolean("nav_accel_enabled", false)) return 1;
+        String raw = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("nav_accel_steps", "1,2,5,10");
+        String[] values = raw.split(",");
+        int index = repeatCount >= 25 ? 3 : repeatCount >= 12 ? 2 : repeatCount >= 5 ? 1 : 0;
+        if (values.length == 0) return 1;
+        index = Math.min(index, values.length - 1);
+        try { return Math.max(1, Integer.parseInt(values[index].trim())); }
+        catch (Exception ignored) { return 1; }
     }
 
     private void executeVolumeMapping(int keyCode, boolean longPress) {
