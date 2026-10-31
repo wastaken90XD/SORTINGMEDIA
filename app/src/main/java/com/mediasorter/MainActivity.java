@@ -179,6 +179,7 @@ public class MainActivity extends Activity
     private long refreshSequence;
     private long statsSequence;
     private boolean infoOverlayVisible;
+    private Map<String, Integer> smartOrderUndo;
     private boolean isGestureExecuting;
     private final ArrayList<String> comboBuffer = new ArrayList<String>();
     private final ArrayList<GestureCombo> partialMatches = new ArrayList<GestureCombo>();
@@ -2612,6 +2613,8 @@ public class MainActivity extends Activity
         if (smartResult == null || smartResult.ranks.isEmpty()) return;
         final List<MediaFile> snapshot = indexer.getFullIndex();
         final Map<String, Integer> ranks = new java.util.HashMap<String, Integer>(smartResult.ranks);
+        final Map<String, Integer> previousOrders = new java.util.HashMap<String, Integer>();
+        for (MediaFile file : snapshot) previousOrders.put(file.getPath(), file.getManualOrder());
         new Thread(new Runnable() {
             @Override public void run() {
                 java.util.Collections.sort(snapshot, new java.util.Comparator<MediaFile>() {
@@ -2628,6 +2631,7 @@ public class MainActivity extends Activity
                         .apply();
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
+                        smartOrderUndo = previousOrders;
                         if (smartSortEngine != null) smartSortEngine.setEnabled(false);
                         Toast.makeText(MainActivity.this, "Smart order locked for "
                                 + snapshot.size() + " files", Toast.LENGTH_SHORT).show();
@@ -2909,6 +2913,17 @@ public class MainActivity extends Activity
     }
 
     private void undoLastAction() {
+        if (smartOrderUndo != null && !smartOrderUndo.isEmpty()) {
+            Map<String, Integer> restore = smartOrderUndo;
+            smartOrderUndo = null;
+            indexer.restoreManualOrders(restore);
+            getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
+                    .putString("sort_sequence", "[{\"id\":\"SMART\",\"direction\":\"ASC\"}]")
+                    .apply();
+            scheduleRefresh();
+            Toast.makeText(this, "Smart order lock undone", Toast.LENGTH_SHORT).show();
+            return;
+        }
         int undone = 0;
         boolean partial = false;
         if (autoOrganizer != null && autoOrganizer.canUndo()) {
@@ -3052,6 +3067,11 @@ public class MainActivity extends Activity
 
         if (applied) tagManager.applyTag(file, tagName);
         else         tagManager.removeTag(file, tagName);
+        if (applied && getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getBoolean("smart_pile_autoretire", false)) {
+            String pile = activeSmartPile();
+            if (!pile.isEmpty() && !pile.equals(tagName)) tagManager.removeTag(file, pile);
+        }
 
         fullList.set(currentIndex, file);
         // Partial update — only rebind tags text, skip thumbnail reload

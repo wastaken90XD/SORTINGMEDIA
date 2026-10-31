@@ -723,6 +723,23 @@ public class MediaIndexer {
      * integer position changed are written to SharedPreferences; the same
      * settings preference file is already covered by SettingsExporter.
      */
+    public void restoreManualOrders(Map<String, Integer> orders) {
+        if (orders == null) return;
+        android.content.SharedPreferences prefs = appContext == null ? null
+                : appContext.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
+        android.content.SharedPreferences.Editor editor = prefs == null ? null : prefs.edit();
+        synchronized (index) {
+            for (MediaFile file : index) {
+                Integer value = orders.get(file.getPath());
+                if (value != null) {
+                    file.setManualOrder(value);
+                    if (editor != null) editor.putInt("manual_order:" + file.getPath(), value);
+                }
+            }
+        }
+        if (editor != null) editor.apply();
+    }
+
     public void updateManualOrder(List<MediaFile> ordered) {
         if (ordered == null || ordered.isEmpty()) return;
         android.content.SharedPreferences prefs = appContext == null ? null

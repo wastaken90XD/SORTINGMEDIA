@@ -48,9 +48,8 @@ public class SmartSortEngine {
 
     private final android.content.SharedPreferences prefs;
     private final Handler mainHandler;
-    private final HandlerThread thread = new HandlerThread("MagnusSmartSort",
-            Process.THREAD_PRIORITY_BACKGROUND);
-    private final Handler worker;
+    private HandlerThread thread;
+    private Handler worker;
     private final Listener listener;
     private final SmartFeatureCache featureCache;
     private final boolean lowMemory;
@@ -70,15 +69,18 @@ public class SmartSortEngine {
         android.app.ActivityManager manager = (android.app.ActivityManager)
                 context.getSystemService(Context.ACTIVITY_SERVICE);
         lowMemory = manager != null && manager.getMemoryClass() < 512;
-        thread.start();
-        worker = new Handler(thread.getLooper());
         enabled = prefs.getBoolean("smart_enabled", false);
         paused = prefs.getBoolean("smart_paused", false);
     }
 
-    public void setEnabled(boolean value) {
+    public synchronized void setEnabled(boolean value) {
         enabled = value;
-        if (!value) cancel();
+        if (!value) {
+            cancel();
+            if (thread != null) thread.quitSafely();
+            thread = null;
+            worker = null;
+        }
     }
 
     public boolean isEnabled() { return enabled; }
@@ -86,8 +88,16 @@ public class SmartSortEngine {
     public void setScanRunning(boolean value) { scanRunning = value; }
     public void noteActivity() { lastActivity = SystemClock.uptimeMillis(); }
 
+    private synchronized void ensureWorker() {
+        if (closed || worker != null) return;
+        thread = new HandlerThread("MagnusSmartSort", Process.THREAD_PRIORITY_BACKGROUND);
+        thread.start();
+        worker = new Handler(thread.getLooper());
+    }
+
     public void request(final List<MediaFile> files) {
         if (!enabled || closed || files == null || files.isEmpty()) return;
+        ensureWorker();
         final int requestGeneration = ++generation;
         int configuredCap = Math.max(500, prefs.getInt("smart_max_pool", 5000));
         int cap = lowMemory ? Math.min(1500, configuredCap) : configuredCap;
@@ -116,7 +126,9 @@ public class SmartSortEngine {
     public void close() {
         closed = true;
         cancel();
-        thread.quitSafely();
+        if (thread != null) thread.quitSafely();
+        worker = null;
+        thread = null;
     }
 
     private Result rank(List<MediaFile> files, int requestGeneration) {
@@ -172,6 +184,17 @@ public class SmartSortEngine {
                 return Float.compare(left.confidence, right.confidence);
             }
         });
+        int randomPercent = Math.max(0, Math.min(50,
+                prefs.getInt("smart_random_fraction", 15)));
+        if (randomPercent > 0 && predictions.size() > 1) {
+            java.util.Random random = new java.util.Random();
+            int stride = Math.max(1, 100 / randomPercent);
+            for (int i = 0; i < predictions.size(); i += stride) {
+                int swap = i + random.nextInt(predictions.size() - i);
+                Prediction moved = predictions.remove(swap);
+                predictions.add(i, moved);
+            }
+        }
         for (Prediction prediction : predictions) result.ranks.put(prediction.path, rank++);
         if (unlabeledFirst) {
             for (Integer index : labeled) result.ranks.put(files.get(index).getPath(), rank++);

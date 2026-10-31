@@ -323,6 +323,15 @@ public class SettingsActivity extends Activity {
         if (!GestureConstants.isComboInputId(inputId)) return;
         if (comboRecordingSequence == null
                 || comboRecordingSequence.size() >= GestureCombo.MAX_SEQUENCE_LENGTH) return;
+        if (GestureConstants.INPUT_VOLUME_UP.equals(inputId)
+                || GestureConstants.INPUT_VOLUME_DOWN.equals(inputId)) {
+            String mapped = getSharedPreferences("gesture_prefs", MODE_PRIVATE)
+                    .getString(inputId, "");
+            if (mapped.contains("NEXT_FILE") || mapped.contains("PREV_FILE")) {
+                Toast.makeText(this, "Warning: this volume key is mapped to navigation and may not start a combo.",
+                        Toast.LENGTH_LONG).show();
+            }
+        }
         comboRecordingSequence.add(inputId);
         updateComboRecordingView();
     }
