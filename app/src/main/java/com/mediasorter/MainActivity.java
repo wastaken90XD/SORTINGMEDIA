@@ -2084,10 +2084,25 @@ public class MainActivity extends Activity
                 final SmartSortEngine.Result smartSnapshot = smartResult;
                 final boolean smartOn = getSharedPreferences("settings_prefs", MODE_PRIVATE)
                         .getBoolean("smart_enabled", false);
+                final String activePile = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                        .getString("smart_active_pile", "");
+                int pileTotal = 0;
+                int pileSorted = 0;
+                if (smartOn && !activePile.isEmpty()) {
+                    for (MediaFile file : totalSnapshot) {
+                        if (file == null || !file.hasTag(activePile)) continue;
+                        pileTotal++;
+                        if (file.getTags().size() > 1) pileSorted++;
+                    }
+                }
+                final int finalPileTotal = pileTotal;
+                final int finalPileSorted = pileSorted;
                 final String text = smartOn && smartSnapshot != null
                         ? "Smart: " + smartSnapshot.labeled + " tagged, "
                                 + smartSnapshot.suggested + " suggested, "
                                 + smartSnapshot.unsure + " unsure"
+                                + (finalPileTotal > 0 ? "  " + activePile + ": "
+                                + finalPileSorted + " of " + finalPileTotal + " sorted" : "")
                         : "Total: " + totalSnapshot.size()
                                 + "  Filtered: " + countedPaths.size()
                                 + "  Tagged: " + tagged
