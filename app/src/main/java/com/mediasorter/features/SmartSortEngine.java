@@ -142,7 +142,8 @@ public class SmartSortEngine {
         featureCache = new SmartFeatureCache(context.getFilesDir());
         android.app.ActivityManager manager = (android.app.ActivityManager)
                 context.getSystemService(Context.ACTIVITY_SERVICE);
-        lowMemory = manager != null && manager.getMemoryClass() < 512;
+        lowMemory = manager != null && (manager.getMemoryClass() < 512
+                || manager.isLowRamDevice());
         enabled = prefs.getBoolean("smart_enabled", false);
         paused = prefs.getBoolean("smart_paused", false);
     }

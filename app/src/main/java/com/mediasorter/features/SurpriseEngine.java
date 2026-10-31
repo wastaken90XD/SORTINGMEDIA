@@ -2,6 +2,7 @@ package com.mediasorter.features;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.media.MediaMetadataRetriever;
 import com.mediasorter.FileStatus;
 import com.mediasorter.models.MediaFile;
 import java.io.File;
@@ -46,7 +47,8 @@ public class SurpriseEngine {
         prefs = context.getSharedPreferences("settings_prefs", android.content.Context.MODE_PRIVATE);
         android.app.ActivityManager manager = (android.app.ActivityManager)
                 context.getSystemService(android.content.Context.ACTIVITY_SERVICE);
-        lowMemory = manager != null && manager.getMemoryClass() < 512;
+        lowMemory = manager != null && (manager.getMemoryClass() < 512
+                || manager.isLowRamDevice());
     }
 
     public synchronized Mode getMode(android.content.SharedPreferences settings) {
@@ -288,6 +290,14 @@ public class SurpriseEngine {
         String key = file.getPath() + "|" + file.getSize() + "|" + file.getDateAdded();
         Long cached = featureHashes.get(key);
         if (cached != null) return cached;
+        if (file.getType() == MediaFile.Type.VIDEO) {
+            if (!prefs.getBoolean("smart_use_video_frames", false) || lowMemory) {
+                return Long.MIN_VALUE;
+            }
+            long videoHash = sampledVideoHash(file.getPath());
+            featureHashes.put(key, videoHash);
+            return videoHash;
+        }
         if (file.getType() != MediaFile.Type.IMAGE) return Long.MIN_VALUE;
         long hash = Long.MIN_VALUE;
         try {
@@ -317,6 +327,43 @@ public class SurpriseEngine {
         } catch (Throwable ignored) {}
         featureHashes.put(key, hash);
         return hash;
+    }
+
+    private long sampledVideoHash(String path) {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(path);
+            String durationText = retriever.extractMetadata(
+                    MediaMetadataRetriever.METADATA_KEY_DURATION);
+            long durationMs = 0L;
+            try { durationMs = Long.parseLong(durationText == null ? "0" : durationText); }
+            catch (Exception ignored) {}
+            Bitmap frame = retriever.getFrameAtTime(Math.max(0L, durationMs / 2L) * 1000L,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            return hashBitmap(frame);
+        } catch (Throwable ignored) {
+            return Long.MIN_VALUE;
+        } finally {
+            try { retriever.release(); } catch (Exception ignored) {}
+        }
+    }
+
+    private long hashBitmap(Bitmap bitmap) {
+        if (bitmap == null || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0) {
+            return Long.MIN_VALUE;
+        }
+        Bitmap scaled = Bitmap.createScaledBitmap(bitmap, 9, 8, true);
+        long value = 0L;
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 8; x++) {
+                int left = gray(scaled.getPixel(x, y));
+                int right = gray(scaled.getPixel(x + 1, y));
+                value = (value << 1) | (right > left ? 1L : 0L);
+            }
+        }
+        scaled = null;
+        bitmap = null;
+        return value;
     }
 
     private int sampleSize(int width, int height) {
