@@ -1129,6 +1129,9 @@ public class MainActivity extends Activity
                             com.mediasorter.features.SmartSortEngine.Result result) {
                         smartResult = result;
                         sortManager.setSmartRanks(result.ranks);
+                        if (result.slowedDown) Toast.makeText(MainActivity.this,
+                                "Smart sort slowed down to protect performance.",
+                                Toast.LENGTH_LONG).show();
                         scheduleRefresh();
                     }
                 });
@@ -1145,6 +1148,10 @@ public class MainActivity extends Activity
                         boolean removedGhost = reconcileDeletedTagFilters();
                         refreshTagBar();
                         if (removedGhost) scheduleRefresh();
+                        if (smartSortEngine != null && getSharedPreferences(
+                                "settings_prefs", MODE_PRIVATE).getBoolean("smart_enabled", false)) {
+                            smartSortEngine.request(indexer.getFullIndex());
+                        }
                         updateStatsBarAsync();
                     }
                 });
@@ -5928,6 +5935,7 @@ private Spinner makeSpinner(String[] options) {
 
     @Override
     public void onScanProgress(int scanned, int total, String currentFile) {
+        if (smartSortEngine != null) smartSortEngine.setScanRunning(true);
         mainHandler.post(new Runnable() {
             @Override public void run() {
                 if (scanProgress != null) {
@@ -5954,6 +5962,7 @@ private Spinner makeSpinner(String[] options) {
 
     @Override
     public void onScanComplete(List<MediaFile> allFiles) {
+        if (smartSortEngine != null) smartSortEngine.setScanRunning(false);
         mainHandler.post(new Runnable() {
             @Override public void run() {
                 btnScan.setEnabled(true);

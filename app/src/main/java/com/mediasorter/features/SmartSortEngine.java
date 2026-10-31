@@ -1,6 +1,8 @@
 package com.mediasorter.features;
 
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Process;
@@ -32,6 +34,16 @@ public class SmartSortEngine {
         public int unsure;
         public long durationMs;
         public int generation;
+        public boolean slowedDown;
+    }
+
+    private static class Features {
+        final long[] hashes;
+        final boolean[] hashPresent;
+        Features(int size) {
+            hashes = new long[size];
+            hashPresent = new boolean[size];
+        }
     }
 
     private final android.content.SharedPreferences prefs;
@@ -40,16 +52,24 @@ public class SmartSortEngine {
             Process.THREAD_PRIORITY_BACKGROUND);
     private final Handler worker;
     private final Listener listener;
+    private final SmartFeatureCache featureCache;
+    private final boolean lowMemory;
     private volatile boolean enabled;
     private volatile boolean paused;
     private volatile boolean closed;
+    private volatile boolean scanRunning;
     private volatile long lastActivity;
     private int generation;
+    private int consecutiveSlowPasses;
 
     public SmartSortEngine(Context context, Handler main, Listener resultListener) {
         prefs = context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
         mainHandler = main;
         listener = resultListener;
+        featureCache = new SmartFeatureCache(context.getFilesDir());
+        android.app.ActivityManager manager = (android.app.ActivityManager)
+                context.getSystemService(Context.ACTIVITY_SERVICE);
+        lowMemory = manager != null && manager.getMemoryClass() < 512;
         thread.start();
         worker = new Handler(thread.getLooper());
         enabled = prefs.getBoolean("smart_enabled", false);
@@ -63,12 +83,17 @@ public class SmartSortEngine {
 
     public boolean isEnabled() { return enabled; }
     public void setPaused(boolean value) { paused = value; }
+    public void setScanRunning(boolean value) { scanRunning = value; }
     public void noteActivity() { lastActivity = SystemClock.uptimeMillis(); }
 
     public void request(final List<MediaFile> files) {
         if (!enabled || closed || files == null || files.isEmpty()) return;
         final int requestGeneration = ++generation;
-        final List<MediaFile> snapshot = new ArrayList<MediaFile>(files);
+        int configuredCap = Math.max(500, prefs.getInt("smart_max_pool", 5000));
+        int cap = lowMemory ? Math.min(1500, configuredCap) : configuredCap;
+        final List<MediaFile> snapshot = files.size() <= cap
+                ? new ArrayList<MediaFile>(files)
+                : new ArrayList<MediaFile>(files.subList(0, cap));
         worker.post(new Runnable() {
             @Override public void run() {
                 Result result = rank(snapshot, requestGeneration);
@@ -105,16 +130,21 @@ public class SmartSortEngine {
             if (isLabeled(files.get(i), ignore)) labeled.add(i); else unlabeled.add(i);
         }
         result.labeled = labeled.size();
+        Features features = buildFeatures(files, requestGeneration);
+        if (features == null) return null;
         int rank = 0;
-        for (Integer index : labeled) result.ranks.put(files.get(index).getPath(), rank++);
+        final String orderMode = prefs.getString("smart_order_mode", "auto");
+        final boolean unlabeledFirst = !unlabeled.isEmpty()
+                && ("queue".equals(orderMode) || "auto".equals(orderMode));
         final float threshold = prefs.getInt("smart_suggest_threshold", 60) / 100f;
-        final int chunk = Math.max(5, Math.min(50, prefs.getInt("smart_chunk_ms", 20)));
+        final int chunk = Math.max(5, Math.min(50, prefs.getInt("smart_chunk_ms", 20)
+                / (lowMemory ? 2 : 1)));
         ArrayList<Prediction> predictions = new ArrayList<Prediction>();
         for (Integer index : unlabeled) {
             if (requestGeneration != generation || closed) return null;
             waitForSlice(chunk);
             MediaFile target = files.get(index);
-            Prediction prediction = predict(target, files, labeled);
+            Prediction prediction = predict(target, index, files, labeled, features);
             predictions.add(prediction);
             result.confidence.put(target.getPath(), prediction.confidence);
             int occurrences = prediction.tag == null ? 0 : countLabeledTag(
@@ -132,15 +162,98 @@ public class SmartSortEngine {
             }
         });
         for (Prediction prediction : predictions) result.ranks.put(prediction.path, rank++);
+        if (unlabeledFirst) {
+            for (Integer index : labeled) result.ranks.put(files.get(index).getPath(), rank++);
+        }
         result.durationMs = SystemClock.uptimeMillis() - started;
+        int budget = Math.max(200, prefs.getInt("smart_pass_budget_ms", 1500));
+        if (result.durationMs > budget) consecutiveSlowPasses++;
+        else consecutiveSlowPasses = 0;
+        if (consecutiveSlowPasses >= 3) {
+            int current = Math.max(1, prefs.getInt("smart_k_neighbors", 5));
+            prefs.edit().putInt("smart_k_neighbors", Math.max(1, current / 2)).apply();
+            result.slowedDown = true;
+            consecutiveSlowPasses = 0;
+        }
         return result;
     }
+
+    private Features buildFeatures(List<MediaFile> files, int requestGeneration) {
+        Features features = new Features(files.size());
+        for (int i = 0; i < files.size(); i++) {
+            if (requestGeneration != generation || closed) return null;
+            waitForSlice(Math.max(1, prefs.getInt("smart_chunk_ms", 20)));
+            MediaFile file = files.get(i);
+            if (file == null || file.getPath() == null) continue;
+            SmartFeatureCache.Entry cached = featureCache.get(file.getPath(), file.getSize(),
+                    file.getDateAdded());
+            if (cached != null) {
+                features.hashes[i] = cached.hash;
+                features.hashPresent[i] = cached.present;
+                continue;
+            }
+            if (file.getType() == MediaFile.Type.IMAGE) {
+                try {
+                    BitmapFactory.Options bounds = new BitmapFactory.Options();
+                    bounds.inJustDecodeBounds = true;
+                    BitmapFactory.decodeFile(file.getPath(), bounds);
+                    BitmapFactory.Options options = new BitmapFactory.Options();
+                    options.inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight);
+                    Bitmap bitmap = BitmapFactory.decodeFile(file.getPath(), options);
+                    if (bitmap != null && bitmap.getWidth() > 0 && bitmap.getHeight() > 0) {
+                        long hash = 0L;
+                        for (int y = 0; y < 8; y++) {
+                            int previous = grayAt(bitmap, 0, y);
+                            for (int x = 0; x < 8; x++) {
+                                int next = grayAt(bitmap, x + 1, y);
+                                hash <<= 1;
+                                if (next > previous) hash |= 1L;
+                                previous = next;
+                            }
+                        }
+                        features.hashes[i] = hash;
+                        features.hashPresent[i] = true;
+                    }
+                    // Do not recycle: release the local reference and let GC handle it.
+                    bitmap = null;
+                } catch (OutOfMemoryError memory) {
+                    features.hashPresent[i] = false;
+                } catch (Throwable ignored) {
+                    features.hashPresent[i] = false;
+                }
+            }
+            featureCache.put(file.getPath(), file.getSize(), file.getDateAdded(),
+                    features.hashes[i], features.hashPresent[i]);
+        }
+        featureCache.save();
+        return features;
+    }
+
+    private int sampleSize(int width, int height) {
+        int largest = Math.max(width, height);
+        int sample = 1;
+        while (largest / sample > 256) sample *= 2;
+        return Math.max(1, sample);
+    }
+
+    private int grayAt(Bitmap bitmap, int x, int y) {
+        int safeX = Math.max(0, Math.min(bitmap.getWidth() - 1,
+                x * bitmap.getWidth() / 9));
+        int safeY = Math.max(0, Math.min(bitmap.getHeight() - 1,
+                y * bitmap.getHeight() / 8));
+        int color = bitmap.getPixel(safeX, safeY);
+        return (ColorRed(color) * 299 + ColorGreen(color) * 587 + ColorBlue(color) * 114) / 1000;
+    }
+    private int ColorRed(int color) { return (color >> 16) & 0xFF; }
+    private int ColorGreen(int color) { return (color >> 8) & 0xFF; }
+    private int ColorBlue(int color) { return color & 0xFF; }
 
     private void waitForSlice(int chunkMs) {
         long start = SystemClock.uptimeMillis();
         while (SystemClock.uptimeMillis() - start < chunkMs) {
-            if (paused || prefs.getBoolean("smart_paused", false)
-                    || SystemClock.uptimeMillis() - lastActivity < prefs.getInt("rerank_idle_ms", 400)) {
+            if (scanRunning || paused || prefs.getBoolean("smart_paused", false)
+                    || SystemClock.uptimeMillis() - lastActivity < prefs.getInt("rerank_idle_ms", 400)
+                            * (lowMemory ? 2 : 1)) {
                 SystemClock.sleep(16);
             } else break;
         }
@@ -162,7 +275,13 @@ public class SmartSortEngine {
             String value = part.trim();
             if (value.isEmpty()) continue;
             if (expression.length() > 0) expression.append("|");
-            expression.append(Pattern.quote(value).replace("\\Q*\\E", ".*"));
+            StringBuilder wildcard = new StringBuilder();
+            for (int i = 0; i < value.length(); i++) {
+                char ch = value.charAt(i);
+                if (ch == '*') wildcard.append(".*");
+                else wildcard.append(Pattern.quote(String.valueOf(ch)));
+            }
+            expression.append(wildcard);
         }
         try { return expression.length() == 0 ? null : Pattern.compile(expression.toString(), Pattern.CASE_INSENSITIVE); }
         catch (Exception ignored) { return null; }
@@ -174,14 +293,15 @@ public class SmartSortEngine {
         float confidence;
     }
 
-    private Prediction predict(MediaFile target, List<MediaFile> files, List<Integer> labeled) {
+    private Prediction predict(MediaFile target, int targetIndex, List<MediaFile> files,
+                               List<Integer> labeled, Features features) {
         Prediction result = new Prediction();
         result.path = target.getPath();
         if (labeled.isEmpty()) return result;
         ArrayList<Neighbor> neighbors = new ArrayList<Neighbor>();
         for (Integer index : labeled) {
             MediaFile candidate = files.get(index);
-            float distance = distance(target, candidate);
+            float distance = distance(target, targetIndex, candidate, index, features);
             neighbors.add(new Neighbor(candidate, distance));
         }
         java.util.Collections.sort(neighbors, new java.util.Comparator<Neighbor>() {
@@ -231,20 +351,30 @@ public class SmartSortEngine {
         return count;
     }
 
-    private float distance(MediaFile a, MediaFile b) {
+    private float distance(MediaFile a, int ai, MediaFile b, int bi, Features features) {
         if (a == null || b == null) return 1f;
         float value = 0f;
         float weight = 0f;
+        int wHash = prefs.getInt("smart_w_hash", 35);
         int wName = prefs.getInt("smart_w_name", 15);
         int wFolder = prefs.getInt("smart_w_folder", 15);
         int wDate = prefs.getInt("smart_w_date", 15);
+        int wColor = prefs.getInt("smart_w_color", 10);
         int wShape = prefs.getInt("smart_w_shape", 10);
-        int wSize = prefs.getInt("smart_w_hash", 35);
+        if (wHash > 0 && features.hashPresent[ai] && features.hashPresent[bi]) {
+            value += wHash * (Long.bitCount(features.hashes[ai] ^ features.hashes[bi]) / 64f);
+            weight += wHash;
+        }
         if (wName > 0) { value += wName * nameDistance(a, b); weight += wName; }
         if (wFolder > 0) { value += wFolder * folderDistance(a, b); weight += wFolder; }
         if (wDate > 0) { value += wDate * dateDistance(a, b); weight += wDate; }
+        if (wColor > 0 && a.getColorFamily() != null && b.getColorFamily() != null) {
+            if (!a.getColorFamily().isEmpty() && !b.getColorFamily().isEmpty()) {
+                value += wColor * (a.getColorFamily().equalsIgnoreCase(b.getColorFamily()) ? 0f : 1f);
+                weight += wColor;
+            }
+        }
         if (wShape > 0) { value += wShape * shapeDistance(a, b); weight += wShape; }
-        if (wSize > 0) { value += wSize * sizeDistance(a, b); weight += wSize; }
         return weight == 0f ? 1f : value / weight;
     }
 
