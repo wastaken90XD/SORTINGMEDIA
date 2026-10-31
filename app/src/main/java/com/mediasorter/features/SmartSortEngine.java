@@ -50,6 +50,12 @@ public class SmartSortEngine {
         public int generation;
         public boolean slowedDown;
         public boolean arranged;
+        public boolean lowMemoryDevice;
+        public boolean incrementalNeighbors;
+        public int featureCount;
+        public int missingFeatureCount;
+        public long featureBytes;
+        public long neighborComparisons;
     }
 
     private static class Features {
@@ -66,6 +72,7 @@ public class SmartSortEngine {
         final int[] indexes;
         final float[] distances;
         final String[] paths;
+        long comparisons;
 
         NeighborTable(int fileCount, int neighbors) {
             k = neighbors;
@@ -116,6 +123,8 @@ public class SmartSortEngine {
     private volatile long lastActivity;
     private volatile int generation;
     private int consecutiveSlowPasses;
+    private boolean skipDiversityOrdering;
+    private boolean slowdownToastShown;
     private long sliceStarted;
     // Session-local incremental neighbour snapshot. Paths are references to
     // MediaFile strings; distances and indexes remain primitive arrays.
@@ -125,6 +134,7 @@ public class SmartSortEngine {
     private float[] previousNeighborDistances;
     private Set<String> previousLabeledPaths = new HashSet<String>();
     private Map<String, String> previousFileVersions = new HashMap<String, String>();
+    private boolean lastNeighborSnapshotReused;
 
     public SmartSortEngine(Context context, Handler main, Listener resultListener) {
         prefs = context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
@@ -205,6 +215,7 @@ public class SmartSortEngine {
         previousNeighborDistances = null;
         previousLabeledPaths.clear();
         previousFileVersions.clear();
+        lastNeighborSnapshotReused = false;
     }
 
     public void close() {
@@ -221,6 +232,8 @@ public class SmartSortEngine {
         sliceStarted = SystemClock.uptimeMillis();
         Result result = new Result();
         result.generation = requestGeneration;
+        result.lowMemoryDevice = lowMemory;
+        result.featureBytes = files.size() * 9L;
         ArrayList<Integer> labeled = new ArrayList<Integer>();
         ArrayList<Integer> unlabeled = new ArrayList<Integer>();
         boolean[] labeledMask = new boolean[files.size()];
@@ -245,8 +258,12 @@ public class SmartSortEngine {
 
         Features features = buildFeatures(files, requestGeneration);
         if (features == null) return null;
+        result.featureCount = files.size();
+        for (boolean present : features.hashPresent) if (!present) result.missingFeatureCount++;
         NeighborTable neighbors = buildNeighborTable(files, labeled, unlabeled, features,
                 requestGeneration);
+        result.neighborComparisons = neighbors == null ? 0L : neighbors.comparisons;
+        result.incrementalNeighbors = lastNeighborSnapshotReused;
         if (neighbors == null) return null;
 
         final String orderMode = prefs.getString("smart_order_mode", "auto");
@@ -284,7 +301,7 @@ public class SmartSortEngine {
                     requestGeneration);
         } else {
             List<Prediction> ordered = predictions;
-            if (labeled.size() < minLabeled) {
+            if (labeled.size() < minLabeled && !skipDiversityOrdering) {
                 ordered = farthestFirst(predictions, files, labeled, features, requestGeneration);
             } else {
                 Collections.sort(ordered, uncertaintyComparator());
@@ -310,7 +327,9 @@ public class SmartSortEngine {
         if (consecutiveSlowPasses >= 3) {
             int current = Math.max(1, prefs.getInt("smart_k_neighbors", 5));
             prefs.edit().putInt("smart_k_neighbors", Math.max(1, current / 2)).apply();
-            result.slowedDown = true;
+            result.slowedDown = !slowdownToastShown;
+            slowdownToastShown = true;
+            skipDiversityOrdering = true;
             consecutiveSlowPasses = 0;
         }
         return result;
@@ -431,6 +450,7 @@ public class SmartSortEngine {
             if (files.get(i) != null) currentIndexes.put(files.get(i).getPath(), i);
         }
         boolean reusable = canReuseNeighborSnapshot(files, currentIndexes, k);
+        lastNeighborSnapshotReused = reusable;
         Set<String> currentLabeledPaths = new HashSet<String>();
         for (Integer index : labeled) currentLabeledPaths.add(files.get(index).getPath());
         Set<String> newlyLabeled = new HashSet<String>(currentLabeledPaths);
@@ -467,6 +487,7 @@ public class SmartSortEngine {
                 List<Integer> candidates = candidateIndexes(files, labeled, targetIndex,
                         features, maxPool);
                 for (Integer candidateIndex : candidates) {
+                    table.comparisons++;
                     float value = distance(files.get(targetIndex), targetIndex,
                             files.get(candidateIndex), candidateIndex, features);
                     insertNeighbor(table, targetIndex, candidateIndex, value);
@@ -477,6 +498,7 @@ public class SmartSortEngine {
                 for (String path : newlyLabeled) {
                     Integer candidateIndex = currentIndexes.get(path);
                     if (candidateIndex == null || candidateIndex == targetIndex) continue;
+                    table.comparisons++;
                     float value = distance(files.get(targetIndex), targetIndex,
                             files.get(candidateIndex), candidateIndex, features);
                     insertNeighbor(table, targetIndex, candidateIndex, value);

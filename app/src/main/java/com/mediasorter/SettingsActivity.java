@@ -669,6 +669,11 @@ public class SettingsActivity extends Activity {
                 new OnNumericChangeListener() {
                     @Override public void onChange(int value) { saveInt("surprise_w_flagged", value); }
                 }));
+        root.addView(makeNumericInputRow("Uncertain Smart weight (1-20):",
+                settingsPrefs.getInt("surprise_w_uncertain", 2), 1, 20,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("surprise_w_uncertain", value); }
+                }));
         root.addView(makeCheckBoxRow("Volume navigation acceleration",
                 settingsPrefs.getBoolean("nav_accel_enabled", false), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("nav_accel_enabled", value); }

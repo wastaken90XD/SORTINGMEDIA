@@ -2353,6 +2353,12 @@ public class MainActivity extends Activity
                 result.add(group);
             }
         }
+        java.util.Collections.sort(result, new java.util.Comparator<Group>() {
+            @Override public int compare(Group left, Group right) {
+                int count = Integer.compare(right.getCount(), left.getCount());
+                return count != 0 ? count : left.getLabel().compareToIgnoreCase(right.getLabel());
+            }
+        });
         return result;
     }
 
@@ -2758,6 +2764,7 @@ public class MainActivity extends Activity
                     && !primary.equals(file.getTags().isEmpty() ? "" : file.getTags().get(0))) continue;
             if (!file.hasTag(tag)) {
                 tagManager.applyTag(file, tag);
+                maybeAutoRetirePile(file, tag);
                 if (smartResult != null) smartResult.suggestions.remove(file.getPath());
                 count++;
             }
@@ -2846,6 +2853,14 @@ public class MainActivity extends Activity
         return false;
     }
 
+    private boolean isAllDigits(String value) {
+        if (value == null || value.isEmpty()) return false;
+        for (int i = 0; i < value.length(); i++) {
+            if (!Character.isDigit(value.charAt(i))) return false;
+        }
+        return true;
+    }
+
     /** A child pile named parent_1, parent_2, ... is recognized automatically. */
     private boolean isDirectChildPile(String value, String parent) {
         if (value == null || parent == null || parent.isEmpty()) return false;
@@ -2905,12 +2920,20 @@ public class MainActivity extends Activity
                         try { count = Integer.parseInt(input.getText().toString().trim()); }
                         catch (Exception ignored) { count = 2; }
                         count = Math.max(2, Math.min(10, count));
-                        String format = getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                                .getString("smart_pile_child_format", "{parent}_{n}");
+                        android.content.SharedPreferences pilePrefs = getSharedPreferences(
+                                "settings_prefs", MODE_PRIVATE);
+                        String format = pilePrefs.getString("smart_pile_child_format", "{parent}_{n}");
+                        boolean reuse = "reuse".equals(pilePrefs.getString(
+                                "smart_pile_split_naming", "child"));
+                        Set<String> existing = new java.util.HashSet<String>();
+                        for (Tag tag : tagManager.getAllTags()) existing.add(tag.getName());
                         for (int i = 1; i <= count; i++) {
                             String child = format.replace("{parent}", parent)
                                     .replace("{n}", String.valueOf(i));
-                            tagManager.createTag(child);
+                            if (!reuse || !existing.contains(child)) {
+                                tagManager.createTag(child);
+                                existing.add(child);
+                            }
                         }
                         getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
                                 .putString("smart_active_pile", parent)
@@ -2965,12 +2988,20 @@ public class MainActivity extends Activity
         android.content.SharedPreferences prefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
         String patterns = prefs.getString("smart_pile_tag_patterns", "");
         java.util.LinkedHashSet<String> piles = new java.util.LinkedHashSet<String>();
+        java.util.HashSet<String> allTagNames = new java.util.HashSet<String>();
+        for (MediaFile file : snapshot) if (file != null) allTagNames.addAll(file.getTags());
         String active = activeSmartPile();
         if (!active.isEmpty()) piles.add(active);
         for (MediaFile file : snapshot) {
             if (file == null) continue;
             for (String tag : file.getTags()) {
                 if (matchesPilePattern(tag, patterns)) piles.add(tag);
+                int marker = tag == null ? -1 : tag.lastIndexOf('_');
+                if (marker > 0 && marker + 1 < tag.length()
+                        && isAllDigits(tag.substring(marker + 1))) {
+                    String parent = tag.substring(0, marker);
+                    if (allTagNames.contains(parent)) piles.add(parent);
+                }
             }
         }
         for (String pile : piles) {
@@ -3101,10 +3132,22 @@ public class MainActivity extends Activity
         if (file != null && !recent.isEmpty()) tagManager.removeTag(file, recent.get(0).getName());
     }
 
+    private void maybeAutoRetirePile(MediaFile file, String appliedTag) {
+        if (file == null || appliedTag == null || appliedTag.isEmpty()) return;
+        android.content.SharedPreferences prefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        if (!prefs.getBoolean("smart_pile_autoretire", false)) return;
+        String pile = prefs.getString("smart_active_pile", "");
+        if (pile.isEmpty() || !file.hasTag(pile)) pile = findPileTag(file);
+        if (!pile.isEmpty() && !pile.equals(appliedTag) && hasSortedBeyondPile(file, pile)) {
+            tagManager.removeTag(file, pile);
+        }
+    }
+
     private void applyQuickTagToCurrent(String tag) {
         if (currentIndex < 0 || currentIndex >= fullList.size()) return;
         MediaFile file = fullList.get(currentIndex);
         tagManager.applyOrUndo(file, tag);
+        maybeAutoRetirePile(file, tag);
         mediaAdapter.updateFileTags(file);
         if (galleryAdapter != null) galleryAdapter.notifyDataSetChanged();
         refreshSidePanel();
@@ -3400,13 +3443,7 @@ public class MainActivity extends Activity
 
         if (applied) tagManager.applyTag(file, tagName);
         else         tagManager.removeTag(file, tagName);
-        if (applied && getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                .getBoolean("smart_pile_autoretire", false)) {
-            String pile = activeSmartPile();
-            if (!pile.isEmpty() && !pile.equals(tagName) && hasSortedBeyondPile(file, pile)) {
-                tagManager.removeTag(file, pile);
-            }
-        }
+        if (applied) maybeAutoRetirePile(file, tagName);
 
         fullList.set(currentIndex, file);
         // Partial update — only rebind tags text, skip thumbnail reload
@@ -3632,7 +3669,7 @@ public class MainActivity extends Activity
         listView.setBackgroundColor(0xFF161616); // match background color of dark theme
         listView.setDivider(new android.graphics.drawable.ColorDrawable(0xFF2A2A3E));
         listView.setDividerHeight((int) (1 * getResources().getDisplayMetrics().density));
-        final QuickTagListAdapter tagListAdapter = new QuickTagListAdapter(items);
+        final QuickTagListAdapter tagListAdapter = new QuickTagListAdapter(items, selectedFiles);
         listView.setAdapter(tagListAdapter);
 
         LinearLayout batchTagContent = new LinearLayout(this);
@@ -3681,8 +3718,10 @@ public class MainActivity extends Activity
                                 for (QuickTagItem item : items) {
                                     if (item.currentType == item.initialType) continue;
                                     for (MediaFile file : executionFiles) {
-                                        if (item.currentType == 1) tagManager.applyTag(file, item.name);
-                                        else if (item.currentType == 0) tagManager.removeTag(file, item.name);
+                                        if (item.currentType == 1) {
+                                            tagManager.applyTag(file, item.name);
+                                            maybeAutoRetirePile(file, item.name);
+                                        } else if (item.currentType == 0) tagManager.removeTag(file, item.name);
                                     }
                                 }
                                 final int missing = skipped[0];
@@ -3729,6 +3768,7 @@ public class MainActivity extends Activity
                 tagManager.createTag(generated);
                 for (MediaFile file : executionFiles) {
                     tagManager.applyTag(file, generated);
+                    maybeAutoRetirePile(file, generated);
                     mediaAdapter.updateFileTags(file);
                 }
                 if (tagAdapter != null) tagAdapter.setTags(getOrderedTagChoices(getTagMenuTargets()));
@@ -5447,7 +5487,7 @@ private Spinner makeSpinner(String[] options) {
         listView.setBackgroundColor(0xFF161616); // match background color of dark theme
         listView.setDivider(new android.graphics.drawable.ColorDrawable(0xFF2A2A3E));
         listView.setDividerHeight((int) (1 * getResources().getDisplayMetrics().density));
-        final QuickTagListAdapter tagListAdapter = new QuickTagListAdapter(items);
+        final QuickTagListAdapter tagListAdapter = new QuickTagListAdapter(items, targets);
         listView.setAdapter(tagListAdapter);
         LinearLayout quickTagContent = new LinearLayout(this);
         quickTagContent.setOrientation(LinearLayout.VERTICAL);
@@ -8243,10 +8283,17 @@ private Spinner makeSpinner(String[] options) {
     private class QuickTagListAdapter extends android.widget.BaseAdapter {
         private final List<QuickTagItem> allItems;
         private final List<QuickTagItem> visibleItems = new ArrayList<QuickTagItem>();
+        private final List<MediaFile> suggestionTargets;
         private final android.view.LayoutInflater inflater;
 
         QuickTagListAdapter(List<QuickTagItem> items) {
+            this(items, null);
+        }
+
+        QuickTagListAdapter(List<QuickTagItem> items, List<MediaFile> targets) {
             this.allItems = items;
+            this.suggestionTargets = targets == null
+                    ? new ArrayList<MediaFile>() : new ArrayList<MediaFile>(targets);
             this.visibleItems.addAll(items);
             this.inflater = android.view.LayoutInflater.from(MainActivity.this);
         }
@@ -8314,9 +8361,10 @@ private Spinner makeSpinner(String[] options) {
                 @Override
                 public void onClick(android.view.View v) {
                     if (item.suggested) {
-                        for (MediaFile file : selectedFiles) {
+                        for (MediaFile file : suggestionTargets) {
                             if (!file.hasTag(item.name)) {
                                 tagManager.applyTag(file, item.name);
+                                maybeAutoRetirePile(file, item.name);
                                 mediaAdapter.updateFileTags(file);
                             }
                         }
@@ -8325,7 +8373,7 @@ private Spinner makeSpinner(String[] options) {
                         }
                         item.currentType = 1;
                         item.suggested = false;
-                        syncUiAfterTagging(selectedFiles);
+                        syncUiAfterTagging(suggestionTargets);
                         refreshTagBar();
                         notifyDataSetChanged();
                         return;
