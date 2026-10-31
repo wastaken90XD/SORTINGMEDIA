@@ -56,6 +56,8 @@ public class SmartSortEngine {
         public int missingFeatureCount;
         public long featureBytes;
         public long neighborComparisons;
+        public int predictionsReused;
+        public int predictionsRecomputed;
     }
 
     private static class Features {
@@ -133,6 +135,11 @@ public class SmartSortEngine {
     private float[] previousNeighborDistances;
     private Set<String> previousLabeledPaths = new HashSet<String>();
     private Map<String, String> previousFileVersions = new HashMap<String, String>();
+    private Map<String, Integer> previousTagFingerprints = new HashMap<String, Integer>();
+    private Map<String, Prediction> previousPredictions = new HashMap<String, Prediction>();
+    private Map<String, Long> previousPredictionNeighbors = new HashMap<String, Long>();
+    private Map<String, String> previousPredictionVersions = new HashMap<String, String>();
+    private int previousPredictionConfig;
     private boolean lastNeighborSnapshotReused;
 
     public SmartSortEngine(Context context, Handler main, Listener resultListener) {
@@ -219,6 +226,11 @@ public class SmartSortEngine {
         previousNeighborDistances = null;
         previousLabeledPaths.clear();
         previousFileVersions.clear();
+        previousTagFingerprints.clear();
+        previousPredictions.clear();
+        previousPredictionNeighbors.clear();
+        previousPredictionVersions.clear();
+        previousPredictionConfig = 0;
         lastNeighborSnapshotReused = false;
     }
 
@@ -241,6 +253,7 @@ public class SmartSortEngine {
         ArrayList<Integer> labeled = new ArrayList<Integer>();
         ArrayList<Integer> unlabeled = new ArrayList<Integer>();
         boolean[] labeledMask = new boolean[files.size()];
+        Map<String, Integer> currentTagFingerprints = new HashMap<String, Integer>();
         Pattern ignore = compileIgnore();
         String activePile = prefs.getString("smart_active_pile", "");
         Pattern pilePatterns = compilePatterns(prefs.getString("smart_pile_tag_patterns", ""));
@@ -250,6 +263,7 @@ public class SmartSortEngine {
             checkpoint(requestGeneration);
             MediaFile file = files.get(i);
             if (file == null) continue;
+            currentTagFingerprints.put(file.getPath(), tagFingerprint(file));
             if (scopePile && !file.hasTag(activePile)) continue;
             if (isLabeled(file, ignore, activePile, pilePatterns)) {
                 labeled.add(i);
@@ -274,16 +288,27 @@ public class SmartSortEngine {
         final float threshold = Math.max(.30f,
                 Math.min(.95f, prefs.getInt("smart_suggest_threshold", 60) / 100f));
         final int minLabeled = Math.max(1, prefs.getInt("smart_min_labeled", 5));
+        final int predictionConfig = predictionConfig();
         ArrayList<Prediction> predictions = new ArrayList<Prediction>();
         Map<String, Prediction> byPath = new HashMap<String, Prediction>();
+        Map<String, Prediction> currentPredictions = new HashMap<String, Prediction>();
         for (Integer index : unlabeled) {
             checkpoint(requestGeneration);
             MediaFile target = files.get(index);
-            Prediction prediction = predict(target, index, files, neighbors, features,
-                    ignore, activePile, pilePatterns);
+            Prediction prediction = reusePrediction(target, index, files, neighbors,
+                    currentTagFingerprints, predictionConfig);
+            if (prediction == null) {
+                prediction = predict(target, index, files, neighbors, features,
+                        ignore, activePile, pilePatterns);
+                result.predictionsRecomputed++;
+            } else {
+                result.predictionsReused++;
+            }
             predictions.add(prediction);
+            currentPredictions.put(prediction.path, prediction);
             byPath.put(prediction.path, prediction);
             result.confidence.put(target.getPath(), prediction.confidence);
+            prediction.suggested = false;
             int occurrences = prediction.tag == null ? 0
                     : countLabeledTag(prediction.tag, files, labeled, ignore, activePile, pilePatterns);
             float localThreshold = occurrences > 0 && occurrences <= 3
@@ -324,6 +349,8 @@ public class SmartSortEngine {
             for (Integer index : labeledOrder) result.ranks.put(files.get(index).getPath(), rank++);
         }
 
+        rememberPredictionSnapshot(currentPredictions, currentTagFingerprints,
+                predictionConfig, files, neighbors);
         result.durationMs = SystemClock.uptimeMillis() - started;
         int budget = Math.max(200, prefs.getInt("smart_pass_budget_ms", 1500));
         if (result.durationMs > budget) consecutiveSlowPasses++;
@@ -619,6 +646,103 @@ public class SmartSortEngine {
         if (table.indexes[position] < 0 || distance < table.distances[position]) {
             table.indexes[position] = candidateIndex;
             table.distances[position] = distance;
+        }
+    }
+
+    private int predictionConfig() {
+        String value = prefs.getInt("smart_k_neighbors", 5) + "|"
+                + prefs.getInt("smart_w_hash", 35) + "|"
+                + prefs.getInt("smart_w_folder", 15) + "|"
+                + prefs.getInt("smart_w_name", 15) + "|"
+                + prefs.getInt("smart_w_date", 15) + "|"
+                + prefs.getInt("smart_w_color", 10) + "|"
+                + prefs.getInt("smart_w_shape", 10) + "|"
+                + prefs.getInt("smart_date_tau_hours", 24) + "|"
+                + prefs.getInt("smart_suggest_threshold", 60) + "|"
+                + prefs.getString("smart_ignore_tag_patterns", "link_*,*_seq_*") + "|"
+                + prefs.getBoolean("smart_use_video_frames", false) + "|"
+                + prefs.getString("smart_active_pile", "") + "|"
+                + prefs.getString("smart_pile_mode", "scope") + "|"
+                + prefs.getString("smart_pile_tag_patterns", "");
+        return value.hashCode();
+    }
+
+    private int tagFingerprint(MediaFile file) {
+        int result = 1;
+        if (file != null && file.getTags() != null) {
+            for (String tag : file.getTags()) result = 31 * result
+                    + (tag == null ? 0 : tag.hashCode());
+        }
+        return result;
+    }
+
+    private long neighborSignature(NeighborTable table, int targetIndex, List<MediaFile> files) {
+        long result = 1125899906842597L;
+        int offset = table.offset(targetIndex);
+        for (int slot = 0; slot < table.k; slot++) {
+            int neighbor = table.indexes[offset + slot];
+            result = 31L * result + (neighbor < 0 ? 0L : files.get(neighbor).getPath().hashCode());
+            result = 31L * result + Float.floatToIntBits(table.distances[offset + slot]);
+        }
+        return result;
+    }
+
+    private Prediction copyPrediction(Prediction source) {
+        if (source == null) return null;
+        Prediction copy = new Prediction();
+        copy.path = source.path;
+        copy.tag = source.tag;
+        copy.confidence = source.confidence;
+        copy.index = source.index;
+        copy.suggested = source.suggested;
+        return copy;
+    }
+
+    private Prediction reusePrediction(MediaFile target, int targetIndex, List<MediaFile> files,
+                                       NeighborTable table, Map<String, Integer> currentTags,
+                                       int config) {
+        if (config != previousPredictionConfig || target == null) return null;
+        Prediction previous = previousPredictions.get(target.getPath());
+        if (previous == null) return null;
+        String oldVersion = previousPredictionVersions.get(target.getPath());
+        if (oldVersion == null || !oldVersion.equals(fileVersion(target))) return null;
+        Long oldSignature = previousPredictionNeighbors.get(target.getPath());
+        if (oldSignature == null || oldSignature.longValue()
+                != neighborSignature(table, targetIndex, files)) return null;
+        int offset = table.offset(targetIndex);
+        for (int slot = 0; slot < table.k; slot++) {
+            int neighbor = table.indexes[offset + slot];
+            if (neighbor < 0) continue;
+            String path = files.get(neighbor).getPath();
+            Integer before = previousTagFingerprints.get(path);
+            Integer now = currentTags.get(path);
+            if (before == null || now == null || !before.equals(now)) return null;
+        }
+        return copyPrediction(previous);
+    }
+
+    private void rememberPredictionSnapshot(Map<String, Prediction> currentPredictions,
+                                             Map<String, Integer> currentTags, int config,
+                                             List<MediaFile> files, NeighborTable table) {
+        previousPredictions = new HashMap<String, Prediction>();
+        previousPredictionNeighbors = new HashMap<String, Long>();
+        for (Map.Entry<String, Prediction> entry : currentPredictions.entrySet()) {
+            previousPredictions.put(entry.getKey(), copyPrediction(entry.getValue()));
+        }
+        previousTagFingerprints = new HashMap<String, Integer>(currentTags);
+        previousPredictionVersions = new HashMap<String, String>();
+        previousPredictionConfig = config;
+        Map<String, Integer> indexes = new HashMap<String, Integer>();
+        for (int i = 0; i < files.size(); i++) {
+            if (files.get(i) != null) indexes.put(files.get(i).getPath(), i);
+        }
+        for (String path : currentPredictions.keySet()) {
+            Integer index = indexes.get(path);
+            if (index != null) {
+                previousPredictionVersions.put(path, fileVersion(files.get(index)));
+                previousPredictionNeighbors.put(path,
+                        neighborSignature(table, index, files));
+            }
         }
     }
 
