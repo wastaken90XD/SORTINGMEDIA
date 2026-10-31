@@ -793,7 +793,11 @@ public class RulesActivity extends Activity {
                 "{random_seq} — random sequence",
                 "{uuid} — unique identifier",
                 "{session_date} — session date",
-                "{run_index} — session run index"
+                "{run_index} — session run index",
+                "{smart_confidence} — Smart confidence",
+                "{smart_suggested_tag} — Smart suggested tag",
+                "{smart_group_pos} — Smart group position",
+                "{smart_group_total} — Smart group total"
         };
         new AlertDialog.Builder(this).setTitle("Variables").setItems(values,
                 new DialogInterface.OnClickListener() {

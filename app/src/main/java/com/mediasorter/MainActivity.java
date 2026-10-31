@@ -1128,6 +1128,8 @@ public class MainActivity extends Activity
                             @Override public void onSmartResult(
                             com.mediasorter.features.SmartSortEngine.Result result) {
                         smartResult = result;
+                        com.mediasorter.features.SmartState.publish(result.confidence,
+                                result.suggestions, result.generation);
                         sortManager.setSmartRanks(result.ranks);
                         if (result.slowedDown) Toast.makeText(MainActivity.this,
                                 "Smart sort slowed down to protect performance.",
@@ -2736,6 +2738,7 @@ public class MainActivity extends Activity
             if (smartSortEngine != null) {
                 smartSortEngine.setEnabled(enabled);
                 if (enabled) smartSortEngine.request(indexer.getFullIndex());
+                else com.mediasorter.features.SmartState.clear();
             }
             Toast.makeText(this, enabled ? "Smart Sort enabled" : "Smart Sort disabled",
                     Toast.LENGTH_SHORT).show();
