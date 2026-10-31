@@ -103,6 +103,22 @@ public class MainActivity extends Activity
         else mainHandler.post(galleryUpdate);
     }
 
+    private void notifyGalleryFileChanged(final String path) {
+        notifyGalleryFilesChanged(path == null ? null
+                : java.util.Collections.singletonList(path));
+    }
+
+    private void notifyGalleryFilesChanged(final List<String> paths) {
+        if (paths == null || paths.isEmpty()) return;
+        Runnable update = new Runnable() {
+            @Override public void run() {
+                if (galleryAdapter != null) galleryAdapter.notifyFilesChanged(paths);
+            }
+        };
+        if (galleryBrowser != null) galleryBrowser.post(update);
+        else mainHandler.post(update);
+    }
+
     private BatchRenameManager batchRenameManager = new BatchRenameManager();
     private MediaIndexer    indexer;
     private TagManager      tagManager;
@@ -1282,7 +1298,7 @@ public class MainActivity extends Activity
                         if (changed != null && mediaAdapter != null) {
                             mediaAdapter.updateFileStatus(changed);
                         }
-                        if (galleryAdapter != null) galleryAdapter.notifyDataSetChanged();
+                        notifyGalleryFileChanged(path);
                         if (previewManager != null && currentIndex >= 0
                                 && currentIndex < fullList.size()
                                 && fullList.get(currentIndex) != null
@@ -3172,7 +3188,7 @@ public class MainActivity extends Activity
         tagManager.applyOrUndo(file, tag);
         maybeAutoRetirePile(file, tag);
         mediaAdapter.updateFileTags(file);
-        if (galleryAdapter != null) galleryAdapter.notifyDataSetChanged();
+        notifyGalleryFileChanged(file.getPath());
         refreshSidePanel();
         refreshTagBar();
         updateProgress();
@@ -3434,7 +3450,7 @@ public class MainActivity extends Activity
         // no refresh or background callback is required for the row indicator.
         if (mediaAdapter != null) mediaAdapter.notifyFlagChanged(currentIndex);
         if (previewManager != null) previewManager.updateStatus(file);
-        if (galleryAdapter != null) galleryAdapter.notifyDataSetChanged();
+        notifyGalleryFileChanged(file.getPath());
         autoOrganizer.setActiveListIndex(currentIndex);
         autoOrganizer.applyToSingle(file);
         updateStatsBarAsync();
@@ -3471,7 +3487,7 @@ public class MainActivity extends Activity
         fullList.set(currentIndex, file);
         // Partial update — only rebind tags text, skip thumbnail reload
         mediaAdapter.updateFileTags(file);
-        if (galleryAdapter != null) galleryAdapter.notifyDataSetChanged();
+        notifyGalleryFileChanged(file.getPath());
         tagAdapter.setCurrentFile(file);
         tagAdapter.setTags(getOrderedTagChoices(getTagMenuTargets()));
         refreshSidePanel();
@@ -6326,7 +6342,11 @@ private Spinner makeSpinner(String[] options) {
                 }
             }
         }
-        if (galleryAdapter != null && galleryModeActive) galleryAdapter.notifyDataSetChanged();
+        if (galleryModeActive) {
+            List<String> changedPaths = new ArrayList<String>();
+            for (MediaFile file : targets) if (file != null) changedPaths.add(file.getPath());
+            notifyGalleryFilesChanged(changedPaths);
+        }
         updateProgress();
     }
 
@@ -8159,9 +8179,11 @@ private Spinner makeSpinner(String[] options) {
                     else if (status == FileStatus.Status.SKIPPED) fileStatus.setSkipped(file.getPath());
                 }
                 final int missing = skipped[0];
+                final List<String> changedPaths = new ArrayList<String>();
+                for (MediaFile file : selected) changedPaths.add(file.getPath());
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
-                        galleryAdapter.notifyDataSetChanged();
+                        notifyGalleryFilesChanged(changedPaths);
                         scheduleRefresh();
                         if (missing > 0) Toast.makeText(MainActivity.this,
                                 missing + " selected file(s) skipped", Toast.LENGTH_SHORT).show();

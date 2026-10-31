@@ -306,6 +306,28 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         notifyDataSetChanged();
     }
 
+    /** Rebind only the visible appearances of one file after a tag/status edit. */
+    public void notifyFileChanged(String path) {
+        notifyFilesChanged(path == null ? null : java.util.Collections.singletonList(path));
+    }
+
+    public void notifyFilesChanged(List<String> paths) {
+        if (paths == null || paths.isEmpty()) return;
+        Set<String> changed = new HashSet<String>(paths);
+        if (groupedMode) {
+            for (int i = 0; i < displayItems.size(); i++) {
+                DisplayItem item = displayItems.get(i);
+                if (!item.header && item.file != null && changed.contains(item.file.getPath())) {
+                    notifyItemChanged(i, "file_update");
+                }
+            }
+        } else {
+            for (int i = 0; i < files.size(); i++) {
+                if (changed.contains(files.get(i).getPath())) notifyItemChanged(i, "file_update");
+            }
+        }
+    }
+
     public boolean isGroupedMode() { return groupedMode; }
 
     public boolean isGroupHeaderPosition(int position) {
