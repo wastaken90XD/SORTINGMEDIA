@@ -112,7 +112,8 @@ public class SmartSortEngine {
     private final Listener listener;
     private final SmartFeatureCache featureCache;
     private final boolean lowMemory;
-    private final Set<String> featureFailures = new HashSet<String>();
+    private final Set<String> featureFailures =
+            Collections.synchronizedSet(new HashSet<String>());
     private final Random random = new Random();
     private volatile boolean enabled;
     private volatile boolean paused;
@@ -150,7 +151,11 @@ public class SmartSortEngine {
         enabled = value;
         if (!value) {
             cancel();
-            clearNeighborSnapshot();
+            featureFailures.clear();
+            featureCache.clearMemory();
+            consecutiveSlowPasses = 0;
+            skipDiversityOrdering = false;
+            slowdownToastShown = false;
             if (thread != null) thread.quitSafely();
             thread = null;
             worker = null;
@@ -219,7 +224,6 @@ public class SmartSortEngine {
     public void close() {
         closed = true;
         cancel();
-        clearNeighborSnapshot();
         if (thread != null) thread.quitSafely();
         worker = null;
         thread = null;

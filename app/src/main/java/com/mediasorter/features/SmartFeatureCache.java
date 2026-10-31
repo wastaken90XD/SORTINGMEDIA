@@ -69,6 +69,11 @@ public final class SmartFeatureCache {
         entries.put(path, value);
     }
 
+    /** Release the in-memory cache when Smart is disabled; the disk cache remains reusable. */
+    public synchronized void clearMemory() {
+        entries.clear();
+    }
+
     public synchronized void save() {
         File parent = file.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) return;
