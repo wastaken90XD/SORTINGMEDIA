@@ -9,6 +9,7 @@ import android.content.DialogInterface;
 import android.graphics.Rect;
 import com.mediasorter.features.RandomGenerator;
 import com.mediasorter.features.SurpriseEngine;
+import com.mediasorter.features.SmartSortEngine;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -92,6 +93,7 @@ public class MainActivity extends Activity
     private AutoOrganizer autoOrganizer;
     private com.mediasorter.features.SurpriseEngine surpriseEngine;
     private com.mediasorter.features.SmartSortEngine smartSortEngine;
+    private com.mediasorter.features.SmartSortEngine.Result smartResult;
     private SearchHistory searchHistory;
     private MediaAdapter mediaAdapter;
     private TagAdapter   tagAdapter;
@@ -1123,8 +1125,9 @@ public class MainActivity extends Activity
         surpriseEngine = new com.mediasorter.features.SurpriseEngine(this);
         smartSortEngine = new com.mediasorter.features.SmartSortEngine(this, mainHandler,
                 new com.mediasorter.features.SmartSortEngine.Listener() {
-                    @Override public void onSmartResult(
+                            @Override public void onSmartResult(
                             com.mediasorter.features.SmartSortEngine.Result result) {
+                        smartResult = result;
                         sortManager.setSmartRanks(result.ranks);
                         scheduleRefresh();
                     }
@@ -1848,7 +1851,12 @@ public class MainActivity extends Activity
                 counts.put(tag, old == null ? 1 : old + 1);
             }
         }
-        tagBarAdapter.setData(visible, counts, activeTagFilters);
+        Set<String> suggestedTags = new java.util.HashSet<String>();
+        if (smartResult != null && currentFile != null) {
+            String suggestion = smartResult.suggestions.get(currentFile.getPath());
+            if (suggestion != null && !suggestion.isEmpty()) suggestedTags.add(suggestion);
+        }
+        tagBarAdapter.setData(visible, counts, activeTagFilters, suggestedTags);
         if (tagBarContainer != null) {
             boolean show = getSharedPreferences("settings_prefs", MODE_PRIVATE)
                     .getBoolean("show_tag_bar", true);
@@ -2032,11 +2040,18 @@ public class MainActivity extends Activity
                     if (doneSnapshot.contains(file.getPath())) completed++;
                     if (flaggedSnapshot.contains(file.getPath())) flagged++;
                 }
-                final String text = "Total: " + totalSnapshot.size()
-                        + "  Filtered: " + countedPaths.size()
-                        + "  Tagged: " + tagged
-                        + "  Completed: " + completed
-                        + "  Flagged: " + flagged;
+                final SmartSortEngine.Result smartSnapshot = smartResult;
+                final boolean smartOn = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                        .getBoolean("smart_enabled", false);
+                final String text = smartOn && smartSnapshot != null
+                        ? "Smart: " + smartSnapshot.labeled + " tagged, "
+                                + smartSnapshot.suggested + " suggested, "
+                                + smartSnapshot.unsure + " unsure"
+                        : "Total: " + totalSnapshot.size()
+                                + "  Filtered: " + countedPaths.size()
+                                + "  Tagged: " + tagged
+                                + "  Completed: " + completed
+                                + "  Flagged: " + flagged;
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
                         if (request == statsSequence && statsBar != null) statsBar.setText(text);
@@ -2529,6 +2544,80 @@ public class MainActivity extends Activity
                 .getInt("explorer_width_percent", 40), show);
     }
 
+    private void acceptSmartSuggestionForCurrent() {
+        if (smartResult == null || currentFileReference() == null) return;
+        String tag = smartResult.suggestions.get(currentFileReference().getPath());
+        if (tag == null || tag.isEmpty()) {
+            Toast.makeText(this, "No Smart suggestion for this file", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        tagManager.applyTag(currentFileReference(), tag);
+        smartResult.suggestions.remove(currentFileReference().getPath());
+        refreshTagBar();
+        scheduleRefresh();
+    }
+
+    private void acceptSmartSuggestionForGroup() {
+        if (smartResult == null || currentFileReference() == null) return;
+        String tag = smartResult.suggestions.get(currentFileReference().getPath());
+        if (tag == null || tag.isEmpty()) return;
+        List<MediaFile> snapshot = indexer.getFullIndex();
+        String primary = currentFileReference().getTags().isEmpty() ? ""
+                : currentFileReference().getTags().get(0);
+        int count = 0;
+        for (MediaFile file : snapshot) {
+            if (primary.equals(file.getTags().isEmpty() ? "" : file.getTags().get(0))
+                    && !file.hasTag(tag)) {
+                tagManager.applyTag(file, tag);
+                count++;
+            }
+        }
+        Toast.makeText(this, "Accepted Smart suggestion for " + count + " files",
+                Toast.LENGTH_SHORT).show();
+        scheduleRefresh();
+    }
+
+    private void jumpToNextSmartUncertain() {
+        if (smartResult == null || smartResult.confidence.isEmpty()) return;
+        String path = null;
+        float value = Float.MAX_VALUE;
+        for (Map.Entry<String, Float> entry : smartResult.confidence.entrySet()) {
+            if (entry.getValue() < value) { value = entry.getValue(); path = entry.getKey(); }
+        }
+        int index = findIndexByPath(fullList, path);
+        if (index >= 0) loadFileAtIndex(index);
+    }
+
+    private void lockSmartOrder() {
+        if (smartResult == null || smartResult.ranks.isEmpty()) return;
+        final List<MediaFile> snapshot = indexer.getFullIndex();
+        final Map<String, Integer> ranks = new java.util.HashMap<String, Integer>(smartResult.ranks);
+        new Thread(new Runnable() {
+            @Override public void run() {
+                java.util.Collections.sort(snapshot, new java.util.Comparator<MediaFile>() {
+                    @Override public int compare(MediaFile left, MediaFile right) {
+                        Integer a = ranks.get(left.getPath());
+                        Integer b = ranks.get(right.getPath());
+                        return Integer.compare(a == null ? Integer.MAX_VALUE : a,
+                                b == null ? Integer.MAX_VALUE : b);
+                    }
+                });
+                indexer.updateManualOrder(snapshot);
+                getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
+                        .putString("sort_sequence", "[{\"id\":\"MANUAL_ORDER\",\"direction\":\"ASC\"}]")
+                        .apply();
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        if (smartSortEngine != null) smartSortEngine.setEnabled(false);
+                        Toast.makeText(MainActivity.this, "Smart order locked for "
+                                + snapshot.size() + " files", Toast.LENGTH_SHORT).show();
+                        scheduleRefresh();
+                    }
+                });
+            }
+        }).start();
+    }
+
     private String activeSmartPile() {
         return getSharedPreferences("settings_prefs", MODE_PRIVATE)
                 .getString("smart_active_pile", "");
@@ -2638,9 +2727,18 @@ public class MainActivity extends Activity
             Toast.makeText(this, paused ? "Smart Sort paused" : "Smart Sort resumed",
                     Toast.LENGTH_SHORT).show();
         } else if (action == GestureSettings.GestureAction.SMART_RERANK_NOW) {
+            if (smartSortEngine != null) smartSortEngine.request(indexer.getFullIndex());
             Toast.makeText(this, "Smart Sort rerank requested", Toast.LENGTH_SHORT).show();
+        } else if (action == GestureSettings.GestureAction.SMART_ACCEPT_SUGGESTIONS) {
+            acceptSmartSuggestionForCurrent();
+        } else if (action == GestureSettings.GestureAction.SMART_ACCEPT_GROUP) {
+            acceptSmartSuggestionForGroup();
+        } else if (action == GestureSettings.GestureAction.SMART_NEXT_UNCERTAIN) {
+            jumpToNextSmartUncertain();
+        } else if (action == GestureSettings.GestureAction.SMART_LOCK_ORDER) {
+            lockSmartOrder();
         } else {
-            Toast.makeText(this, "Smart Sort is not ready for this action", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Smart Sort action unavailable", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -3132,6 +3230,8 @@ public class MainActivity extends Activity
             }
             
             QuickTagItem item = new QuickTagItem(name, count, initialType);
+            item.suggested = smartResult != null && currentFile != null
+                    && name.equals(smartResult.suggestions.get(currentFile.getPath()));
             if (pendingStates != null && pendingStates.containsKey(name)) {
                 item.currentType = pendingStates.get(name);
             }
@@ -4945,6 +5045,8 @@ private Spinner makeSpinner(String[] options) {
             }
             
             QuickTagItem item = new QuickTagItem(name, count, initialType);
+            item.suggested = smartResult != null && currentFile != null
+                    && name.equals(smartResult.suggestions.get(currentFile.getPath()));
             if (pendingStates != null && pendingStates.containsKey(name)) {
                 item.currentType = pendingStates.get(name);
             }
@@ -7734,6 +7836,7 @@ private Spinner makeSpinner(String[] options) {
     private static class QuickTagItem {
         String name;
         int count;
+        boolean suggested;
         int initialType; // 0 = none, 1 = all, 2 = some (mixed)
         int currentType; // 0 = none, 1 = all, 2 = some (mixed)
 
@@ -7789,6 +7892,7 @@ private Spinner makeSpinner(String[] options) {
             android.widget.CheckBox tagCheck = convertView.findViewById(R.id.tagCheck);
 
             tagCount.setText(String.valueOf(item.count));
+            tagName.setTextColor(item.suggested ? 0xFFFFD54F : 0xFFFFFFFF);
 
             tagCheck.setOnCheckedChangeListener(null);
             if (item.currentType == 1) {

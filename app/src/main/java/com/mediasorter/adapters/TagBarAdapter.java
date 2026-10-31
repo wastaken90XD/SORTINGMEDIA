@@ -29,6 +29,7 @@ public class TagBarAdapter extends RecyclerView.Adapter<TagBarAdapter.ViewHolder
     private final List<Tag> tags = new ArrayList<>();
     private final Map<String, Integer> fileCounts = new HashMap<>();
     private final Set<String> active = new HashSet<>();
+    private final Set<String> suggested = new HashSet<>();
     private Listener listener;
     private int accent = 0xFFE94560;
 
@@ -40,12 +41,19 @@ public class TagBarAdapter extends RecyclerView.Adapter<TagBarAdapter.ViewHolder
 
     public void setData(List<Tag> values, Map<String, Integer> counts,
                         Set<String> activeTags) {
+        setData(values, counts, activeTags, null);
+    }
+
+    public void setData(List<Tag> values, Map<String, Integer> counts,
+                        Set<String> activeTags, Set<String> suggestedTags) {
         tags.clear();
         if (values != null) tags.addAll(values);
         fileCounts.clear();
         if (counts != null) fileCounts.putAll(counts);
         active.clear();
         if (activeTags != null) active.addAll(activeTags);
+        suggested.clear();
+        if (suggestedTags != null) suggested.addAll(suggestedTags);
         notifyDataSetChanged();
     }
 
@@ -87,9 +95,10 @@ public class TagBarAdapter extends RecyclerView.Adapter<TagBarAdapter.ViewHolder
         holder.count.setText(String.valueOf(count == null ? 0 : count));
         GradientDrawable background = new GradientDrawable();
         background.setCornerRadius(100f);
-        background.setColor(active.contains(name) ? accent : 0xFF2A2A3E);
+        boolean isSuggested = suggested.contains(name);
+        background.setColor(active.contains(name) ? accent : (isSuggested ? 0xFF6A5A20 : 0xFF2A2A3E));
         holder.itemView.setBackground(background);
-        holder.count.setTextColor(active.contains(name) ? Color.WHITE : accent);
+        holder.count.setTextColor(active.contains(name) ? Color.WHITE : (isSuggested ? 0xFFFFD54F : accent));
         holder.itemView.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
                 if (listener != null) listener.onTagClicked(name);

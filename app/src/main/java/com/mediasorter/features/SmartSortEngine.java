@@ -107,23 +107,31 @@ public class SmartSortEngine {
         result.labeled = labeled.size();
         int rank = 0;
         for (Integer index : labeled) result.ranks.put(files.get(index).getPath(), rank++);
-        float threshold = prefs.getInt("smart_suggest_threshold", 60) / 100f;
-        int chunk = Math.max(5, Math.min(50, prefs.getInt("smart_chunk_ms", 20)));
+        final float threshold = prefs.getInt("smart_suggest_threshold", 60) / 100f;
+        final int chunk = Math.max(5, Math.min(50, prefs.getInt("smart_chunk_ms", 20)));
+        ArrayList<Prediction> predictions = new ArrayList<Prediction>();
         for (Integer index : unlabeled) {
             if (requestGeneration != generation || closed) return null;
             waitForSlice(chunk);
             MediaFile target = files.get(index);
-            String suggested = suggest(target, files, labeled);
-            float confidence = suggested == null ? 0f : confidence(target, files, labeled);
-            result.confidence.put(target.getPath(), confidence);
-            if (suggested != null && confidence >= threshold) {
-                result.suggestions.put(target.getPath(), suggested);
+            Prediction prediction = predict(target, files, labeled);
+            predictions.add(prediction);
+            result.confidence.put(target.getPath(), prediction.confidence);
+            int occurrences = prediction.tag == null ? 0 : countLabeledTag(
+                    prediction.tag, files, labeled);
+            float localThreshold = occurrences > 0 && occurrences <= 3
+                    ? Math.max(.30f, threshold - .20f) : threshold;
+            if (prediction.tag != null && prediction.confidence >= localThreshold) {
+                result.suggestions.put(target.getPath(), prediction.tag);
                 result.suggested++;
             } else result.unsure++;
-            // Queue order: least confident unlabeled files first. A stable
-            // fallback rank keeps all files visible even before labels exist.
-            result.ranks.put(target.getPath(), rank++);
         }
+        java.util.Collections.sort(predictions, new java.util.Comparator<Prediction>() {
+            @Override public int compare(Prediction left, Prediction right) {
+                return Float.compare(left.confidence, right.confidence);
+            }
+        });
+        for (Prediction prediction : predictions) result.ranks.put(prediction.path, rank++);
         result.durationMs = SystemClock.uptimeMillis() - started;
         return result;
     }
@@ -160,23 +168,67 @@ public class SmartSortEngine {
         catch (Exception ignored) { return null; }
     }
 
-    private String suggest(MediaFile target, List<MediaFile> files, List<Integer> labeled) {
-        if (labeled.isEmpty()) return null;
-        float best = Float.MAX_VALUE;
-        MediaFile nearest = null;
+    private static class Prediction {
+        String path;
+        String tag;
+        float confidence;
+    }
+
+    private Prediction predict(MediaFile target, List<MediaFile> files, List<Integer> labeled) {
+        Prediction result = new Prediction();
+        result.path = target.getPath();
+        if (labeled.isEmpty()) return result;
+        ArrayList<Neighbor> neighbors = new ArrayList<Neighbor>();
         for (Integer index : labeled) {
             MediaFile candidate = files.get(index);
             float distance = distance(target, candidate);
-            if (distance < best) { best = distance; nearest = candidate; }
+            neighbors.add(new Neighbor(candidate, distance));
         }
-        if (nearest == null || nearest.getTags().isEmpty()) return null;
-        return nearest.getTags().get(0);
+        java.util.Collections.sort(neighbors, new java.util.Comparator<Neighbor>() {
+            @Override public int compare(Neighbor left, Neighbor right) {
+                return Float.compare(left.distance, right.distance);
+            }
+        });
+        int limit = Math.max(1, Math.min(15, prefs.getInt("smart_k_neighbors", 5)));
+        Map<String, Float> votes = new HashMap<String, Float>();
+        float total = 0f;
+        float nearest = neighbors.isEmpty() ? 1f : neighbors.get(0).distance;
+        for (int i = 0; i < neighbors.size() && i < limit; i++) {
+            Neighbor neighbor = neighbors.get(i);
+            float weight = 1f / (.05f + neighbor.distance);
+            Set<String> unique = new HashSet<String>();
+            for (String raw : neighbor.file.getTags()) {
+                String tag = raw == null ? "" : raw.trim();
+                if (tag.isEmpty() || !unique.add(tag)) continue;
+                Float old = votes.get(tag);
+                votes.put(tag, old == null ? weight : old + weight);
+                total += weight;
+            }
+        }
+        String bestTag = null;
+        float bestVote = 0f;
+        for (Map.Entry<String, Float> entry : votes.entrySet()) {
+            if (entry.getValue() > bestVote) {
+                bestVote = entry.getValue();
+                bestTag = entry.getKey();
+            }
+        }
+        result.tag = bestTag;
+        result.confidence = total <= 0f ? 0f
+                : (bestVote / total) * (1f - Math.min(1f, nearest));
+        return result;
     }
 
-    private float confidence(MediaFile target, List<MediaFile> files, List<Integer> labeled) {
-        float best = Float.MAX_VALUE;
-        for (Integer index : labeled) best = Math.min(best, distance(target, files.get(index)));
-        return best == Float.MAX_VALUE ? 0f : Math.max(0f, 1f - Math.min(1f, best));
+    private static class Neighbor {
+        final MediaFile file;
+        final float distance;
+        Neighbor(MediaFile value, float score) { file = value; distance = score; }
+    }
+
+    private int countLabeledTag(String tag, List<MediaFile> files, List<Integer> labeled) {
+        int count = 0;
+        for (Integer index : labeled) if (files.get(index).hasTag(tag)) count++;
+        return count;
     }
 
     private float distance(MediaFile a, MediaFile b) {
