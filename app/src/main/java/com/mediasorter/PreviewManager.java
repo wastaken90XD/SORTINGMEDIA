@@ -600,6 +600,15 @@ public class PreviewManager {
     // ── Load ──────────────────────────────────────────────────────────────────
 
     public void load(MediaFile file) {
+        loadInternal(file, 1920, 1080);
+    }
+
+    /** Latest-wins, smaller decode path for held volume-key navigation. */
+    public void loadFast(MediaFile file) {
+        loadInternal(file, 640, 480);
+    }
+
+    private void loadInternal(MediaFile file, int imageWidth, int imageHeight) {
         if (released || file == null) return;
         currentPath = file.getPath();
         stopMedia();
@@ -615,7 +624,7 @@ public class PreviewManager {
         }
 
         switch (file.getType()) {
-            case IMAGE: loadImage(file); break;
+            case IMAGE: loadImage(file, imageWidth, imageHeight); break;
             case VIDEO: loadVideo(file); break;
             default:    showUnsupported("Unsupported"); break;
         }
@@ -640,7 +649,7 @@ public class PreviewManager {
 
     // ── Image ─────────────────────────────────────────────────────────────────
 
-    private void loadImage(final MediaFile file) {
+    private void loadImage(final MediaFile file, final int requestWidth, final int requestHeight) {
         Bitmap thumb = thumbnailLoader != null
                 ? thumbnailLoader.getCachedThumbnail(file)
                 : null;
@@ -657,7 +666,7 @@ public class PreviewManager {
                 @Override
                 public void run() {
                     if (released) return;
-                    final Bitmap bmp = decodeSampled(path, 1920, 1080);
+                    final Bitmap bmp = decodeSampled(path, requestWidth, requestHeight);
 
                     mainHandler.post(new Runnable() {
                         @Override

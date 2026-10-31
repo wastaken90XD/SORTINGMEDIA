@@ -3539,7 +3539,7 @@ public class MainActivity extends Activity
         currentFile = fullList.get(absoluteIndex);
         if (mediaAdapter != null) mediaAdapter.setHighlightedPosition(absoluteIndex);
         if (previewManager != null) {
-            previewManager.load(currentFile);
+            previewManager.loadFast(currentFile);
             previewManager.setPosition(absoluteIndex + 1, fullList.size());
         }
         // Deliberately no tag-bar, stats, side-panel, or Smart recomputation.
