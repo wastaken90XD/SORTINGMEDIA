@@ -414,7 +414,7 @@ public final class SettingsExporter {
                 try {
                     Object value = gestures.get(key);
                     if (value instanceof String) {
-                        applyOneValue(gesturePrefs, key, value, result);
+                        applyOneValue(gesturePrefs, "gesture_prefs", key, value, result);
                         result.gesturesCount++;
                     }
                 } catch (Exception error) {
