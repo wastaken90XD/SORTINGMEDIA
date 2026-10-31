@@ -26,6 +26,20 @@
         android:visibility="gone"
         android:layout_marginEnd="4dp" />
 
+    <TextView
+        android:id="@+id/smartPosition"
+        android:layout_width="wrap_content"
+        android:layout_height="24dp"
+        android:gravity="center"
+        android:textColor="#FFFF80"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:background="#554A4320"
+        android:visibility="gone"
+        android:paddingStart="3dp"
+        android:paddingEnd="3dp"
+        android:layout_marginEnd="4dp" />
+
     <ImageView
         android:id="@+id/thumbnail"
         android:layout_width="56dp"

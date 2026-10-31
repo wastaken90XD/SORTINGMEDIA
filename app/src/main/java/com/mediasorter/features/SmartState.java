@@ -15,21 +15,21 @@ public final class SmartState {
     private SmartState() {}
 
     public static void publish(Map<String, Float> values, Map<String, String> tags, int pass) {
+        publish(values, tags, null, null, pass);
+    }
+
+    public static void publish(Map<String, Float> values, Map<String, String> tags,
+                               Map<String, Integer> positions,
+                               Map<String, Integer> totals, int pass) {
         synchronized (LOCK) {
             confidence = values == null ? new HashMap<String, Float>()
                     : new HashMap<String, Float>(values);
             suggestions = tags == null ? new HashMap<String, String>()
                     : new HashMap<String, String>(tags);
-            groupPositions.clear();
-            groupTotals.clear();
-            int total = values == null ? 0 : values.size();
-            if (values != null) {
-                int position = 1;
-                for (Map.Entry<String, Float> entry : values.entrySet()) {
-                    groupPositions.put(entry.getKey(), position++);
-                    groupTotals.put(entry.getKey(), total);
-                }
-            }
+            groupPositions = positions == null ? new HashMap<String, Integer>()
+                    : new HashMap<String, Integer>(positions);
+            groupTotals = totals == null ? new HashMap<String, Integer>()
+                    : new HashMap<String, Integer>(totals);
             generation = pass;
         }
     }

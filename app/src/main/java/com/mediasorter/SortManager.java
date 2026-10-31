@@ -334,6 +334,28 @@ public class SortManager {
         return "DESC".equalsIgnoreCase(direction) ? "DESC" : "ASC";
     }
 
+    /**
+     * Smart is an active view mode, not merely a saved sort criterion. This
+     * entry point lets MainActivity keep the user's ordinary sort sequence
+     * intact while Smart is enabled.
+     */
+    public void sortSmart(List<MediaFile> files) {
+        if (files == null || files.size() < 2) return;
+        Collections.sort(files, new Comparator<MediaFile>() {
+            @Override public int compare(MediaFile left, MediaFile right) {
+                Integer a = smartRanks.get(left.getPath());
+                Integer b = smartRanks.get(right.getPath());
+                int result = Integer.compare(a == null ? Integer.MAX_VALUE : a,
+                        b == null ? Integer.MAX_VALUE : b);
+                return result != 0 ? result : compareSmartNames(left, right);
+            }
+        });
+    }
+
+    private int compareSmartNames(MediaFile left, MediaFile right) {
+        return left.getName().compareToIgnoreCase(right.getName());
+    }
+
     public void sort(List<MediaFile> files) {
         if (files == null || files.size() < 2) return;
         List<SortCriterion> sequence = getSortSequence();

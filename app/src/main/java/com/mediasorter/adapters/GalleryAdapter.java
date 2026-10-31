@@ -45,21 +45,23 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         public final TextView tagBadge;
         public final TextView statusBadge;
         public final TextView sequenceBadge;
+        public final TextView smartPositionBadge;
         public final CheckBox checkBox;
         public final TextView groupHeader;
         public final boolean groupHeaderView;
 
         ViewHolder(FrameLayout cell, ImageView thumbnail, TextView filename,
                    TextView tagBadge, TextView statusBadge,
-                   TextView sequenceBadge, CheckBox checkBox) {
+                   TextView sequenceBadge, TextView smartPositionBadge,
+                   CheckBox checkBox) {
             this(cell, thumbnail, filename, tagBadge, statusBadge,
-                    sequenceBadge, checkBox, null, false);
+                    sequenceBadge, smartPositionBadge, checkBox, null, false);
         }
 
         ViewHolder(FrameLayout cell, ImageView thumbnail, TextView filename,
                    TextView tagBadge, TextView statusBadge,
-                   TextView sequenceBadge, CheckBox checkBox,
-                   TextView header, boolean isHeader) {
+                   TextView sequenceBadge, TextView smartPositionBadge,
+                   CheckBox checkBox, TextView header, boolean isHeader) {
             super(cell);
             this.cell = cell;
             this.thumbnail = thumbnail;
@@ -67,6 +69,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
             this.tagBadge = tagBadge;
             this.statusBadge = statusBadge;
             this.sequenceBadge = sequenceBadge;
+            this.smartPositionBadge = smartPositionBadge;
             this.checkBox = checkBox;
             this.groupHeader = header;
             this.groupHeaderView = isHeader;
@@ -92,6 +95,9 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     private boolean showTagBadge = true;
     private boolean showFlagBadge = true;
     private boolean showSequenceBadge = true;
+    private Map<String, Integer> smartPositions = new HashMap<String, Integer>();
+    private Map<String, Integer> smartTotals = new HashMap<String, Integer>();
+    private boolean showSmartPosition;
     private int spacingDp = 4;
     private int columns = 3;
 
@@ -150,6 +156,16 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     }
 
     public boolean isFastScrolling() { return fastScrolling; }
+
+    public void setSmartPositionData(Map<String, Integer> positions,
+                                     Map<String, Integer> totals, boolean show) {
+        smartPositions = positions == null ? new HashMap<String, Integer>()
+                : new HashMap<String, Integer>(positions);
+        smartTotals = totals == null ? new HashMap<String, Integer>()
+                : new HashMap<String, Integer>(totals);
+        showSmartPosition = show;
+        notifyDataSetChanged();
+    }
 
     public void reloadVisibleThumbnails(RecyclerView recyclerView) {
         if (recyclerView == null || fastScrolling) return;
@@ -517,7 +533,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
             headerCell.addView(header, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, dp(40)));
             return new ViewHolder(headerCell, null, null, null, null, null,
-                    null, header, true);
+                    null, null, header, true);
         }
         FrameLayout cell = new FrameLayout(context);
         cell.setFocusable(true);
@@ -565,6 +581,13 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         seqLp.gravity = Gravity.BOTTOM | Gravity.START;
         cell.addView(sequenceBadge, seqLp);
 
+        TextView smartPositionBadge = makeBadge();
+        smartPositionBadge.setTextColor(0xFFFFFF80);
+        FrameLayout.LayoutParams smartLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, dp(22));
+        smartLp.gravity = Gravity.BOTTOM | Gravity.END;
+        cell.addView(smartPositionBadge, smartLp);
+
         CheckBox checkBox = new CheckBox(context);
         checkBox.setButtonTintList(android.content.res.ColorStateList.valueOf(accentColor));
         FrameLayout.LayoutParams checkLp = new FrameLayout.LayoutParams(dp(40), dp(40));
@@ -572,7 +595,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         cell.addView(checkBox, checkLp);
 
         return new ViewHolder(cell, thumbnail, filename, tagBadge,
-                statusBadge, sequenceBadge, checkBox);
+                statusBadge, sequenceBadge, smartPositionBadge, checkBox);
     }
 
     private TextView makeBadge() {
@@ -613,8 +636,8 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
 
     private void bindGroupHeader(ViewHolder holder, DisplayItem item) {
         if (holder.groupHeader == null || item == null || item.group == null) return;
-        holder.groupHeader.setText(item.group.getLabel() + " ("
-                + item.group.getTotalCount() + ")");
+        holder.groupHeader.setText(item.group.getLabel() + " - "
+                + item.group.getTotalCount() + " files");
     }
 
     @Override
@@ -648,6 +671,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         holder.thumbnail.setLayoutParams(imageLp);
 
         bindBadges(holder, file);
+        bindSmartPosition(holder, file, item);
         bindSelection(holder, file, selectionKey);
         applySpacing(holder);
         applyGroupBorder(holder, file);
@@ -674,6 +698,31 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     private void applySpacing(ViewHolder holder) {
         int pad = dp(spacingDp);
         holder.cell.setPadding(pad, pad, pad, pad);
+    }
+
+    private void bindSmartPosition(ViewHolder holder, MediaFile file, DisplayItem item) {
+        if (holder.smartPositionBadge == null) return;
+        int position = 0;
+        int total = 0;
+        if (item != null && item.group != null) {
+            List<MediaFile> members = item.group.getFiles();
+            for (int i = 0; i < members.size(); i++) {
+                MediaFile member = members.get(i);
+                if (member != null && file.getPath().equals(member.getPath())) {
+                    position = item.group.getFileOffset() + i + 1;
+                    total = item.group.getTotalCount();
+                    break;
+                }
+            }
+        } else if (showSmartPosition) {
+            Integer value = smartPositions.get(file.getPath());
+            Integer count = smartTotals.get(file.getPath());
+            position = value == null ? 0 : value;
+            total = count == null ? 0 : count;
+        }
+        boolean visible = showSmartPosition && position > 0 && total > 0;
+        holder.smartPositionBadge.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (visible) holder.smartPositionBadge.setText(position + "/" + total);
     }
 
     private void bindBadges(ViewHolder holder, MediaFile file) {

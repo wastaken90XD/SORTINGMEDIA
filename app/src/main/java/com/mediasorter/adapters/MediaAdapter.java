@@ -55,6 +55,9 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     private int                         absoluteWindowStart;
     private boolean                    selectMode   = false;
     private final LinkedHashSet<String> selected     = new LinkedHashSet<>();
+    private java.util.Map<String, Integer> smartPositions = new java.util.HashMap<String, Integer>();
+    private java.util.Map<String, Integer> smartTotals = new java.util.HashMap<String, Integer>();
+    private boolean showSmartPosition;
 
     private static final int TYPE_FILE = 0;
     private static final int TYPE_GROUP_HEADER = 1;
@@ -85,6 +88,18 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     public void setAbsoluteWindowStart(int start) { absoluteWindowStart = Math.max(0, start); }
     public void setHighlightProvider(HighlightProvider provider) {
         this.highlightProvider = provider;
+    }
+
+    /** Smart positions are derived during bind; no position is stored on MediaFile. */
+    public void setSmartPositionData(java.util.Map<String, Integer> positions,
+                                     java.util.Map<String, Integer> totals,
+                                     boolean show) {
+        smartPositions = positions == null ? new java.util.HashMap<String, Integer>()
+                : new java.util.HashMap<String, Integer>(positions);
+        smartTotals = totals == null ? new java.util.HashMap<String, Integer>()
+                : new java.util.HashMap<String, Integer>(totals);
+        showSmartPosition = show;
+        if (getItemCount() > 0) notifyItemRangeChanged(0, getItemCount(), "smart_position");
     }
 
     /** Rebind only the current-row visual state after navigation. */
@@ -543,17 +558,20 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
                     bindSelectionVisual(holder, file, key);
                     bindFlagIndicator(holder, file, key);
                     handled = true;
+                } else if ("smart_position".equals(payload)) {
+                    bindSmartPosition(holder, file, item);
+                    handled = true;
                 }
             }
             if (handled) return;
         }
-        bindFileViewHolder(holder, file, key);
+        bindFileViewHolder(holder, file, key, item);
     }
 
     private void bindGroupHeader(ViewHolder holder, DisplayItem item, final int position) {
         TextView header = (TextView) holder.itemView;
         final Group group = item.group;
-        header.setText(group.getLabel() + " (" + group.getTotalCount() + ")");
+        header.setText(group.getLabel() + " - " + group.getTotalCount() + " files");
         header.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) { toggleGroup(position); }
         });
@@ -567,16 +585,18 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
             return;
         }
         MediaFile file = item == null ? files.get(position) : item.file;
-        bindFileViewHolder(holder, file, item == null ? file.getPath() : appearanceKey(item));
+        bindFileViewHolder(holder, file, item == null ? file.getPath() : appearanceKey(item), item);
     }
 
     private void bindFileViewHolder(@NonNull final ViewHolder holder,
-                                    final MediaFile file, final String selectionKey) {
+                                    final MediaFile file, final String selectionKey,
+                                    final DisplayItem displayItem) {
         holder.fileName.setText(file.getName());
         holder.fileDetails.setText(
                 file.getFormattedSize()
                         + "  •  " + file.getType().name().toLowerCase(java.util.Locale.US));
         bindTags(holder, file);
+        bindSmartPosition(holder, file, displayItem);
         bindSelectionVisual(holder, file, selectionKey);
         bindFlagIndicator(holder, file, selectionKey);
         loader.load(file, holder.thumbnail);
@@ -671,6 +691,32 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         }
     }
 
+    private void bindSmartPosition(ViewHolder holder, MediaFile file, DisplayItem displayItem) {
+        if (holder.smartPosition == null) return;
+        int position = 0;
+        int total = 0;
+        if (displayItem != null && displayItem.group != null) {
+            List<MediaFile> members = displayItem.group.getFiles();
+            for (int i = 0; i < members.size(); i++) {
+                MediaFile member = members.get(i);
+                if (member != null && file.getPath().equals(member.getPath())) {
+                    position = displayItem.group.getFileOffset() + i + 1;
+                    total = displayItem.group.getTotalCount();
+                    break;
+                }
+            }
+        } else if (showSmartPosition) {
+            Integer value = smartPositions.get(file.getPath());
+            Integer count = smartTotals.get(file.getPath());
+            position = value == null ? 0 : value;
+            total = count == null ? 0 : count;
+        }
+        boolean visible = (displayItem != null && displayItem.group != null
+                ? showSmartPosition : showSmartPosition) && position > 0 && total > 0;
+        holder.smartPosition.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (visible) holder.smartPosition.setText(position + "/" + total);
+    }
+
     /** Extracted so partial-update can call just this. */
     private void bindTags(ViewHolder holder, MediaFile file) {
         List<String> tags = new ArrayList<>();
@@ -726,6 +772,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         TextView  fileTags;
         CheckBox  checkBox;
         TextView  selectionOrder;
+        TextView  smartPosition;
         boolean groupHeader;
 
         ViewHolder(View v) { this(v, false); }
@@ -740,6 +787,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
                 fileTags       = v.findViewById(R.id.fileTags);
                 checkBox       = v.findViewById(R.id.fileCheckbox);
                 selectionOrder = v.findViewById(R.id.selectionOrder);
+                smartPosition  = v.findViewById(R.id.smartPosition);
             }
         }
     }

@@ -93,7 +93,13 @@ public class MainActivity extends Activity
     private AutoOrganizer autoOrganizer;
     private com.mediasorter.features.SurpriseEngine surpriseEngine;
     private com.mediasorter.features.SmartSortEngine smartSortEngine;
-    private com.mediasorter.features.SmartSortEngine.Result smartResult;
+    private volatile com.mediasorter.features.SmartSortEngine.Result smartResult;
+    private volatile List<Group> smartGroups = new ArrayList<Group>();
+    private final java.util.Set<String> dismissedSmartSuggestions =
+            new java.util.HashSet<String>();
+    private Map<String, List<String>> smartPileUndo;
+    private String smartOrderPreviousSequence;
+    private boolean smartOrderPreviousEnabled;
     private SearchHistory searchHistory;
     private MediaAdapter mediaAdapter;
     private TagAdapter   tagAdapter;
@@ -125,6 +131,7 @@ public class MainActivity extends Activity
     private int tagGroupPageSize;
 
     private boolean refreshPending = false;
+    private Runnable smartRerankRunnable;
 
     private EditText searchBar;
     private TextView progressLabel;
@@ -186,6 +193,8 @@ public class MainActivity extends Activity
     private Runnable comboTimeoutRunnable;
     private boolean volumeUpHeld;
     private boolean volumeDownHeld;
+    private long volumeUpStart;
+    private long volumeDownStart;
     private boolean volumeUpLongSent;
     private boolean volumeDownLongSent;
     private Runnable volumeUpLongRunnable;
@@ -224,6 +233,7 @@ public class MainActivity extends Activity
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event != null && smartSortEngine != null) smartSortEngine.noteActivity();
         if (event != null && event.getAction() == MotionEvent.ACTION_DOWN) {
             View focused = getCurrentFocus();
             if (focused instanceof EditText) {
@@ -247,12 +257,18 @@ public class MainActivity extends Activity
     protected void onResume() {
         super.onResume();
         if (smartSortEngine != null) {
-            smartSortEngine.setEnabled(getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                    .getBoolean("smart_enabled", false));
+            boolean smartEnabled = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                    .getBoolean("smart_enabled", false);
+            smartSortEngine.setEnabled(smartEnabled);
             smartSortEngine.onResume();
-            if (getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                    .getBoolean("smart_enabled", false)) {
+            if (smartEnabled) {
                 smartSortEngine.request(indexer.getFullIndex());
+            } else {
+                smartResult = null;
+                smartGroups = new ArrayList<Group>();
+                com.mediasorter.features.SmartState.clear();
+                if (mediaAdapter != null) mediaAdapter.setSmartPositionData(null, null, false);
+                if (galleryAdapter != null) galleryAdapter.setSmartPositionData(null, null, false);
             }
         }
         applyUiToggles();
@@ -477,6 +493,8 @@ public class MainActivity extends Activity
             explorerWidthLayoutListener = null;
         }
         cancelComboTimeout();
+        if (smartRerankRunnable != null) mainHandler.removeCallbacks(smartRerankRunnable);
+        smartRerankRunnable = null;
         cancelVolumeLongPress(android.view.KeyEvent.KEYCODE_VOLUME_UP);
         cancelVolumeLongPress(android.view.KeyEvent.KEYCODE_VOLUME_DOWN);
         refreshExecutor.shutdownNow();
@@ -520,6 +538,7 @@ public class MainActivity extends Activity
 
     @Override
     public boolean onKeyDown(int keyCode, android.view.KeyEvent event) {
+        if (smartSortEngine != null) smartSortEngine.noteActivity();
         if (isVolumeKey(keyCode)) {
             if (isTextInputFocused()) return super.onKeyDown(keyCode, event);
             if (smartSortEngine != null) smartSortEngine.noteActivity();
@@ -528,14 +547,19 @@ public class MainActivity extends Activity
             if (event == null || event.getRepeatCount() == 0) {
                 if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
                     volumeUpHeld = true;
+                    volumeUpStart = android.os.SystemClock.uptimeMillis();
                     volumeUpLongSent = false;
                 } else {
                     volumeDownHeld = true;
+                    volumeDownStart = android.os.SystemClock.uptimeMillis();
                     volumeDownLongSent = false;
                 }
                 scheduleVolumeLongPress(keyCode);
             }
-            int acceleration = getVolumeAccelerationSteps(event == null ? 0 : event.getRepeatCount());
+            long heldFor = android.os.SystemClock.uptimeMillis()
+                    - (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
+                    ? volumeUpStart : volumeDownStart);
+            int acceleration = getVolumeAccelerationSteps(heldFor);
             List<GestureSettings.GestureStep> volumeSteps = getVolumeSteps(keyCode, false);
             if (acceleration > 1 && isPureVolumeNavigation(volumeSteps)) {
                 int direction = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP ? 1 : -1;
@@ -754,16 +778,20 @@ public class MainActivity extends Activity
         return longPress ? gestureSettings.getVolumeDownLong() : gestureSettings.getVolumeDown();
     }
 
-    private int getVolumeAccelerationSteps(int repeatCount) {
-        if (!getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                .getBoolean("nav_accel_enabled", false)) return 1;
-        String raw = getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                .getString("nav_accel_steps", "1,2,5,10");
-        String[] values = raw.split(",");
-        int index = repeatCount >= 25 ? 3 : repeatCount >= 12 ? 2 : repeatCount >= 5 ? 1 : 0;
-        if (values.length == 0) return 1;
-        index = Math.min(index, values.length - 1);
-        try { return Math.max(1, Integer.parseInt(values[index].trim())); }
+    private int getVolumeAccelerationSteps(long heldForMs) {
+        android.content.SharedPreferences prefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        if (!prefs.getBoolean("nav_accel_enabled", false)) return 1;
+        String[] steps = prefs.getString("nav_accel_steps", "1,2,5,10").split(",");
+        String[] times = prefs.getString("nav_accel_times_ms", "400,1200,2500").split(",");
+        int index = 0;
+        for (int i = 0; i < times.length; i++) {
+            try {
+                if (heldForMs >= Long.parseLong(times[i].trim())) index = i + 1;
+            } catch (Exception ignored) {}
+        }
+        if (steps.length == 0) return 1;
+        index = Math.min(index, steps.length - 1);
+        try { return Math.max(1, Integer.parseInt(steps[index].trim())); }
         catch (Exception ignored) { return 1; }
     }
 
@@ -813,8 +841,19 @@ public class MainActivity extends Activity
                 int pending = pendingVolumeNavigation;
                 pendingVolumeNavigation = 0;
                 volumeNavigationPosted = false;
-                while (pending > 0) { navigateNext(); pending--; }
-                while (pending < 0) { navigatePrev(); pending++; }
+                if (fullList.isEmpty() || pending == 0) return;
+                int next = currentIndex < 0 ? (pending > 0 ? 0 : fullList.size() - 1)
+                        : (int) (((long) currentIndex + pending) % fullList.size());
+                if (next < 0) next += fullList.size();
+                currentIndex = next;
+                currentFile = fullList.get(next);
+                if (!windowManager.isInWindow(next)) {
+                    windowManager.centerOn(next);
+                    updateWindow();
+                } else if (mediaAdapter != null) {
+                    mediaAdapter.setHighlightedPosition(next);
+                }
+                loadFileAtIndexFast(next);
             }
         });
     }
@@ -1148,10 +1187,30 @@ public class MainActivity extends Activity
                 new com.mediasorter.features.SmartSortEngine.Listener() {
                             @Override public void onSmartResult(
                             com.mediasorter.features.SmartSortEngine.Result result) {
+                        if (result == null) return;
+                        java.util.Iterator<String> suggestionIterator = result.suggestions.keySet().iterator();
+                        while (suggestionIterator.hasNext()) {
+                            if (dismissedSmartSuggestions.contains(suggestionIterator.next())) {
+                                suggestionIterator.remove();
+                            }
+                        }
+                        result.suggested = result.suggestions.size();
                         smartResult = result;
+                        smartGroups = new ArrayList<Group>(result.groups);
                         com.mediasorter.features.SmartState.publish(result.confidence,
-                                result.suggestions, result.generation);
+                                result.suggestions, result.groupPositions,
+                                result.groupTotals, result.generation);
                         sortManager.setSmartRanks(result.ranks);
+                        boolean showSmartBadge = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getBoolean("smart_show_position_badge", true);
+                        if (mediaAdapter != null) {
+                            mediaAdapter.setSmartPositionData(result.groupPositions,
+                                    result.groupTotals, showSmartBadge);
+                        }
+                        if (galleryAdapter != null) {
+                            galleryAdapter.setSmartPositionData(result.groupPositions,
+                                    result.groupTotals, showSmartBadge);
+                        }
                         if (result.slowedDown) Toast.makeText(MainActivity.this,
                                 "Smart sort slowed down to protect performance.",
                                 Toast.LENGTH_LONG).show();
@@ -1173,7 +1232,20 @@ public class MainActivity extends Activity
                         if (removedGhost) scheduleRefresh();
                         if (smartSortEngine != null && getSharedPreferences(
                                 "settings_prefs", MODE_PRIVATE).getBoolean("smart_enabled", false)) {
-                            smartSortEngine.request(indexer.getFullIndex());
+                            if (smartRerankRunnable != null) mainHandler.removeCallbacks(smartRerankRunnable);
+                            smartRerankRunnable = new Runnable() {
+                                @Override public void run() {
+                                    smartRerankRunnable = null;
+                                    if (smartSortEngine != null && getSharedPreferences(
+                                            "settings_prefs", MODE_PRIVATE)
+                                            .getBoolean("smart_enabled", false)) {
+                                        smartSortEngine.request(indexer.getFullIndex());
+                                    }
+                                }
+                            };
+                            int debounce = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                    .getInt("smart_rerank_debounce_ms", 400);
+                            mainHandler.postDelayed(smartRerankRunnable, Math.max(0, debounce));
                         }
                         updateStatsBarAsync();
                     }
@@ -1701,17 +1773,18 @@ public class MainActivity extends Activity
                 final SurpriseEngine.Mode mode = surpriseEngine == null
                         ? SurpriseEngine.Mode.UNIFORM
                         : surpriseEngine.getMode(getSharedPreferences("settings_prefs", MODE_PRIVATE));
+                final SmartSortEngine.Result smartSnapshot = smartResult;
                 if (mode == SurpriseEngine.Mode.UNIFORM || mode == SurpriseEngine.Mode.DECK
                         || mode == SurpriseEngine.Mode.STRIDE) {
                     MediaFile picked = surpriseEngine == null
                             ? pool.get(RandomGenerator.pick(pool.size()))
-                            : surpriseEngine.pick(pool, mode, fileStatus, generation);
+                            : surpriseEngine.pick(pool, mode, fileStatus, generation, smartSnapshot);
                     applySurprisePick(picked, previousVisiblePos);
                 } else {
                     new Thread(new Runnable() {
                         @Override public void run() {
                             final MediaFile picked = surpriseEngine == null ? null
-                                    : surpriseEngine.pick(pool, mode, fileStatus, generation);
+                                    : surpriseEngine.pick(pool, mode, fileStatus, generation, smartSnapshot);
                             mainHandler.post(new Runnable() {
                                 @Override public void run() {
                                     applySurprisePick(picked, previousVisiblePos);
@@ -1769,6 +1842,11 @@ public class MainActivity extends Activity
                     LinearLayoutManager.HORIZONTAL, false));
             tagBarAdapter = new TagBarAdapter(new TagBarAdapter.Listener() {
                 @Override public void onTagClicked(String tag) {
+                    if (smartResult != null && currentFileReference() != null
+                            && tag.equals(smartResult.suggestions.get(currentFileReference().getPath()))) {
+                        acceptSmartSuggestionForCurrent();
+                        return;
+                    }
                     if (activeTagFilters.contains(tag)) activeTagFilters.remove(tag);
                     else activeTagFilters.add(tag);
                     filterManager.setTagFilters(activeTagFilters);
@@ -1911,6 +1989,9 @@ public class MainActivity extends Activity
         menu.getMenu().add("Delete tag");
         menu.getMenu().add("Select all files with this tag");
         menu.getMenu().add("Add tag to current file");
+        boolean suggested = smartResult != null && currentFileReference() != null
+                && tag.equals(smartResult.suggestions.get(currentFileReference().getPath()));
+        if (suggested) menu.getMenu().add("Dismiss Smart suggestion");
         menu.getMenu().add(tagManager != null && tagManager.isTagsEnabled()
                 ? "Disable tag menus" : "Enable tag menus");
         menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
@@ -1922,6 +2003,12 @@ public class MainActivity extends Activity
                 else if ("Add tag to current file".equals(title)) {
                     List<MediaFile> targets = getTagMenuTargets();
                     showNewTagDialog(targets.isEmpty() ? null : targets, null);
+                } else if ("Dismiss Smart suggestion".equals(title)) {
+                    MediaFile file = currentFileReference();
+                    if (file != null) dismissedSmartSuggestions.add(file.getPath());
+                    if (smartResult != null && file != null) smartResult.suggestions.remove(file.getPath());
+                    refreshTagBar();
+                    updateStatsBarAsync();
                 } else if ("Enable tag menus".equals(title)) {
                     tagManager.setTagsEnabled(true);
                     applyUiToggles();
@@ -2092,7 +2179,7 @@ public class MainActivity extends Activity
                     for (MediaFile file : totalSnapshot) {
                         if (file == null || !file.hasTag(activePile)) continue;
                         pileTotal++;
-                        if (file.getTags().size() > 1) pileSorted++;
+                        if (hasSortedBeyondPile(file, activePile)) pileSorted++;
                     }
                 }
                 final int finalPileTotal = pileTotal;
@@ -2247,6 +2334,28 @@ public class MainActivity extends Activity
         return result;
     }
 
+    /** Apply the ordinary search/filter view to an already ordered Smart snapshot. */
+    private List<Group> filteredSmartGroups(List<Group> source, List<MediaFile> allowed) {
+        List<Group> result = new ArrayList<Group>();
+        Set<String> allowedPaths = new java.util.HashSet<String>();
+        if (allowed != null) {
+            for (MediaFile file : allowed) if (file != null) allowedPaths.add(file.getPath());
+        }
+        if (source == null) return result;
+        for (Group sourceGroup : source) {
+            if (sourceGroup == null) continue;
+            Group group = new Group(sourceGroup.getLabel(), Group.GroupBy.TAG);
+            for (MediaFile file : sourceGroup.getFiles()) {
+                if (file != null && allowedPaths.contains(file.getPath())) group.addFile(file);
+            }
+            if (group.getCount() > 0) {
+                group.setTotalCount(group.getCount());
+                result.add(group);
+            }
+        }
+        return result;
+    }
+
     private List<Group> tagGroupsForCurrentWindow() {
         List<Group> visible = new ArrayList<Group>();
         if (!tagGroupingActive || displayedTagGroups == null) return visible;
@@ -2257,6 +2366,8 @@ public class MainActivity extends Activity
             if (fullGroup == null) continue;
             Group windowGroup = new Group(fullGroup.getLabel(), Group.GroupBy.TAG);
             windowGroup.setTotalCount(fullGroup.getTotalCount());
+            int groupStart = cursor;
+            windowGroup.setFileOffset(Math.max(0, start - groupStart));
             for (MediaFile file : fullGroup.getFiles()) {
                 if (cursor >= start && cursor < end) windowGroup.addFile(file);
                 cursor++;
@@ -2277,9 +2388,15 @@ public class MainActivity extends Activity
 
         loadTagGroupingConfiguration();
         final boolean groupingByTag = groupManager.getCurrent() == Group.GroupBy.TAG;
-        // Tag grouping must always start from MediaIndexer.getFullIndex();
-        // WindowManager contains only the current display window.
-        final List<MediaFile> initialBase = groupingByTag
+        final android.content.SharedPreferences smartPrefs = getSharedPreferences(
+                "settings_prefs", MODE_PRIVATE);
+        final boolean smartEnabledSnapshot = smartPrefs.getBoolean("smart_enabled", false);
+        final SmartSortEngine.Result smartSnapshot = smartResult;
+        final boolean smartArranged = smartEnabledSnapshot && smartSnapshot != null
+                && smartSnapshot.arranged;
+        // Smart and tag grouping both use the complete index. WindowManager is
+        // only a presentation page and is never a Smart training pool.
+        final List<MediaFile> initialBase = (groupingByTag || smartArranged || smartEnabledSnapshot)
                 ? indexer.getFullIndex() : indexer.getIndex();
         final int requestedTagPage = tagGroupPage;
         final int requestedPageSize = getTagGroupPageSize();
@@ -2297,7 +2414,11 @@ public class MainActivity extends Activity
                 List<Group> pageGroups = new ArrayList<Group>();
                 int appliedTagPage = requestedTagPage;
                 try {
-                    if (groupingByTag) {
+                    if (smartArranged) {
+                        List<MediaFile> filteredBase = filterManager.apply(base);
+                        pageGroups = filteredSmartGroups(smartSnapshot.groups, filteredBase);
+                        flattened = flattenGroups(pageGroups);
+                    } else if (groupingByTag) {
                         // Filter actual files before grouping so each group
                         // count describes the active view, while membership is
                         // still evaluated against every sanitized tag.
@@ -2318,7 +2439,8 @@ public class MainActivity extends Activity
                             }
                         }
                         flattened = filterManager.apply(flattened);
-                        sortManager.sort(flattened);
+                        if (smartEnabledSnapshot) sortManager.sortSmart(flattened);
+                        else sortManager.sort(flattened);
                     }
                 } catch (Exception e) {
                     flattened = new ArrayList<>(base);
@@ -2334,12 +2456,12 @@ public class MainActivity extends Activity
                         synchronized (fullListLock) {
                             fullList = result;
                         }
-                        tagGroupingActive = groupingByTag;
-                        if (groupingByTag) {
+                        tagGroupingActive = groupingByTag || smartArranged;
+                        if (groupingByTag || smartArranged) {
                             displayedTagGroups = resultPageGroups;
-                            tagGroupPage = resultTagPage;
-                            tagGroupPageSize = requestedPageSize;
-                            windowManager.setWindowSize(requestedPageSize);
+                            tagGroupPage = smartArranged ? 0 : resultTagPage;
+                            tagGroupPageSize = smartArranged ? getWindowSize() : requestedPageSize;
+                            windowManager.setWindowSize(tagGroupPageSize);
                         } else {
                             displayedTagGroups = new ArrayList<Group>();
                             tagGroupPage = 0;
@@ -2509,7 +2631,7 @@ public class MainActivity extends Activity
                 break;
             case SMART_SPLIT_PILE: showSmartSplitPileDialog(); break;
             case SMART_RETIRE_PILE: retireSmartPile(); break;
-            case SMART_MOVE_PILE: openQuickTagAction(); break;
+            case SMART_MOVE_PILE: moveCurrentToSmartPile(); break;
             case SMART_NEXT_UNFINISHED_PILE: nextUnfinishedSmartPile(); break;
             case OPEN_GALLERY: setGalleryMode(true, true); break;
             case TOGGLE_GALLERY: setGalleryMode(!galleryModeActive, true); break;
@@ -2618,13 +2740,25 @@ public class MainActivity extends Activity
         String tag = smartResult.suggestions.get(currentFileReference().getPath());
         if (tag == null || tag.isEmpty()) return;
         List<MediaFile> snapshot = indexer.getFullIndex();
+        List<MediaFile> groupTargets = new ArrayList<MediaFile>();
+        for (Group group : smartGroups) {
+            for (MediaFile file : group.getFiles()) {
+                if (file != null && file.getPath().equals(currentFileReference().getPath())) {
+                    groupTargets.addAll(group.getFiles());
+                    break;
+                }
+            }
+            if (!groupTargets.isEmpty()) break;
+        }
         String primary = currentFileReference().getTags().isEmpty() ? ""
                 : currentFileReference().getTags().get(0);
         int count = 0;
-        for (MediaFile file : snapshot) {
-            if (primary.equals(file.getTags().isEmpty() ? "" : file.getTags().get(0))
-                    && !file.hasTag(tag)) {
+        for (MediaFile file : (groupTargets.isEmpty() ? snapshot : groupTargets)) {
+            if (groupTargets.isEmpty()
+                    && !primary.equals(file.getTags().isEmpty() ? "" : file.getTags().get(0))) continue;
+            if (!file.hasTag(tag)) {
                 tagManager.applyTag(file, tag);
+                if (smartResult != null) smartResult.suggestions.remove(file.getPath());
                 count++;
             }
         }
@@ -2650,6 +2784,10 @@ public class MainActivity extends Activity
         final Map<String, Integer> ranks = new java.util.HashMap<String, Integer>(smartResult.ranks);
         final Map<String, Integer> previousOrders = new java.util.HashMap<String, Integer>();
         for (MediaFile file : snapshot) previousOrders.put(file.getPath(), file.getManualOrder());
+        final android.content.SharedPreferences smartPrefs = getSharedPreferences(
+                "settings_prefs", MODE_PRIVATE);
+        final String previousSequence = smartPrefs.getString("sort_sequence", "");
+        final boolean previousEnabled = smartPrefs.getBoolean("smart_enabled", false);
         new Thread(new Runnable() {
             @Override public void run() {
                 java.util.Collections.sort(snapshot, new java.util.Comparator<MediaFile>() {
@@ -2663,10 +2801,18 @@ public class MainActivity extends Activity
                 indexer.updateManualOrder(snapshot);
                 getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
                         .putString("sort_sequence", "[{\"id\":\"MANUAL_ORDER\",\"direction\":\"ASC\"}]")
+                        .putBoolean("smart_enabled", false)
                         .apply();
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
                         smartOrderUndo = previousOrders;
+                        smartOrderPreviousSequence = previousSequence;
+                        smartOrderPreviousEnabled = previousEnabled;
+                        smartResult = null;
+                        smartGroups = new ArrayList<Group>();
+                        com.mediasorter.features.SmartState.clear();
+                        if (mediaAdapter != null) mediaAdapter.setSmartPositionData(null, null, false);
+                        if (galleryAdapter != null) galleryAdapter.setSmartPositionData(null, null, false);
                         if (smartSortEngine != null) smartSortEngine.setEnabled(false);
                         Toast.makeText(MainActivity.this, "Smart order locked for "
                                 + snapshot.size() + " files", Toast.LENGTH_SHORT).show();
@@ -2681,18 +2827,11 @@ public class MainActivity extends Activity
         android.content.SharedPreferences prefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
         String active = prefs.getString("smart_active_pile", "");
         if (active != null && !active.trim().isEmpty()) return active.trim();
-        MediaFile current = currentFileReference();
-        String patterns = prefs.getString("smart_pile_tag_patterns", "");
-        if (current != null && !patterns.trim().isEmpty()) {
-            for (String tag : current.getTags()) {
-                if (matchesPilePattern(tag, patterns)) return tag;
-            }
-        }
-        return "";
+        return findPileTag(currentFileReference());
     }
 
     private boolean matchesPilePattern(String value, String patterns) {
-        if (value == null) return false;
+        if (value == null || patterns == null) return false;
         for (String raw : patterns.split(",")) {
             String pattern = raw.trim();
             if (pattern.isEmpty()) continue;
@@ -2707,13 +2846,52 @@ public class MainActivity extends Activity
         return false;
     }
 
+    /** A child pile named parent_1, parent_2, ... is recognized automatically. */
+    private boolean isDirectChildPile(String value, String parent) {
+        if (value == null || parent == null || parent.isEmpty()) return false;
+        String prefix = parent + "_";
+        if (!value.startsWith(prefix) || value.length() == prefix.length()) return false;
+        for (int i = prefix.length(); i < value.length(); i++) {
+            if (!Character.isDigit(value.charAt(i))) return false;
+        }
+        return true;
+    }
+
+    private boolean hasSortedBeyondPile(MediaFile file, String pile) {
+        if (file == null) return false;
+        String patterns = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("smart_pile_tag_patterns", "");
+        for (String tag : file.getTags()) {
+            if (tag == null || tag.equals(pile)) continue;
+            if (isDirectChildPile(tag, pile)) return true;
+            if (!matchesPilePattern(tag, patterns)) return true;
+        }
+        return false;
+    }
+
+    private String findPileTag(MediaFile file) {
+        if (file == null) return "";
+        android.content.SharedPreferences prefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        String configured = prefs.getString("smart_pile_tag_patterns", "");
+        for (String tag : file.getTags()) {
+            if (matchesPilePattern(tag, configured)) return tag;
+        }
+        String active = prefs.getString("smart_active_pile", "");
+        if (!active.isEmpty() && file.hasTag(active)) return active;
+        return file.getTags().isEmpty() ? "" : file.getTags().get(0);
+    }
+
     private void showSmartSplitPileDialog() {
         final MediaFile current = currentFileReference();
         if (current == null || current.getTags().isEmpty()) {
             Toast.makeText(this, "Select a tagged file to split its pile", Toast.LENGTH_SHORT).show();
             return;
         }
-        final String parent = current.getTags().get(0);
+        final String parent = findPileTag(current);
+        if (parent.isEmpty()) {
+            Toast.makeText(this, "No pile tag found on this file", Toast.LENGTH_SHORT).show();
+            return;
+        }
         final EditText input = new EditText(this);
         input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         input.setSingleLine(true);
@@ -2757,17 +2935,20 @@ public class MainActivity extends Activity
                         new Thread(new Runnable() {
                             @Override public void run() {
                                 int count = 0;
+                                final Map<String, List<String>> undo =
+                                        new java.util.HashMap<String, List<String>>();
                                 for (MediaFile file : snapshot) {
-                                    if (!file.hasTag(pile)) continue;
-                                    if (file.getTags().size() > 1) {
-                                        tagManager.removeTag(file, pile);
-                                        count++;
-                                    }
+                                    if (!file.hasTag(pile) || !hasSortedBeyondPile(file, pile)) continue;
+                                    undo.put(file.getPath(), new ArrayList<String>(file.getTags()));
+                                    tagManager.removeTag(file, pile);
+                                    count++;
                                 }
                                 final int result = count;
                                 mainHandler.post(new Runnable() {
                                     @Override public void run() {
+                                        smartPileUndo = undo;
                                         scheduleRefresh();
+                                        updateStatsBarAsync();
                                         Toast.makeText(MainActivity.this,
                                                 "Retired pile tag from " + result + " files",
                                                 Toast.LENGTH_SHORT).show();
@@ -2781,10 +2962,22 @@ public class MainActivity extends Activity
 
     private void nextUnfinishedSmartPile() {
         List<MediaFile> snapshot = indexer.getFullIndex();
+        android.content.SharedPreferences prefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        String patterns = prefs.getString("smart_pile_tag_patterns", "");
+        java.util.LinkedHashSet<String> piles = new java.util.LinkedHashSet<String>();
+        String active = activeSmartPile();
+        if (!active.isEmpty()) piles.add(active);
         for (MediaFile file : snapshot) {
-            if (file != null && !file.getTags().isEmpty()) {
-                String pile = file.getTags().get(0);
-                if (pile.equals(activeSmartPile()) && file.getTags().size() <= 1) {
+            if (file == null) continue;
+            for (String tag : file.getTags()) {
+                if (matchesPilePattern(tag, patterns)) piles.add(tag);
+            }
+        }
+        for (String pile : piles) {
+            for (MediaFile file : snapshot) {
+                if (file != null && file.hasTag(pile) && !hasSortedBeyondPile(file, pile)) {
+                    prefs.edit().putString("smart_active_pile", pile)
+                            .putString("smart_pile_mode", "scope").apply();
                     int index = findIndexByPath(fullList, file.getPath());
                     if (index >= 0) loadFileAtIndex(index);
                     return;
@@ -2792,6 +2985,40 @@ public class MainActivity extends Activity
             }
         }
         Toast.makeText(this, "No unfinished Smart pile found", Toast.LENGTH_SHORT).show();
+    }
+
+    private void moveCurrentToSmartPile() {
+        final MediaFile file = currentFileReference();
+        if (file == null) {
+            Toast.makeText(this, "No file selected", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final java.util.LinkedHashSet<String> piles = new java.util.LinkedHashSet<String>();
+        String patterns = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("smart_pile_tag_patterns", "");
+        String active = activeSmartPile();
+        if (!active.isEmpty()) piles.add(active);
+        for (MediaFile candidate : indexer.getFullIndex()) {
+            if (candidate == null) continue;
+            for (String tag : candidate.getTags()) {
+                if (matchesPilePattern(tag, patterns)) piles.add(tag);
+            }
+        }
+        if (piles.isEmpty()) {
+            Toast.makeText(this, "No pile tags found; split a pile first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final String[] choices = piles.toArray(new String[piles.size()]);
+        new AlertDialog.Builder(this).setTitle("Move to Smart pile")
+                .setItems(choices, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        tagManager.applyTag(file, choices[which]);
+                        getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
+                                .putString("smart_active_pile", choices[which])
+                                .putString("smart_pile_mode", "scope").apply();
+                        scheduleRefresh();
+                    }
+                }).setNegativeButton("Cancel", null).show();
     }
 
     private void toggleSmartSetting(GestureSettings.GestureAction action) {
@@ -2802,7 +3029,13 @@ public class MainActivity extends Activity
             if (smartSortEngine != null) {
                 smartSortEngine.setEnabled(enabled);
                 if (enabled) smartSortEngine.request(indexer.getFullIndex());
-                else com.mediasorter.features.SmartState.clear();
+                else {
+                    smartResult = null;
+                    smartGroups = new ArrayList<Group>();
+                    com.mediasorter.features.SmartState.clear();
+                    if (mediaAdapter != null) mediaAdapter.setSmartPositionData(null, null, false);
+                    if (galleryAdapter != null) galleryAdapter.setSmartPositionData(null, null, false);
+                }
             }
             Toast.makeText(this, enabled ? "Smart Sort enabled" : "Smart Sort disabled",
                     Toast.LENGTH_SHORT).show();
@@ -2973,13 +3206,53 @@ public class MainActivity extends Activity
     }
 
     private void undoLastAction() {
+        if (smartPileUndo != null && !smartPileUndo.isEmpty()) {
+            final Map<String, List<String>> restore = smartPileUndo;
+            smartPileUndo = null;
+            final Map<String, MediaFile> filesToRestore = new java.util.HashMap<String, MediaFile>();
+            for (MediaFile file : indexer.getFullIndex()) {
+                if (file != null && restore.containsKey(file.getPath())) filesToRestore.put(file.getPath(), file);
+            }
+            new Thread(new Runnable() {
+                @Override public void run() {
+                    for (Map.Entry<String, List<String>> entry : restore.entrySet()) {
+                        MediaFile file = filesToRestore.get(entry.getKey());
+                        if (file == null) continue;
+                        List<String> wanted = entry.getValue();
+                        for (String tag : new ArrayList<String>(file.getTags())) {
+                            if (!wanted.contains(tag)) tagManager.removeTag(file, tag);
+                        }
+                        for (String tag : wanted) {
+                            if (!file.hasTag(tag)) tagManager.applyTag(file, tag);
+                        }
+                    }
+                    mainHandler.post(new Runnable() {
+                        @Override public void run() {
+                            scheduleRefresh();
+                            Toast.makeText(MainActivity.this, "Smart pile retirement undone",
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                }
+            }).start();
+            return;
+        }
         if (smartOrderUndo != null && !smartOrderUndo.isEmpty()) {
             Map<String, Integer> restore = smartOrderUndo;
             smartOrderUndo = null;
             indexer.restoreManualOrders(restore);
-            getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
-                    .putString("sort_sequence", "[{\"id\":\"SMART\",\"direction\":\"ASC\"}]")
-                    .apply();
+            android.content.SharedPreferences.Editor editor = getSharedPreferences(
+                    "settings_prefs", MODE_PRIVATE).edit();
+            editor.putString("sort_sequence", smartOrderPreviousSequence == null
+                    || smartOrderPreviousSequence.isEmpty()
+                    ? "[{\"id\":\"NAME\",\"direction\":\"ASC\"}]"
+                    : smartOrderPreviousSequence);
+            editor.putBoolean("smart_enabled", smartOrderPreviousEnabled);
+            editor.apply();
+            if (smartSortEngine != null) {
+                smartSortEngine.setEnabled(smartOrderPreviousEnabled);
+                if (smartOrderPreviousEnabled) smartSortEngine.request(indexer.getFullIndex());
+            }
             scheduleRefresh();
             Toast.makeText(this, "Smart order lock undone", Toast.LENGTH_SHORT).show();
             return;
@@ -3130,7 +3403,9 @@ public class MainActivity extends Activity
         if (applied && getSharedPreferences("settings_prefs", MODE_PRIVATE)
                 .getBoolean("smart_pile_autoretire", false)) {
             String pile = activeSmartPile();
-            if (!pile.isEmpty() && !pile.equals(tagName)) tagManager.removeTag(file, pile);
+            if (!pile.isEmpty() && !pile.equals(tagName) && hasSortedBeyondPile(file, pile)) {
+                tagManager.removeTag(file, pile);
+            }
         }
 
         fullList.set(currentIndex, file);
@@ -3179,6 +3454,20 @@ public class MainActivity extends Activity
         if (nextIdx != currentIndex && nextIdx < fullList.size()) toCache.add(fullList.get(nextIdx));
         if (prevIdx != currentIndex && prevIdx < fullList.size()) toCache.add(fullList.get(prevIdx));
         if (!toCache.isEmpty()) thumbnailLoader.precache(toCache);
+    }
+
+    /** Latest-wins preview path used by held volume navigation. */
+    private void loadFileAtIndexFast(int absoluteIndex) {
+        if (absoluteIndex < 0 || absoluteIndex >= fullList.size()) return;
+        currentIndex = absoluteIndex;
+        currentFile = fullList.get(absoluteIndex);
+        if (mediaAdapter != null) mediaAdapter.setHighlightedPosition(absoluteIndex);
+        if (previewManager != null) {
+            previewManager.load(currentFile);
+            previewManager.setPosition(absoluteIndex + 1, fullList.size());
+        }
+        // Deliberately no tag-bar, stats, side-panel, or Smart recomputation.
+        // The next ordinary interaction refreshes those secondary surfaces.
     }
 
     private void loadFileAtIndex(int absoluteIndex) {
@@ -7996,33 +8285,51 @@ private Spinner makeSpinner(String[] options) {
 
             tagCount.setText(String.valueOf(item.count));
             tagName.setTextColor(item.suggested ? 0xFFFFD54F : 0xFFFFFFFF);
+            String suggestedPrefix = item.suggested ? "Suggested · " : "";
 
             tagCheck.setOnCheckedChangeListener(null);
             if (item.currentType == 1) {
                 tagCheck.setChecked(true);
                 tagCheck.setAlpha(1.0f);
                 if (item.initialType == 1) {
-                    tagName.setText(item.name);
+                    tagName.setText(suggestedPrefix + item.name);
                 } else {
-                    tagName.setText(item.name + " (add to all)");
+                    tagName.setText(suggestedPrefix + item.name + " (add to all)");
                 }
             } else if (item.currentType == 0) {
                 tagCheck.setChecked(false);
                 tagCheck.setAlpha(1.0f);
                 if (item.initialType == 1 || item.initialType == 2) {
-                    tagName.setText(item.name + " (remove from all)");
+                    tagName.setText(suggestedPrefix + item.name + " (remove from all)");
                 } else {
-                    tagName.setText(item.name);
+                    tagName.setText(suggestedPrefix + item.name);
                 }
             } else { // mixed (currentType == 2)
                 tagCheck.setChecked(false);
                 tagCheck.setAlpha(0.5f);
-                tagName.setText(item.name + " (some files)");
+                tagName.setText(suggestedPrefix + item.name + " (some files)");
             }
 
             android.view.View.OnClickListener clickListener = new android.view.View.OnClickListener() {
                 @Override
                 public void onClick(android.view.View v) {
+                    if (item.suggested) {
+                        for (MediaFile file : selectedFiles) {
+                            if (!file.hasTag(item.name)) {
+                                tagManager.applyTag(file, item.name);
+                                mediaAdapter.updateFileTags(file);
+                            }
+                        }
+                        if (smartResult != null && currentFile != null) {
+                            smartResult.suggestions.remove(currentFile.getPath());
+                        }
+                        item.currentType = 1;
+                        item.suggested = false;
+                        syncUiAfterTagging(selectedFiles);
+                        refreshTagBar();
+                        notifyDataSetChanged();
+                        return;
+                    }
                     if (item.initialType == 0) {
                         item.currentType = (item.currentType == 0) ? 1 : 0;
                     } else if (item.initialType == 1) {

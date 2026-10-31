@@ -90,12 +90,12 @@ public class TagBarAdapter extends RecyclerView.Adapter<TagBarAdapter.ViewHolder
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         final Tag tag = tags.get(position);
         final String name = tag.getName();
-        holder.name.setText(name);
+        boolean isSuggested = suggested.contains(name);
+        holder.name.setText(isSuggested ? "Suggested · " + name : name);
         Integer count = fileCounts.get(name);
         holder.count.setText(String.valueOf(count == null ? 0 : count));
         GradientDrawable background = new GradientDrawable();
         background.setCornerRadius(100f);
-        boolean isSuggested = suggested.contains(name);
         background.setColor(active.contains(name) ? accent : (isSuggested ? 0xFF6A5A20 : 0xFF2A2A3E));
         holder.itemView.setBackground(background);
         holder.count.setTextColor(active.contains(name) ? Color.WHITE : (isSuggested ? 0xFFFFD54F : accent));
