@@ -126,8 +126,13 @@ public class SmartSortEngine {
         ArrayList<Integer> labeled = new ArrayList<Integer>();
         ArrayList<Integer> unlabeled = new ArrayList<Integer>();
         Pattern ignore = compileIgnore();
+        String activePile = prefs.getString("smart_active_pile", "");
+        boolean scopePile = "scope".equals(prefs.getString("smart_pile_mode", "scope"))
+                && !activePile.trim().isEmpty();
         for (int i = 0; i < files.size(); i++) {
-            if (isLabeled(files.get(i), ignore)) labeled.add(i); else unlabeled.add(i);
+            MediaFile file = files.get(i);
+            if (scopePile && !file.hasTag(activePile)) continue;
+            if (isLabeled(file, ignore, activePile)) labeled.add(i); else unlabeled.add(i);
         }
         result.labeled = labeled.size();
         Features features = buildFeatures(files, requestGeneration);
@@ -259,10 +264,12 @@ public class SmartSortEngine {
         }
     }
 
-    private boolean isLabeled(MediaFile file, Pattern ignore) {
+    private boolean isLabeled(MediaFile file, Pattern ignore, String activePile) {
         if (file == null || file.getTags() == null) return false;
         for (String tag : file.getTags()) {
-            if (tag != null && !tag.trim().isEmpty() && (ignore == null || !ignore.matcher(tag).matches())) return true;
+            if (tag == null || tag.trim().isEmpty()) continue;
+            if (activePile != null && !activePile.isEmpty() && activePile.equals(tag)) continue;
+            if (ignore == null || !ignore.matcher(tag).matches()) return true;
         }
         return false;
     }
