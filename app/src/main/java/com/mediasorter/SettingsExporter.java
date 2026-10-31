@@ -68,6 +68,19 @@ public final class SettingsExporter {
             "smart_pile_autoretire", "smart_pile_split_naming", "smart_active_pile"
     ));
 
+    /** Integer settings must remain Integer in SharedPreferences after import. */
+    private static final Set<String> INTEGER_SETTINGS_KEYS = new HashSet<String>(Arrays.asList(
+            "long_press_duration", "swipe_min_distance", "swipe_min_velocity",
+            "precache_radius", "max_undo_history", "gallery_columns", "gallery_cell_spacing",
+            "explorer_width_percent", "group_tag_position", "tag_bar_width",
+            "smart_k_neighbors", "smart_suggest_threshold", "smart_min_labeled",
+            "smart_random_fraction", "smart_w_hash", "smart_w_folder", "smart_w_name",
+            "smart_w_date", "smart_w_color", "smart_w_shape", "smart_date_tau_hours",
+            "smart_rerank_debounce_ms", "rerank_idle_ms", "smart_chunk_ms",
+            "smart_pass_budget_ms", "smart_max_pool", "surprise_history_size",
+            "surprise_w_untagged", "surprise_w_stale", "surprise_w_flagged",
+            "surprise_w_uncertain", "surprise_candidate_cap"));
+
     private static final Set<String> GESTURE_KEYS = new HashSet<String>(Arrays.asList(
             GestureConstants.INPUT_SWIPE_LEFT, GestureConstants.INPUT_SWIPE_RIGHT,
             GestureConstants.INPUT_SWIPE_UP, GestureConstants.INPUT_SWIPE_DOWN,
@@ -507,7 +520,7 @@ public final class SettingsExporter {
             String key = keys.next();
             if (!isKnownKey(prefsName, key)) continue;
             try {
-                applyOneValue(prefs, key, values.get(key), result);
+                applyOneValue(prefs, prefsName, key, values.get(key), result);
                 result.preferencesCount++;
             } catch (Exception error) {
                 recordFailure(result, prefsName + "." + key, error);
@@ -515,8 +528,8 @@ public final class SettingsExporter {
         }
     }
 
-    private static void applyOneValue(SharedPreferences prefs, String key, Object value,
-                                       ApplyResult result) {
+    private static void applyOneValue(SharedPreferences prefs, String prefsName,
+                                       String key, Object value, ApplyResult result) {
         SharedPreferences.Editor editor = prefs.edit();
         if (value instanceof JSONArray) {
             Set<String> set = new HashSet<String>();
@@ -524,7 +537,10 @@ public final class SettingsExporter {
             for (int i = 0; i < array.length(); i++) set.add(array.optString(i, ""));
             editor.putStringSet(key, set);
         } else if (value instanceof Boolean) editor.putBoolean(key, (Boolean) value);
-        else if (value instanceof Integer && "thumb_max_bytes".equals(key)) {
+        else if ("settings_prefs".equals(prefsName)
+                && INTEGER_SETTINGS_KEYS.contains(key) && value instanceof Number) {
+            editor.putInt(key, ((Number) value).intValue());
+        } else if (value instanceof Integer && "thumb_max_bytes".equals(key)) {
             editor.putLong(key, ((Integer) value).longValue());
         } else if (value instanceof Integer) editor.putInt(key, (Integer) value);
         else if (value instanceof Long) editor.putLong(key, (Long) value);
