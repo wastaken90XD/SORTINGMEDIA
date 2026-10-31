@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.view.View;
 import android.widget.TextView;
 import com.mediasorter.models.MediaFile;
 import com.mediasorter.models.Tag;
@@ -19,6 +20,7 @@ public class DashboardActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setTitle(getString(R.string.app_name) + " Dashboard");
 
         // Prefer the static snapshots passed by MainActivity — a whole media
         // index sent as Intent extras can overflow the binder transaction
@@ -129,7 +131,9 @@ public class DashboardActivity extends Activity {
             LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.topMargin = 48;
         btnBack.setLayoutParams(lp);
-        btnBack.setOnClickListener(v -> finish());
+        btnBack.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { finish(); }
+        });
         root.addView(btnBack);
 
         ScrollView scroll = new ScrollView(this);

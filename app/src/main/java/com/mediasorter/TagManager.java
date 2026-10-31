@@ -7,9 +7,11 @@ import com.mediasorter.models.Tag;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -62,10 +64,18 @@ public class TagManager {
     // ── Load ──────────────────────────────────────────────────────────────────
 
     private void loadTags() {
-        executor.submit(() -> {
-            List<Tag> tags = db.tagDao().getAllByUsage();
-            synchronized (tagMap) {
-                for (Tag t : tags) tagMap.put(t.getName(), t);
+        executor.submit(new Runnable() {
+            @Override public void run() {
+                List<Tag> tags = db.tagDao().getAllByUsage();
+                synchronized (tagMap) {
+                    for (Tag t : tags) {
+                        String plain = TagText.plain(t.getName());
+                        if (plain.isEmpty()) continue;
+                        if (!plain.equals(t.getName())) t.setName(plain);
+                        tagMap.put(plain, t);
+                    }
+                }
+                notifyTagsChanged();
             }
         });
     }
@@ -77,13 +87,19 @@ public class TagManager {
         String saved = prefs.getString(KEY_RECENT, "");
         if (!saved.isEmpty()) {
             for (String t : saved.split(",")) {
-                if (!t.isEmpty()) list.add(t);
+                String plain = TagText.plain(t);
+                if (!plain.isEmpty() && !list.contains(plain)) list.add(plain);
             }
         }
         return list;
     }
 
-    private void saveRecentTags() {
+    public synchronized void reloadRecentTags() {
+        recentTags.clear();
+        recentTags.addAll(loadRecentTags());
+    }
+
+    private synchronized void saveRecentTags() {
         StringBuilder sb = new StringBuilder();
         for (String t : recentTags) {
             if (sb.length() > 0) sb.append(",");
@@ -92,9 +108,11 @@ public class TagManager {
         prefs.edit().putString(KEY_RECENT, sb.toString()).apply();
     }
 
-    private void addToRecent(String tagName) {
-        recentTags.remove(tagName);
-        recentTags.addFirst(tagName);
+    private synchronized void addToRecent(String tagName) {
+        String plain = TagText.plain(tagName);
+        if (plain.isEmpty()) return;
+        recentTags.remove(plain);
+        recentTags.addFirst(plain);
         while (recentTags.size() > MAX_RECENT) recentTags.removeLast();
         saveRecentTags();
     }
@@ -125,7 +143,7 @@ public class TagManager {
     // ── Create ────────────────────────────────────────────────────────────────
 
     public void createTag(String name) {
-        String trimmed = name.trim();
+        String trimmed = TagText.plain(name);
         // Commas would corrupt the comma-separated recent-tags persistence
         if (trimmed.isEmpty() || trimmed.contains(",")) return;
         final Tag tag;
@@ -137,51 +155,59 @@ public class TagManager {
             tag = new Tag(trimmed);
             tagMap.put(trimmed, tag);
         }
-        executor.submit(() -> db.tagDao().insert(tag));
+        executor.submit(new Runnable() {
+            @Override public void run() { db.tagDao().insert(tag); }
+        });
         notifyTagsChanged();
     }
 
     // ── Apply ─────────────────────────────────────────────────────────────────
 
     public void applyTag(MediaFile file, String tagName) {
-        if (file.hasTag(tagName)) return;
-        file.addTag(tagName);
-        addToRecent(tagName);
-        recordApplied(file.getPath(), tagName);
+        String plain = TagText.plain(tagName);
+        if (plain.isEmpty() || file.hasTag(plain)) return;
+        file.addTag(plain);
+        addToRecent(plain);
+        recordApplied(file.getPath(), plain);
 
-        executor.submit(() -> {
-            synchronized (tagMap) {
-                Tag tag = tagMap.get(tagName);
-                if (tag == null) {
-                    tag = new Tag(tagName);
-                    tagMap.put(tagName, tag);
-                    db.tagDao().insert(tag);
+        executor.submit(new Runnable() {
+            @Override public void run() {
+                synchronized (tagMap) {
+                    Tag tag = tagMap.get(plain);
+                    if (tag == null) {
+                        tag = new Tag(plain);
+                        tagMap.put(plain, tag);
+                        db.tagDao().insert(tag);
+                    }
+                    tag.incrementUsage();
+                    db.tagDao().update(tag);
                 }
-                tag.incrementUsage();
-                db.tagDao().update(tag);
+                MetadataWriter.writeTags(file.getPath(), file.getTags());
+                notifyTagsChanged();
             }
-            MetadataWriter.writeTags(file.getPath(), file.getTags());
-            notifyTagsChanged();
         });
     }
 
     // ── Remove ────────────────────────────────────────────────────────────────
 
     public void removeTag(MediaFile file, String tagName) {
-        if (!file.hasTag(tagName)) return;
-        file.removeTag(tagName);
-        unrecordApplied(file.getPath(), tagName);
+        String plain = TagText.plain(tagName);
+        if (plain.isEmpty() || !file.hasTag(plain)) return;
+        file.removeTag(plain);
+        unrecordApplied(file.getPath(), plain);
 
-        executor.submit(() -> {
-            synchronized (tagMap) {
-                Tag tag = tagMap.get(tagName);
-                if (tag != null) {
-                    tag.decrementUsage();
-                    db.tagDao().update(tag);
+        executor.submit(new Runnable() {
+            @Override public void run() {
+                synchronized (tagMap) {
+                    Tag tag = tagMap.get(plain);
+                    if (tag != null) {
+                        tag.decrementUsage();
+                        db.tagDao().update(tag);
+                    }
                 }
+                MetadataWriter.writeTags(file.getPath(), file.getTags());
+                notifyTagsChanged();
             }
-            MetadataWriter.writeTags(file.getPath(), file.getTags());
-            notifyTagsChanged();
         });
     }
 
@@ -224,18 +250,20 @@ public class TagManager {
      * left untouched, so rapid swipe-tagging never strips unknown tags.
      */
     public void applyOrUndo(MediaFile file, String tagName) {
+        String plain = TagText.plain(tagName);
+        if (plain.isEmpty()) return;
         // Compound check-then-act under the lock (reentrant; applyTag/
         // removeTag re-acquire it in recordApplied/unrecordApplied). No other
         // monitor is taken while stackLock is held, so no lock-order issues.
         synchronized (stackLock) {
             LinkedList<String> stack = appliedStack.get(file.getPath());
-            boolean tracked = stack != null && stack.contains(tagName);
-            if (tracked && file.hasTag(tagName)) {
+            boolean tracked = stack != null && stack.contains(plain);
+            if (tracked && file.hasTag(plain)) {
                 // Repeat of the gesture that applied this tag — undo just this
                 // tag and leave every other gesture-applied tag untouched.
-                removeTag(file, tagName);
-            } else if (!file.hasTag(tagName)) {
-                applyTag(file, tagName);
+                removeTag(file, plain);
+            } else if (!file.hasTag(plain)) {
+                applyTag(file, plain);
             }
             // else: file already carried the tag without it being applied in
             // this session — keep the original no-op behaviour.
@@ -245,12 +273,19 @@ public class TagManager {
     // ── Delete ────────────────────────────────────────────────────────────────
 
     public void deleteTag(String name) {
-        executor.submit(() -> {
-            synchronized (tagMap) {
-                Tag tag = tagMap.remove(name);
-                if (tag != null) db.tagDao().delete(tag);
+        String plain = TagText.plain(name);
+        if (plain.isEmpty()) return;
+        final Tag removed;
+        synchronized (tagMap) {
+            removed = tagMap.remove(plain);
+        }
+        notifyTagsChanged();
+        executor.submit(new Runnable() {
+            @Override public void run() {
+                Tag stored = removed != null ? removed : db.tagDao().getByName(plain);
+                if (stored != null) db.tagDao().delete(stored);
+                notifyTagsChanged();
             }
-            notifyTagsChanged();
         });
     }
 
@@ -258,17 +293,72 @@ public class TagManager {
 
     // Auto-populate tagMap from tags already written to files
     public void importTagsFromFiles(List<String> tagNames) {
-        executor.submit(() -> {
-            synchronized (tagMap) {
-                for (String name : tagNames) {
-                    if (!tagMap.containsKey(name)) {
-                        Tag tag = new Tag(name);
+        executor.submit(new Runnable() {
+            @Override public void run() {
+                if (tagNames == null) return;
+                synchronized (tagMap) {
+                    for (String name : tagNames) {
+                        String plain = TagText.plain(name);
+                        if (plain.isEmpty() || tagMap.containsKey(plain)) continue;
+                        Tag tag = new Tag(plain);
                         db.tagDao().insert(tag);
-                        tagMap.put(name, tag);
+                        tagMap.put(plain, tag);
                     }
                 }
+                notifyTagsChanged();
             }
-            notifyTagsChanged();
+        });
+    }
+
+    /**
+     * Synchronizes the global tag catalog with every indexed file. Tags found
+     * in XMP or another external source are first-class global tags just like
+     * tags created in the app. The usage count is rebuilt from the complete
+     * index so sorting and every tag picker agree on the same library state.
+     * Existing zero-use tags are retained because they may be user-created
+     * library tags that are not currently assigned to a file.
+     */
+    public void syncTagsFromFiles(List<MediaFile> files) {
+        final Map<String, Integer> usage = new HashMap<String, Integer>();
+        if (files != null) {
+            for (MediaFile file : files) {
+                if (file == null || file.getTags() == null) continue;
+                Set<String> seenInFile = new HashSet<String>();
+                for (String raw : file.getTags()) {
+                    String plain = TagText.plain(raw);
+                    if (plain.isEmpty() || !seenInFile.add(plain)) continue;
+                    Integer count = usage.get(plain);
+                    usage.put(plain, count == null ? 1 : count + 1);
+                }
+            }
+        }
+
+        executor.submit(new Runnable() {
+            @Override public void run() {
+                synchronized (tagMap) {
+                    for (Map.Entry<String, Integer> entry : usage.entrySet()) {
+                        String name = entry.getKey();
+                        int count = entry.getValue() == null ? 0 : entry.getValue();
+                        Tag tag = tagMap.get(name);
+                        boolean created = false;
+                        if (tag == null) {
+                            tag = new Tag(name);
+                            tagMap.put(name, tag);
+                            created = true;
+                        }
+                        if (tag.getUsageCount() != count) tag.setUsageCount(count);
+                        if (created) db.tagDao().insert(tag);
+                        else db.tagDao().update(tag);
+                    }
+                    for (Tag tag : tagMap.values()) {
+                        if (!usage.containsKey(tag.getName()) && tag.getUsageCount() != 0) {
+                            tag.setUsageCount(0);
+                            db.tagDao().update(tag);
+                        }
+                    }
+                }
+                notifyTagsChanged();
+            }
         });
     }
 
@@ -277,8 +367,11 @@ public class TagManager {
     public List<Tag> getAllTags() {
         synchronized (tagMap) {
             List<Tag> list = new ArrayList<>(tagMap.values());
-            Collections.sort(list, (a, b) ->
-                Integer.compare(b.getUsageCount(), a.getUsageCount()));
+            Collections.sort(list, new java.util.Comparator<Tag>() {
+                @Override public int compare(Tag a, Tag b) {
+                    return Integer.compare(b.getUsageCount(), a.getUsageCount());
+                }
+            });
             return list;
         }
     }
@@ -289,12 +382,14 @@ public class TagManager {
     }
 
     public boolean hasTagName(String name) {
+        String plain = TagText.plain(name);
+        if (plain.isEmpty()) return false;
         synchronized (tagMap) {
-            return tagMap.containsKey(name);
+            return tagMap.containsKey(plain);
         }
     }
 
-    public List<Tag> getRecentTags(int n) {
+    public synchronized List<Tag> getRecentTags(int n) {
         List<Tag> result = new ArrayList<>();
         synchronized (tagMap) {
             int count = 0;

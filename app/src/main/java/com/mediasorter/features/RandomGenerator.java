@@ -3,6 +3,13 @@ package com.mediasorter.features;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.util.Log;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.HashSet;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -12,6 +19,10 @@ import java.util.Set;
 public final class RandomGenerator {
 
     private static final Random RAND = new Random();
+    private static final java.util.regex.Pattern CUSTOM_TOKEN =
+            java.util.regex.Pattern.compile("\\{([^{}]+)\\}");
+    private static final java.util.regex.Pattern TAG_TOKEN =
+            java.util.regex.Pattern.compile("tag:[0-9]+");
 
     private static final java.util.regex.Pattern LEADING_PATTERN = java.util.regex.Pattern.compile("^(link_|tag_)", java.util.regex.Pattern.CASE_INSENSITIVE);
     private static final java.util.regex.Pattern TRAILING_SEQ = java.util.regex.Pattern.compile("_seq_[a-z0-9]+$", java.util.regex.Pattern.CASE_INSENSITIVE);
@@ -137,6 +148,121 @@ public final class RandomGenerator {
         String p2 = SYLLABLES[RAND.nextInt(SYLLABLES.length)];
         String p3 = SYLLABLES[RAND.nextInt(SYLLABLES.length)];
         return p1 + "-" + p2 + "-" + p3;
+    }
+
+    /**
+     * Generate the tag requested by SettingsActivity. The method is kept
+     * context-aware instead of caching a Context so it is safe to call from a
+     * dialog, a gesture, or a background action without leaking an Activity.
+     */
+    public static String randomTag(Context context, Set<String> existingTags) {
+        String format = "syllable";
+        String custom = "{syl}-{date}";
+        if (context != null) {
+            SharedPreferences prefs = context.getSharedPreferences(
+                    "settings_prefs", Context.MODE_PRIVATE);
+            format = prefs.getString("random_tag_format", "syllable");
+            custom = prefs.getString("random_tag_custom_pattern", custom);
+        }
+        String base;
+        if ("hex".equalsIgnoreCase(format)) {
+            base = randomPlaceholderTag();
+        } else if ("custom".equalsIgnoreCase(format)) {
+            base = resolveCustomPattern(custom, existingTags);
+        } else if ("random".equalsIgnoreCase(format)) {
+            int choice = RAND.nextInt(3);
+            if (choice == 0) base = randomSyllableTag();
+            else if (choice == 1) base = randomPlaceholderTag();
+            else base = resolveCustomPattern(custom, existingTags);
+        } else {
+            base = randomSyllableTag();
+        }
+        if (existingTags == null || !existingTags.contains(base)) return base;
+        return uniqueSuffixTag(base, existingTags);
+    }
+
+    private static String resolveCustomPattern(String pattern, Set<String> existingTags) {
+        String value = pattern == null || pattern.trim().isEmpty()
+                ? "{syl}-{date}" : pattern;
+        Calendar now = Calendar.getInstance();
+        value = value.replace("{syl}", randomSyllableTag());
+        value = value.replace("{hex}", randomHex(6));
+        value = value.replace("{seq}", nextCustomSequence(existingTags));
+        value = value.replace("{date}", new SimpleDateFormat(
+                "yyyyMMdd", Locale.US).format(now.getTime()));
+        value = value.replace("{year}", String.format(Locale.US, "%04d", now.get(Calendar.YEAR)));
+        value = value.replace("{month}", String.format(Locale.US, "%02d", now.get(Calendar.MONTH) + 1));
+        value = value.replace("{day}", String.format(Locale.US, "%02d", now.get(Calendar.DAY_OF_MONTH)));
+        value = value.replace("{random}", randomSyllableTag());
+        // These variables require a MediaFile and are therefore empty in a
+        // standalone random tag pattern. They are still known placeholders.
+        value = value.replace("{filename}", "");
+        value = value.replace("{ext}", "");
+        value = value.replace("{size}", "");
+        value = value.replace("{index}", "");
+        java.util.regex.Matcher tagMatcher = TAG_TOKEN.matcher(value);
+        StringBuffer tagBuffer = new StringBuffer();
+        while (tagMatcher.find()) tagMatcher.appendReplacement(tagBuffer, "");
+        tagMatcher.appendTail(tagBuffer);
+        value = tagBuffer.toString();
+
+        java.util.regex.Matcher matcher = CUSTOM_TOKEN.matcher(value);
+        StringBuffer buffer = new StringBuffer();
+        while (matcher.find()) {
+            String token = matcher.group(1);
+            Log.w("RandomGenerator", "Unknown random tag placeholder: {" + token + "}");
+            matcher.appendReplacement(buffer, "");
+        }
+        matcher.appendTail(buffer);
+        return buffer.toString().trim();
+    }
+
+    /** Return unknown {placeholder} tokens for SettingsActivity validation. */
+    public static List<String> findUnknownPlaceholders(String pattern) {
+        List<String> unknown = new ArrayList<String>();
+        if (pattern == null) return unknown;
+        java.util.regex.Matcher matcher = CUSTOM_TOKEN.matcher(pattern);
+        while (matcher.find()) {
+            String token = matcher.group(1);
+            if (!isKnownCustomPlaceholder(token) && !unknown.contains(token)) unknown.add(token);
+        }
+        return unknown;
+    }
+
+    private static boolean isKnownCustomPlaceholder(String token) {
+        return "syl".equals(token) || "hex".equals(token) || "seq".equals(token)
+                || "date".equals(token) || "year".equals(token) || "month".equals(token)
+                || "day".equals(token) || "index".equals(token) || "random".equals(token)
+                || "filename".equals(token) || "ext".equals(token) || "size".equals(token)
+                || TAG_TOKEN.matcher(token).matches();
+    }
+
+    private static String randomHex(int count) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            builder.append(Integer.toHexString(RAND.nextInt(16)).toUpperCase(Locale.US));
+        }
+        return builder.toString();
+    }
+
+    private static String nextCustomSequence(Set<String> existingTags) {
+        int next = 0;
+        if (existingTags != null) {
+            String prefix = "seq";
+            next = nextSequenceIndex(prefix, existingTags);
+        }
+        return sequenceLabel(next);
+    }
+
+    /** Fisher-Yates shuffle for callers that need the app's shared random source. */
+    public static <T> void shuffle(List<T> values) {
+        if (values == null) return;
+        for (int i = values.size() - 1; i > 0; i--) {
+            int j = RAND.nextInt(i + 1);
+            T value = values.get(i);
+            values.set(i, values.get(j));
+            values.set(j, value);
+        }
     }
 
     /**

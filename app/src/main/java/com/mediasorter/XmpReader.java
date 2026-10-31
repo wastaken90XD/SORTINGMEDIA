@@ -15,9 +15,29 @@ public class XmpReader {
     private static final String TAG = "XmpReader";
 
     private static final Pattern TAG_PATTERN =
-        Pattern.compile("<rdf:li[^>]*>([^<]+)</rdf:li>");
+        Pattern.compile("<rdf:li[^>]*>(.*?)</rdf:li>", Pattern.DOTALL);
 
     // ── Public API ────────────────────────────────────────────────────────────
+
+    /** Returns true when the file contains an XMP packet, even if it has no tags. */
+    public static boolean hasMetadata(String filePath) {
+        if (filePath == null || filePath.isEmpty()) return false;
+        try {
+            File file = new File(filePath);
+            int readSize = (int) Math.min(file.length(), 524288);
+            if (readSize <= 0) return false;
+            byte[] data = new byte[readSize];
+            RandomAccessFile raf = new RandomAccessFile(filePath, "r");
+            raf.readFully(data);
+            raf.close();
+            String content = new String(data, StandardCharsets.ISO_8859_1);
+            return content.indexOf("<?xpacket") >= 0
+                    || content.indexOf("<x:xmpmeta") >= 0
+                    || content.indexOf("<dc:subject>") >= 0;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
 
     public static List<String> readTags(String filePath) {
         if (filePath == null || filePath.isEmpty()) return new ArrayList<>();
@@ -26,9 +46,12 @@ public class XmpReader {
             String lower = filePath.toLowerCase(java.util.Locale.US);
             if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
                 return readJpeg(filePath);
-            } else if (lower.endsWith(".png")) {
+            } else if (lower.endsWith(".png") || lower.endsWith(".webp")
+                    || lower.endsWith(".bmp") || lower.endsWith(".gif")) {
                 return readGeneric(filePath, false);
-            } else if (lower.endsWith(".mp4") || lower.endsWith(".mov")) {
+            } else if (lower.endsWith(".mp4") || lower.endsWith(".mov")
+                    || lower.endsWith(".3gp") || lower.endsWith(".avi")
+                    || lower.endsWith(".mkv") || lower.endsWith(".webm")) {
                 return readGeneric(filePath, true);
             }
         } catch (Exception e) {
@@ -115,10 +138,24 @@ public class XmpReader {
 
         Matcher m = TAG_PATTERN.matcher(subject);
         while (m.find()) {
-            String tag = m.group(1).trim();
-            if (!tag.isEmpty()) tags.add(tag);
+            String tag = TagText.plain(unescapeXml(m.group(1)));
+            if (!tag.isEmpty() && !tags.contains(tag)) tags.add(tag);
         }
 
         return tags;
+    }
+
+    private static String unescapeXml(String value) {
+        if (value == null) return "";
+        String result = value.trim();
+        if (result.startsWith("<![CDATA[") && result.endsWith("]]>")
+                && result.length() >= 12) {
+            result = result.substring(9, result.length() - 3);
+        }
+        return result.replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&apos;", "'")
+                .replace("&amp;", "&");
     }
 }

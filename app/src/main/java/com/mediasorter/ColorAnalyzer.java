@@ -49,8 +49,8 @@ public class ColorAnalyzer {
         public ProgressListener progressListener;
 
         // ── Golden ticket (signature colour) options ─────────────────────
-        /** Prefix for the one-colour-per-file tag, e.g. "★ Deep Lagoon". */
-        public String  signaturePrefix           = "★ ";
+        /** Optional plain-text prefix for the one-colour-per-file tag. */
+        public String  signaturePrefix           = "";
         /** Minimum pixel coverage (0..1) a colour needs to be a candidate. */
         public float   signatureMinCoverage      = 0.03f;
         /** Skip files that already carry a signature tag (idempotent runs —
@@ -91,6 +91,13 @@ public class ColorAnalyzer {
      *  conversions per dominant colour per file. Computing once saves ~90% of
      *  the naming cost on large selections. */
     private static volatile float[][] sPaletteLab = null;
+    private static final Map<String, String> LAST_COLOR_FAMILIES =
+            new java.util.concurrent.ConcurrentHashMap<String, String>();
+
+    /** Color profile from the most recent completed analysis in this process. */
+    public static String getLastColorFamily(String path) {
+        return path == null ? null : LAST_COLOR_FAMILIES.get(path);
+    }
 
     private static float[][] paletteLab() {
         float[][] cached = sPaletteLab;
@@ -150,6 +157,7 @@ public class ColorAnalyzer {
 
         final boolean wantSignature =
                 opts.mode == Mode.SIGNATURE || opts.mode == Mode.GOLDEN_TICKET;
+        final String signaturePrefix = TagText.plain(opts.signaturePrefix);
 
         List<Result> results = new ArrayList<>();
         int total = files.size();
@@ -172,7 +180,7 @@ public class ColorAnalyzer {
             // Idempotence: honour an existing signature tag and skip the whole
             // decode+analysis for that file.
             if (wantSignature && opts.respectExistingSignature) {
-                String existing = findExistingSignature(file.getTags(), opts.signaturePrefix);
+                String existing = findExistingSignature(file.getTags(), signaturePrefix);
                 if (existing != null) {
                     r.signatureColor = existing;
                     r.success = true;
@@ -234,19 +242,26 @@ public class ColorAnalyzer {
             Result r    = results.get(i);
             MediaFile f = files.get(i);
             if (!r.success) continue;
+            if (!r.colors.isEmpty()) {
+                f.setColorFamily(r.colors.get(0));
+                LAST_COLOR_FAMILIES.put(f.getPath(), r.colors.get(0));
+            } else if (r.signatureColor != null) {
+                f.setColorFamily(r.signatureColor);
+                LAST_COLOR_FAMILIES.put(f.getPath(), r.signatureColor);
+            }
 
             if (wantSignature) {
                 // Signature modes apply ONLY the golden ticket (plus rename for
                 // GOLDEN_TICKET) — the classic colour properties stay out of it.
                 if (r.signatureColor != null) {
                     if (tagManager != null) {
-                        tagManager.applyTag(f, opts.signaturePrefix + r.signatureColor);
+                        tagManager.applyTag(f, signaturePrefix + r.signatureColor);
                     }
                     if (opts.mode == Mode.GOLDEN_TICKET) {
                         renameWithPrefix(f, r,
-                                opts.signaturePrefix.trim().isEmpty()
+                                signaturePrefix.isEmpty()
                                         ? r.signatureColor.replace(" ", "-")
-                                        : opts.signaturePrefix.trim()
+                                        : signaturePrefix.trim()
                                                 + r.signatureColor.replace(" ", "-"));
                     }
                 }
@@ -294,6 +309,7 @@ public class ColorAnalyzer {
 
         String newName = prefix + "_" + oldName + ext;
         File oldFile = new File(r.path);
+        String oldPath = oldFile.getAbsolutePath();
         File newFile = new File(oldFile.getParent(), newName);
 
         if (newFile.equals(oldFile)) return;      // nothing to do
@@ -301,6 +317,11 @@ public class ColorAnalyzer {
         if (oldFile.renameTo(newFile)) {
             r.path = newFile.getAbsolutePath();
             f.setPath(newFile.getAbsolutePath());
+            String family = f.getColorFamily();
+            if (!family.isEmpty()) {
+                LAST_COLOR_FAMILIES.remove(oldPath);
+                LAST_COLOR_FAMILIES.put(f.getPath(), family);
+            }
         }
         // else: leave r.path unchanged so the caller sees what happened
     }
@@ -394,13 +415,10 @@ public class ColorAnalyzer {
         if (bmp == null) throw new RuntimeException("decode failed");
 
         Bitmap scaled = Bitmap.createScaledBitmap(bmp, SAMPLE, SAMPLE, false);
-        // createScaledBitmap returns the SAME object when no scaling is needed
-        // (image already SAMPLE-sized) — recycling it would kill our pixels.
-        if (scaled != bmp) bmp.recycle();
-
+        // createScaledBitmap may return the same object when no scaling is needed.
+        // Bitmap lifetime is left to the garbage collector.
         int[] pixels = new int[SAMPLE * SAMPLE];
         scaled.getPixels(pixels, 0, SAMPLE, 0, 0, SAMPLE, SAMPLE);
-        scaled.recycle();
 
         List<float[]> labs = new ArrayList<>(pixels.length);
         for (int p : pixels) {
@@ -473,11 +491,33 @@ public class ColorAnalyzer {
     private static String findExistingSignature(List<String> tags, String prefix) {
         if (tags == null || prefix == null) return null;
         for (String t : tags) {
-            if (t != null && t.startsWith(prefix)) {
-                return t.substring(prefix.length());
+            String plain = TagText.plain(t);
+            if (plain.isEmpty()) continue;
+            if (!prefix.isEmpty() && plain.startsWith(prefix)) {
+                String color = plain.substring(prefix.length()).trim();
+                if (!color.isEmpty()) return color;
+            } else if (prefix.isEmpty() && isKnownSignatureName(plain)) {
+                // The default signature has no decoration prefix.  Restrict
+                // the match to generated names so an ordinary tag is not
+                // mistaken for an existing signature.
+                return plain;
             }
         }
         return null;
+    }
+
+    private static boolean isKnownSignatureName(String name) {
+        for (String gray : SIGNATURE_GRAY) {
+            if (gray.equals(name)) return true;
+        }
+        for (String family : SIGNATURE_HUE) {
+            if (family.equals(name)
+                    || ("Deep " + family).equals(name)
+                    || ("Pale " + family).equals(name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ── Decode ────────────────────────────────────────────────────────────────
@@ -521,13 +561,10 @@ public class ColorAnalyzer {
         if (bmp == null) throw new RuntimeException("decode failed");
 
         Bitmap scaled = Bitmap.createScaledBitmap(bmp, SAMPLE, SAMPLE, false);
-        // createScaledBitmap returns the SAME object when no scaling is needed
-        // (image already SAMPLE-sized) — recycling it would kill our pixels.
-        if (scaled != bmp) bmp.recycle();
-
+        // createScaledBitmap may return the same object when no scaling is needed.
+        // Bitmap lifetime is left to the garbage collector.
         int[] pixels = new int[SAMPLE * SAMPLE];
         scaled.getPixels(pixels, 0, SAMPLE, 0, 0, SAMPLE, SAMPLE);
-        scaled.recycle();
 
         List<float[]> labs = new ArrayList<>(pixels.length);
         for (int p : pixels) {

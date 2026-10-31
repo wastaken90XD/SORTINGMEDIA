@@ -3,6 +3,7 @@ package com.mediasorter.models;
 import androidx.room.Entity;
 import androidx.room.PrimaryKey;
 import androidx.annotation.NonNull;
+import com.mediasorter.TagText;
 import java.io.Serializable;
 
 @Entity(tableName = "tags")    
@@ -16,7 +17,7 @@ public class Tag implements Serializable {
     private long   createdAt;
 
     public Tag(@NonNull String name) {
-        this.name      = name;
+        this.name      = TagText.plain(name);
         this.usageCount = 0;
         this.createdAt  = System.currentTimeMillis();
     }
@@ -26,7 +27,7 @@ public class Tag implements Serializable {
     public int    getUsageCount()  { return usageCount; }
     public long   getCreatedAt()   { return createdAt; }
 
-    public void setName(@NonNull String n) { name       = n; }
+    public void setName(@NonNull String n) { name       = TagText.plain(n); }
     public void setUsageCount(int c)       { usageCount = c; }
     public void setCreatedAt(long t)       { createdAt  = t; }
 
