@@ -84,6 +84,25 @@ public class MainActivity extends Activity
         });
     }
 
+    /** Adapter notifications are posted after the current RecyclerView frame. */
+    private void setSmartAdapterBadges(final Map<String, Integer> positions,
+                                       final Map<String, Integer> totals, final boolean show) {
+        final Runnable update = new Runnable() {
+            @Override public void run() {
+                if (mediaAdapter != null) mediaAdapter.setSmartPositionData(positions, totals, show);
+            }
+        };
+        if (fileBrowser != null) fileBrowser.post(update);
+        else mainHandler.post(update);
+        Runnable galleryUpdate = new Runnable() {
+            @Override public void run() {
+                if (galleryAdapter != null) galleryAdapter.setSmartPositionData(positions, totals, show);
+            }
+        };
+        if (galleryBrowser != null) galleryBrowser.post(galleryUpdate);
+        else mainHandler.post(galleryUpdate);
+    }
+
     private BatchRenameManager batchRenameManager = new BatchRenameManager();
     private MediaIndexer    indexer;
     private TagManager      tagManager;
@@ -277,8 +296,7 @@ public class MainActivity extends Activity
                 smartResult = null;
                 smartGroups = new ArrayList<Group>();
                 com.mediasorter.features.SmartState.clear();
-                if (mediaAdapter != null) mediaAdapter.setSmartPositionData(null, null, false);
-                if (galleryAdapter != null) galleryAdapter.setSmartPositionData(null, null, false);
+                setSmartAdapterBadges(null, null, false);
             }
         }
         applyUiToggles();
@@ -1213,14 +1231,8 @@ public class MainActivity extends Activity
                         sortManager.setSmartRanks(result.ranks);
                         boolean showSmartBadge = getSharedPreferences("settings_prefs", MODE_PRIVATE)
                                 .getBoolean("smart_show_position_badge", true);
-                        if (mediaAdapter != null) {
-                            mediaAdapter.setSmartPositionData(result.groupPositions,
-                                    result.groupTotals, showSmartBadge);
-                        }
-                        if (galleryAdapter != null) {
-                            galleryAdapter.setSmartPositionData(result.groupPositions,
-                                    result.groupTotals, showSmartBadge);
-                        }
+                        setSmartAdapterBadges(result.groupPositions, result.groupTotals,
+                                showSmartBadge);
                         if (result.slowedDown) Toast.makeText(MainActivity.this,
                                 "Smart sort slowed down to protect performance.",
                                 Toast.LENGTH_LONG).show();
@@ -2828,8 +2840,7 @@ public class MainActivity extends Activity
                         smartResult = null;
                         smartGroups = new ArrayList<Group>();
                         com.mediasorter.features.SmartState.clear();
-                        if (mediaAdapter != null) mediaAdapter.setSmartPositionData(null, null, false);
-                        if (galleryAdapter != null) galleryAdapter.setSmartPositionData(null, null, false);
+                        setSmartAdapterBadges(null, null, false);
                         if (smartSortEngine != null) smartSortEngine.setEnabled(false);
                         Toast.makeText(MainActivity.this, "Smart order locked for "
                                 + snapshot.size() + " files", Toast.LENGTH_SHORT).show();
@@ -3077,8 +3088,7 @@ public class MainActivity extends Activity
                     smartResult = null;
                     smartGroups = new ArrayList<Group>();
                     com.mediasorter.features.SmartState.clear();
-                    if (mediaAdapter != null) mediaAdapter.setSmartPositionData(null, null, false);
-                    if (galleryAdapter != null) galleryAdapter.setSmartPositionData(null, null, false);
+                    setSmartAdapterBadges(null, null, false);
                 }
             }
             Toast.makeText(this, enabled ? "Smart Sort enabled" : "Smart Sort disabled",

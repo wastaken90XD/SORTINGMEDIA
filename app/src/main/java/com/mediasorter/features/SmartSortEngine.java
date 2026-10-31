@@ -71,14 +71,12 @@ public class SmartSortEngine {
         final int k;
         final int[] indexes;
         final float[] distances;
-        final String[] paths;
         long comparisons;
 
         NeighborTable(int fileCount, int neighbors) {
             k = neighbors;
             indexes = new int[Math.max(1, fileCount * neighbors)];
             distances = new float[Math.max(1, fileCount * neighbors)];
-            paths = new String[Math.max(1, fileCount * neighbors)];
             Arrays.fill(indexes, -1);
             Arrays.fill(distances, Float.MAX_VALUE);
         }
@@ -233,7 +231,8 @@ public class SmartSortEngine {
         Result result = new Result();
         result.generation = requestGeneration;
         result.lowMemoryDevice = lowMemory;
-        result.featureBytes = files.size() * 9L;
+        result.featureBytes = files.size() * 9L
+                + (long) files.size() * Math.max(1, prefs.getInt("smart_k_neighbors", 5)) * 4L;
         ArrayList<Integer> labeled = new ArrayList<Integer>();
         ArrayList<Integer> unlabeled = new ArrayList<Integer>();
         boolean[] labeledMask = new boolean[files.size()];
@@ -487,6 +486,7 @@ public class SmartSortEngine {
                 List<Integer> candidates = candidateIndexes(files, labeled, targetIndex,
                         features, maxPool);
                 for (Integer candidateIndex : candidates) {
+                    if ((table.comparisons & 31L) == 0L) checkpoint(requestGeneration);
                     table.comparisons++;
                     float value = distance(files.get(targetIndex), targetIndex,
                             files.get(candidateIndex), candidateIndex, features);
@@ -498,6 +498,7 @@ public class SmartSortEngine {
                 for (String path : newlyLabeled) {
                     Integer candidateIndex = currentIndexes.get(path);
                     if (candidateIndex == null || candidateIndex == targetIndex) continue;
+                    if ((table.comparisons & 31L) == 0L) checkpoint(requestGeneration);
                     table.comparisons++;
                     float value = distance(files.get(targetIndex), targetIndex,
                             files.get(candidateIndex), candidateIndex, features);
@@ -537,7 +538,6 @@ public class SmartSortEngine {
         for (int slot = 0; slot < table.k; slot++) {
             table.indexes[offset + slot] = -1;
             table.distances[offset + slot] = Float.MAX_VALUE;
-            table.paths[offset + slot] = null;
         }
     }
 
@@ -555,9 +555,9 @@ public class SmartSortEngine {
         }
         previousLabeledPaths = new HashSet<String>();
         for (Integer index : labeled) previousLabeledPaths.add(files.get(index).getPath());
-        previousNeighborPaths = new String[table.paths.length];
+        previousNeighborPaths = new String[table.indexes.length];
         previousNeighborDistances = new float[table.distances.length];
-        for (int i = 0; i < table.paths.length; i++) {
+        for (int i = 0; i < table.indexes.length; i++) {
             int neighborIndex = table.indexes[i];
             previousNeighborPaths[i] = neighborIndex < 0 ? null : files.get(neighborIndex).getPath();
             previousNeighborDistances[i] = table.distances[i];
