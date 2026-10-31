@@ -2,8 +2,6 @@ package com.mediasorter.features;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.media.MediaMetadataRetriever;
-import android.os.SystemClock;
 import com.mediasorter.FileStatus;
 import com.mediasorter.models.MediaFile;
 import java.io.File;

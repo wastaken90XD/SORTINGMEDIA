@@ -88,10 +88,14 @@ public final class SmartFeatureCache {
             }
             out.flush();
             out.close();
-            if (file.exists() && !file.delete()) {
+            File backup = new File(parent, file.getName() + ".bak");
+            if (backup.exists()) backup.delete();
+            boolean hadOld = file.exists() && file.renameTo(backup);
+            if (temp.renameTo(file)) {
+                if (hadOld) backup.delete();
+            } else {
                 temp.delete();
-            } else if (!temp.renameTo(file)) {
-                temp.delete();
+                if (hadOld) backup.renameTo(file);
             }
         } catch (Exception ignored) {
             temp.delete();
@@ -121,7 +125,7 @@ public final class SmartFeatureCache {
                 entries.put(path, value);
             }
             in.close();
-        } catch (Exception error) {
+        } catch (Throwable error) {
             entries.clear();
             file.delete();
         }
