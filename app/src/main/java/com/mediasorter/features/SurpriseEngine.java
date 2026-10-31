@@ -217,11 +217,12 @@ public class SurpriseEngine {
         if (history.isEmpty()) return 1.0;
         double best = Double.MAX_VALUE;
         int checked = 0;
-        for (String path : history) {
-            MediaFile previous = find(pool, path);
+        List<String> recent = new ArrayList<String>(history);
+        for (int i = recent.size() - 1; i >= 0 && checked < 10; i--) {
+            MediaFile previous = find(pool, recent.get(i));
             if (previous != null) {
                 best = Math.min(best, featureDistance(file, previous));
-                if (++checked >= 10) break; // exactly the last ten history files
+                checked++;
             }
         }
         return best == Double.MAX_VALUE ? 1.0 : Math.min(1.0, best);

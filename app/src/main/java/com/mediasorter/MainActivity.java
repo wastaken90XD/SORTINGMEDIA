@@ -3043,7 +3043,10 @@ public class MainActivity extends Activity
         new AlertDialog.Builder(this).setTitle("Move to Smart pile")
                 .setItems(choices, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
+                        String oldPile = findPileTag(file);
                         tagManager.applyTag(file, choices[which]);
+                        if (!oldPile.isEmpty() && !oldPile.equals(choices[which])
+                                && file.hasTag(oldPile)) tagManager.removeTag(file, oldPile);
                         getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
                                 .putString("smart_active_pile", choices[which])
                                 .putString("smart_pile_mode", "scope").apply();

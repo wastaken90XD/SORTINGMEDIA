@@ -665,6 +665,10 @@ public class SmartSortEngine {
         if (remaining.isEmpty()) return ordered;
         while (!remaining.isEmpty()) {
             checkpoint(requestGeneration);
+            if (ordered.isEmpty() && labeled.isEmpty()) {
+                ordered.add(remaining.remove(random.nextInt(remaining.size())));
+                continue;
+            }
             int bestPosition = 0;
             float bestDistance = -1f;
             for (int i = 0; i < remaining.size(); i++) {
