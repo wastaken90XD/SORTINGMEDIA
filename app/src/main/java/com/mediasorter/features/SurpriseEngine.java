@@ -7,6 +7,7 @@ import com.mediasorter.models.MediaFile;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -30,9 +31,10 @@ public class SurpriseEngine {
 
     private final Random random = new Random();
     private final android.content.SharedPreferences prefs;
-    private final LinkedHashSet<String> history = new LinkedHashSet<String>();
+    private final Set<String> history = Collections.synchronizedSet(new LinkedHashSet<String>());
     private final ArrayList<String> deck = new ArrayList<String>();
-    private final Map<String, Long> featureHashes = new HashMap<String, Long>();
+    private final Map<String, Long> featureHashes = Collections.synchronizedMap(
+            new HashMap<String, Long>());
     private final boolean lowMemory;
     private int deckPosition;
     private int deckWalked;
@@ -72,13 +74,13 @@ public class SurpriseEngine {
         poolGeneration = -1;
     }
 
-    public synchronized MediaFile pick(List<MediaFile> pool, Mode requested,
+    public MediaFile pick(List<MediaFile> pool, Mode requested,
                                         FileStatus status, int generation) {
         return pick(pool, requested, status, generation, null);
     }
 
     /** Smart result is optional; it supplies the actual uncertainty queue. */
-    public synchronized MediaFile pick(List<MediaFile> pool, Mode requested,
+    public MediaFile pick(List<MediaFile> pool, Mode requested,
                                         FileStatus status, int generation,
                                         SmartSortEngine.Result smartResult) {
         if (pool == null || pool.isEmpty()) return null;
@@ -215,7 +217,8 @@ public class SurpriseEngine {
         if (history.isEmpty()) return 1.0;
         double best = Double.MAX_VALUE;
         int checked = 0;
-        List<String> recent = new ArrayList<String>(history);
+        List<String> recent;
+        synchronized (history) { recent = new ArrayList<String>(history); }
         for (int i = recent.size() - 1; i >= 0 && checked < 10; i--) {
             MediaFile previous = find(pool, recent.get(i));
             if (previous != null) {
@@ -392,10 +395,12 @@ public class SurpriseEngine {
 
     private void remember(String path) {
         if (path == null) return;
-        history.remove(path);
-        history.add(path);
-        int max = Math.max(5, Math.min(500, prefs.getInt(KEY_HISTORY_SIZE, 50)));
-        while (history.size() > max) history.remove(history.iterator().next());
+        synchronized (history) {
+            history.remove(path);
+            history.add(path);
+            int max = Math.max(5, Math.min(500, prefs.getInt(KEY_HISTORY_SIZE, 50)));
+            while (history.size() > max) history.remove(history.iterator().next());
+        }
     }
 
     private void fisherYates(List<String> values) {
