@@ -455,13 +455,38 @@ public class SettingsActivity extends Activity {
                 }));
     }
 
+    private int smartOrderPosition() {
+        String value = settingsPrefs.getString("smart_order_mode", "auto");
+        if ("queue".equals(value)) return 0;
+        if ("arranged".equals(value)) return 1;
+        return 2;
+    }
+
     private void addSmartSettingsSection(LinearLayout root) {
         root.addView(makeTitle("Smart Sort"));
         root.addView(makeLabel("Tags are the only Smart Sort labels; suggestions are never applied automatically."));
+        root.addView(makeLabel("Analysis status is shown on the main screen while Smart Sort is active."));
         root.addView(makeCheckBoxRow("Enable Smart Sort",
                 settingsPrefs.getBoolean("smart_enabled", false), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("smart_enabled", value); }
                 }));
+        root.addView(makeSpinnerRow("Smart order mode:",
+                new String[]{"queue", "arranged", "auto"},
+                smartOrderPosition(), new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) {
+                        saveString("smart_order_mode", value);
+                    }
+                }));
+        final Button pauseSmart = makeButton(settingsPrefs.getBoolean("smart_paused", false)
+                ? "Resume Smart analysis" : "Pause Smart analysis");
+        pauseSmart.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                boolean paused = !settingsPrefs.getBoolean("smart_paused", false);
+                saveBoolean("smart_paused", paused);
+                pauseSmart.setText(paused ? "Resume Smart analysis" : "Pause Smart analysis");
+            }
+        });
+        root.addView(pauseSmart);
         root.addView(makeCheckBoxRow("Show Smart position badge",
                 settingsPrefs.getBoolean("smart_show_position_badge", true), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("smart_show_position_badge", value); }

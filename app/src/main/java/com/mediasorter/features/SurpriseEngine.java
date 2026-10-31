@@ -24,6 +24,7 @@ public class SurpriseEngine {
     public enum Mode { UNIFORM, DECK, STRIDE, WEIGHTED, DIVERSITY, GROUP_FIRST, LEAST_SURE }
 
     private final Random random = new Random();
+    private final android.content.SharedPreferences prefs;
     private final LinkedHashSet<String> history = new LinkedHashSet<String>();
     private final ArrayList<String> deck = new ArrayList<String>();
     private int deckPosition;
@@ -31,7 +32,9 @@ public class SurpriseEngine {
     private int strideSize = -1;
     private int poolGeneration = -1;
 
-    public SurpriseEngine(Context context) {}
+    public SurpriseEngine(Context context) {
+        prefs = context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
+    }
 
     public synchronized Mode getMode(android.content.SharedPreferences prefs) {
         String raw = prefs == null ? "uniform" : prefs.getString(KEY_MODE, "uniform");
@@ -126,8 +129,11 @@ public class SurpriseEngine {
         for (MediaFile file : pool) {
             if (history.contains(file.getPath()) && pool.size() > history.size()) continue;
             double weight = 1.0;
-            if (file.getTags().isEmpty()) weight += 2.0;
-            if (status != null && status.isFlagged(file.getPath())) weight += 0.5;
+            if (file.getTags().isEmpty()) weight += Math.max(0, prefs.getInt(KEY_W_UNTAGGED, 3) - 1);
+            if (!history.contains(file.getPath())) weight += Math.max(0, prefs.getInt(KEY_W_STALE, 2) - 1);
+            if (status != null && status.isFlagged(file.getPath())) {
+                weight += Math.max(0, prefs.getInt(KEY_W_FLAGGED, 1) - 1);
+            }
             double u = Math.max(0.000001, random.nextDouble());
             double key = -Math.log(u) / Math.max(0.001, weight);
             if (key < best) { best = key; selected = file; }
@@ -136,7 +142,8 @@ public class SurpriseEngine {
     }
 
     private MediaFile pickDiversity(List<MediaFile> pool) {
-        int cap = Math.min(pool.size(), 200);
+        int cap = Math.min(pool.size(), Math.max(20,
+                Math.min(1000, prefs.getInt(KEY_CANDIDATE_CAP, 200))));
         MediaFile selected = null;
         int bestScore = -1;
         for (int i = 0; i < cap; i++) {
@@ -179,7 +186,8 @@ public class SurpriseEngine {
         if (path == null) return;
         history.remove(path);
         history.add(path);
-        int max = Math.max(5, Math.min(500, poolSize <= 0 ? 50 : poolSize));
+        int max = Math.max(5, Math.min(500,
+                prefs.getInt(KEY_HISTORY_SIZE, 50)));
         while (history.size() > max) {
             String first = history.iterator().next();
             history.remove(first);
