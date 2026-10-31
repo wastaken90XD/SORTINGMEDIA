@@ -2678,8 +2678,33 @@ public class MainActivity extends Activity
     }
 
     private String activeSmartPile() {
-        return getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                .getString("smart_active_pile", "");
+        android.content.SharedPreferences prefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        String active = prefs.getString("smart_active_pile", "");
+        if (active != null && !active.trim().isEmpty()) return active.trim();
+        MediaFile current = currentFileReference();
+        String patterns = prefs.getString("smart_pile_tag_patterns", "");
+        if (current != null && !patterns.trim().isEmpty()) {
+            for (String tag : current.getTags()) {
+                if (matchesPilePattern(tag, patterns)) return tag;
+            }
+        }
+        return "";
+    }
+
+    private boolean matchesPilePattern(String value, String patterns) {
+        if (value == null) return false;
+        for (String raw : patterns.split(",")) {
+            String pattern = raw.trim();
+            if (pattern.isEmpty()) continue;
+            StringBuilder regex = new StringBuilder();
+            for (int i = 0; i < pattern.length(); i++) {
+                char c = pattern.charAt(i);
+                if (c == '*') regex.append(".*");
+                else regex.append(java.util.regex.Pattern.quote(String.valueOf(c)));
+            }
+            if (value.matches("(?i)^" + regex + "$")) return true;
+        }
+        return false;
     }
 
     private void showSmartSplitPileDialog() {

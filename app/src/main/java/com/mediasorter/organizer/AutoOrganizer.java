@@ -183,8 +183,10 @@ public class AutoOrganizer {
                 com.mediasorter.features.SmartState.confidence(file.getPath())));
         resolved = resolved.replace("{smart_suggested_tag}",
                 com.mediasorter.features.SmartState.suggestedTag(file.getPath()));
-        resolved = resolved.replace("{smart_group_pos}", "");
-        resolved = resolved.replace("{smart_group_total}", "");
+        resolved = resolved.replace("{smart_group_pos}", String.valueOf(
+                com.mediasorter.features.SmartState.groupPosition(file.getPath())));
+        resolved = resolved.replace("{smart_group_total}", String.valueOf(
+                com.mediasorter.features.SmartState.groupTotal(file.getPath())));
         Matcher tagMatcher = Pattern.compile("\\{tag:(\\d+)\\}").matcher(resolved);
         StringBuffer buffer = new StringBuffer();
         while (tagMatcher.find()) {
