@@ -24,8 +24,9 @@ public final class SmartState {
             groupTotals.clear();
             int total = values == null ? 0 : values.size();
             if (values != null) {
-                for (Map.Entry<String, Integer> entry : values.entrySet()) {
-                    groupPositions.put(entry.getKey(), entry.getValue() + 1);
+                int position = 1;
+                for (Map.Entry<String, Float> entry : values.entrySet()) {
+                    groupPositions.put(entry.getKey(), position++);
                     groupTotals.put(entry.getKey(), total);
                 }
             }
