@@ -3244,9 +3244,19 @@ public class MainActivity extends Activity
         if (sortCoordinator != null) sortCoordinator.setInteractivePause(true);
         if (smartSortEngine != null) smartSortEngine.setPaused(true);
         removeSortModePanel();
-        compareSortEngine.start(getFullListSnapshot(),
-                getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                        .getInt("compare_recheck_every", 0));
+        List<MediaFile> compareSnapshot = getFullListSnapshot();
+        java.util.Set<String> comparePaths = new java.util.HashSet<String>();
+        for (MediaFile file : compareSnapshot) if (file != null) comparePaths.add(file.getPath());
+        org.json.JSONObject savedCompare = sortSessionStore == null ? null
+                : sortSessionStore.load(SortSessionStore.COMPARE_FILE);
+        if (savedCompare != null && savedCompare.optJSONArray("pool") != null) {
+            compareSortEngine.restoreJson(savedCompare, comparePaths);
+        } else {
+            compareSortEngine.start(compareSnapshot,
+                    getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                            .getInt("compare_recheck_every", 0));
+        }
+        saveCompareSession();
         showCompareQuestion();
     }
 
@@ -3315,8 +3325,15 @@ public class MainActivity extends Activity
         return slash < 0 ? path : path.substring(slash + 1);
     }
 
+    private void saveCompareSession() {
+        if (sortSessionStore != null && compareSortEngine != null) {
+            sortSessionStore.save(SortSessionStore.COMPARE_FILE, compareSortEngine.toJson());
+        }
+    }
+
     private void answerCompare(CompareSortEngine.Answer answer) {
         if (compareQuestion == null || !compareSortEngine.answer(answer)) return;
+        saveCompareSession();
         removeSortModePanel();
         showCompareQuestion();
     }
@@ -3326,6 +3343,7 @@ public class MainActivity extends Activity
             Toast.makeText(this, "Nothing to undo", Toast.LENGTH_SHORT).show();
             return;
         }
+        saveCompareSession();
         removeSortModePanel();
         showCompareQuestion();
     }
@@ -3378,6 +3396,7 @@ public class MainActivity extends Activity
 
     private void exitCompareSort(boolean keepOrder) {
         compareQuestion = null;
+        if (sortSessionStore != null) sortSessionStore.delete(SortSessionStore.COMPARE_FILE);
         removeSortModePanel();
         if (sortCoordinator != null) {
             sortCoordinator.setInteractivePause(false);

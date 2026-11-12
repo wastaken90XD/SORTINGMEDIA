@@ -56,6 +56,10 @@ public final class SortSessionStore {
         }
     }
 
+    public synchronized void delete(String name) {
+        if (name != null) new File(directory, name).delete();
+    }
+
     public static List<String> existingPaths(JSONArray array, Set<String> paths) {
         List<String> result = new ArrayList<String>();
         if (array == null || paths == null) return result;

@@ -1,6 +1,8 @@
 package com.mediasorter;
 
 import com.mediasorter.models.MediaFile;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -177,6 +179,35 @@ public final class CompareSortEngine {
         questionCount = state.questions;
         unsure.addAll(state.unsure);
         initialized = true;
+    }
+
+    public synchronized JSONObject toJson() {
+        JSONObject object = new JSONObject();
+        try {
+            object.put("pool", new JSONArray(pool));
+            object.put("sorted", new JSONArray(sorted));
+            object.put("current", current == null ? "" : current);
+            object.put("low", low);
+            object.put("high", high);
+            object.put("questions", questionCount);
+            object.put("unsure", new JSONArray(unsure));
+        } catch (Exception ignored) {}
+        return object;
+    }
+
+    public synchronized void restoreJson(JSONObject object, Set<String> existingPaths) {
+        if (object == null) return;
+        List<String> restoredPool = SortSessionStore.existingPaths(
+                object.optJSONArray("pool"), existingPaths);
+        List<String> restoredSorted = SortSessionStore.existingPaths(
+                object.optJSONArray("sorted"), existingPaths);
+        String restoredCurrent = object.optString("current", "");
+        if (!restoredCurrent.isEmpty() && !existingPaths.contains(restoredCurrent)) restoredCurrent = "";
+        JSONObjectState state = new JSONObjectState(restoredPool, restoredSorted,
+                restoredCurrent, object.optInt("low", 0), object.optInt("high", 0),
+                object.optInt("questions", 0), SortSessionStore.existingPaths(
+                        object.optJSONArray("unsure"), existingPaths));
+        restore(state);
     }
 
     public static final class JSONObjectState {
