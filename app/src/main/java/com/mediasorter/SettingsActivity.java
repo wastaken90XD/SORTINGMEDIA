@@ -620,6 +620,74 @@ public class SettingsActivity extends Activity {
                 settingsPrefs.getBoolean("smart_pile_autoretire", false), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("smart_pile_autoretire", value); }
                 }));
+        addInteractiveSortSettingsSection(root);
+    }
+
+    private void addInteractiveSortSettingsSection(LinearLayout root) {
+        root.addView(makeTitle("Compare Sort"));
+        root.addView(makeSpinnerRow("Compare layout:",
+                new String[]{"side_by_side", "stacked", "auto"},
+                compareLayoutPosition(), new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) {
+                        saveString("compare_layout", value);
+                    }
+                }));
+        root.addView(makeCheckBoxRow("Randomize Compare sides",
+                settingsPrefs.getBoolean("compare_randomize_sides", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("compare_randomize_sides", value); }
+                }));
+        root.addView(makeNumericInputRow("Compare recheck every (0-100):",
+                settingsPrefs.getInt("compare_recheck_every", 0), 0, 100,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("compare_recheck_every", value); }
+                }));
+        root.addView(makeNumericInputRow("Compare warning questions:",
+                settingsPrefs.getInt("compare_warn_questions", 100), 1, 10000,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("compare_warn_questions", value); }
+                }));
+        root.addView(makeNumericInputRow("Compare undo depth:",
+                settingsPrefs.getInt("compare_undo_depth", 50), 1, 500,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("compare_undo_depth", value); }
+                }));
+        root.addView(makeTitle("Batch Game"));
+        root.addView(makeNumericInputRow("Game batch size (4-12):",
+                settingsPrefs.getInt("game_batch_size", 6), 4, 12,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("game_batch_size", value); }
+                }));
+        root.addView(makeNumericInputRow("Game decoys (0-3):",
+                settingsPrefs.getInt("game_decoys", 1), 0, 3,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("game_decoys", value); }
+                }));
+        root.addView(makeNumericInputRow("Game probe every rounds (0-100):",
+                settingsPrefs.getInt("game_probe_every", 5), 0, 100,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("game_probe_every", value); }
+                }));
+        root.addView(makeSpinnerRow("Game score mode:",
+                new String[]{"none", "progress", "streak"},
+                gameScorePosition(), new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) {
+                        saveString("game_score_mode", value);
+                    }
+                }));
+    }
+
+    private int compareLayoutPosition() {
+        String value = settingsPrefs.getString("compare_layout", "auto");
+        if ("side_by_side".equals(value)) return 0;
+        if ("stacked".equals(value)) return 1;
+        return 2;
+    }
+
+    private int gameScorePosition() {
+        String value = settingsPrefs.getString("game_score_mode", "progress");
+        if ("none".equals(value)) return 0;
+        if ("streak".equals(value)) return 2;
+        return 1;
     }
 
     private void addSurpriseSettingsSection(LinearLayout root) {

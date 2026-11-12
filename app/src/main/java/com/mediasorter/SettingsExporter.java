@@ -65,7 +65,15 @@ public final class SettingsExporter {
             "surprise_w_flagged", "surprise_w_uncertain", "surprise_diversity_soft",
             "surprise_candidate_cap", "nav_accel_enabled", "nav_accel_steps", "nav_accel_times_ms",
             "smart_pile_mode", "smart_pile_tag_patterns", "smart_pile_child_format",
-            "smart_pile_autoretire", "smart_pile_split_naming", "smart_active_pile"
+            "smart_pile_autoretire", "smart_pile_split_naming", "smart_active_pile",
+            "compare_layout", "compare_question", "compare_randomize_sides",
+            "compare_recheck_every", "compare_sync_zoom", "compare_show_caption",
+            "compare_caption_fields", "compare_volume_pick", "compare_video_muted",
+            "compare_warn_questions", "compare_undo_depth", "compare_prefetch",
+            "compare_hires_on_zoom", "game_batch_size", "game_batch_adaptive",
+            "game_decoys", "game_probe_every", "game_none_cooldown",
+            "game_none_max_returns", "game_order_min_group", "game_score_mode",
+            "game_timer_seconds", "game_prompt_text"
     ));
 
     /** Integer settings must remain Integer in SharedPreferences after import. */
@@ -79,6 +87,9 @@ public final class SettingsExporter {
             "smart_rerank_debounce_ms", "rerank_idle_ms", "smart_chunk_ms",
             "smart_pass_budget_ms", "smart_max_pool", "surprise_history_size",
             "surprise_w_untagged", "surprise_w_stale", "surprise_w_flagged",
+            "compare_recheck_every", "compare_warn_questions", "compare_undo_depth",
+            "game_batch_size", "game_decoys", "game_probe_every", "game_none_cooldown",
+            "game_none_max_returns", "game_order_min_group", "game_timer_seconds",
             "surprise_w_uncertain", "surprise_candidate_cap"));
 
     private static final Set<String> GESTURE_KEYS = new HashSet<String>(Arrays.asList(

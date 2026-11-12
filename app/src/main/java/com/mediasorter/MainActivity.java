@@ -138,6 +138,13 @@ public class MainActivity extends Activity
     private AutoOrganizer autoOrganizer;
     private com.mediasorter.features.SurpriseEngine surpriseEngine;
     private com.mediasorter.features.SmartSortEngine smartSortEngine;
+    private SortCoordinator sortCoordinator;
+    private FeatureStore featureStore;
+    private SortSessionStore sortSessionStore;
+    private CompareSortEngine compareSortEngine;
+    private BatchGameEngine batchGameEngine;
+    private CompareSortEngine.Question compareQuestion;
+    private android.widget.LinearLayout sortModePanel;
     private volatile com.mediasorter.features.SmartSortEngine.Result smartResult;
     private volatile List<Group> smartGroups = new ArrayList<Group>();
     private final java.util.Set<String> dismissedSmartSuggestions =
@@ -280,6 +287,7 @@ public class MainActivity extends Activity
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
         if (event != null && smartSortEngine != null) smartSortEngine.noteActivity();
+        if (event != null && sortCoordinator != null) sortCoordinator.noteActivity();
         if (event != null && event.getAction() == MotionEvent.ACTION_DOWN) {
             View focused = getCurrentFocus();
             if (focused instanceof EditText) {
@@ -302,6 +310,7 @@ public class MainActivity extends Activity
     @Override
     protected void onResume() {
         super.onResume();
+        if (sortCoordinator != null) sortCoordinator.setPaused(false);
         if (smartSortEngine != null) {
             boolean smartEnabled = getSharedPreferences("settings_prefs", MODE_PRIVATE)
                     .getBoolean("smart_enabled", false);
@@ -515,6 +524,7 @@ public class MainActivity extends Activity
     @Override
     protected void onPause() {
         if (smartSortEngine != null) smartSortEngine.onPause();
+        if (sortCoordinator != null) sortCoordinator.setPaused(true);
         super.onPause();
     }
 
@@ -524,6 +534,7 @@ public class MainActivity extends Activity
             if (activeInstance != null && activeInstance.get() == this) activeInstance = null;
         }
         if (smartSortEngine != null) smartSortEngine.close();
+        if (sortCoordinator != null) sortCoordinator.close();
         super.onDestroy();
         folderWatcher.unwatchAll();
         if (previewManager != null) previewManager.release();
@@ -584,6 +595,7 @@ public class MainActivity extends Activity
     @Override
     public boolean onKeyDown(int keyCode, android.view.KeyEvent event) {
         if (smartSortEngine != null) smartSortEngine.noteActivity();
+        if (sortCoordinator != null) sortCoordinator.noteActivity();
         if (isVolumeKey(keyCode)) {
             if (isTextInputFocused()) return super.onKeyDown(keyCode, event);
             if (smartSortEngine != null) smartSortEngine.noteActivity();
@@ -1256,6 +1268,16 @@ public class MainActivity extends Activity
                         scheduleRefresh();
                     }
                 });
+        sortCoordinator = new SortCoordinator(this, mainHandler,
+                new SortCoordinator.Listener() {
+                    @Override public void onTaskError(Throwable error) {
+                        android.util.Log.w("MainActivity", "Sorting task failed", error);
+                    }
+                });
+        featureStore = new FeatureStore(this);
+        sortSessionStore = new SortSessionStore(this);
+        compareSortEngine = new CompareSortEngine();
+        batchGameEngine = new BatchGameEngine();
         searchHistory  = new SearchHistory(this);
         indexer.init(this);
         indexer.setListener(this);
@@ -2719,6 +2741,23 @@ public class MainActivity extends Activity
             case SMART_RETIRE_PILE: retireSmartPile(); break;
             case SMART_MOVE_PILE: moveCurrentToSmartPile(); break;
             case SMART_NEXT_UNFINISHED_PILE: nextUnfinishedSmartPile(); break;
+            case SORT_HUB: showSortHub(); break;
+            case SORT_PROFILE_APPLY: applyNextSortProfile(); break;
+            case SORT_PROFILE_NEXT: applyNextSortProfile(); break;
+            case COMPARE_START: startCompareSort(); break;
+            case COMPARE_PICK_LEFT: answerCompare(CompareSortEngine.Answer.LEFT); break;
+            case COMPARE_PICK_RIGHT: answerCompare(CompareSortEngine.Answer.RIGHT); break;
+            case COMPARE_SAME: answerCompare(CompareSortEngine.Answer.SAME); break;
+            case COMPARE_SKIP: answerCompare(CompareSortEngine.Answer.SKIP); break;
+            case COMPARE_UNDO: undoCompare(); break;
+            case COMPARE_EXIT: exitCompareSort(false); break;
+            case COMPARE_RESUME: startCompareSort(); break;
+            case GAME_START: startBatchGame(); break;
+            case GAME_SUBMIT: submitBatchGameRound(); break;
+            case GAME_NONE: noneBatchGameRound(); break;
+            case GAME_UNDO_ROUND: undoBatchGameRound(); break;
+            case GAME_EXIT: exitBatchGame(false); break;
+            case GAME_RESUME: startBatchGame(); break;
             case OPEN_GALLERY: setGalleryMode(true, true); break;
             case TOGGLE_GALLERY: setGalleryMode(!galleryModeActive, true); break;
             case OPEN_DASHBOARD: openDashboard(); break;
@@ -3170,6 +3209,289 @@ public class MainActivity extends Activity
         } else {
             Toast.makeText(this, "Smart Sort action unavailable", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void showSortHub() {
+        final String[] modes = {"Smart Sort", "Compare Sort", "Batch Game", "Close"};
+        new AlertDialog.Builder(this).setTitle("Sorting hub")
+                .setItems(modes, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        if (which == 0) toggleSmartSetting(GestureSettings.GestureAction.SMART_TOGGLE);
+                        else if (which == 1) startCompareSort();
+                        else if (which == 2) startBatchGame();
+                    }
+                }).show();
+    }
+
+    private void applyNextSortProfile() {
+        Toast.makeText(this, "Sorting profiles are not configured", Toast.LENGTH_SHORT).show();
+    }
+
+    private void removeSortModePanel() {
+        if (sortModePanel != null) {
+            ViewParent parent = sortModePanel.getParent();
+            if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(sortModePanel);
+            sortModePanel = null;
+        }
+    }
+
+    private void startCompareSort() {
+        if (fullList == null || fullList.size() < 2) {
+            Toast.makeText(this, "Need at least 2 files.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (sortCoordinator != null) sortCoordinator.setMode(SortCoordinator.Mode.COMPARE);
+        if (sortCoordinator != null) sortCoordinator.setInteractivePause(true);
+        if (smartSortEngine != null) smartSortEngine.setPaused(true);
+        removeSortModePanel();
+        compareSortEngine.start(getFullListSnapshot(),
+                getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                        .getInt("compare_recheck_every", 0));
+        showCompareQuestion();
+    }
+
+    private void showCompareQuestion() {
+        compareQuestion = compareSortEngine.nextQuestion();
+        if (compareQuestion == null) {
+            showCompareResult();
+            return;
+        }
+        FrameLayout preview = findViewById(R.id.previewPanel);
+        if (preview == null) return;
+        sortModePanel = new LinearLayout(this);
+        sortModePanel.setOrientation(LinearLayout.VERTICAL);
+        sortModePanel.setPadding(12, 12, 12, 12);
+        sortModePanel.setBackgroundColor(0xEE161622);
+        TextView title = new TextView(this);
+        title.setTextColor(0xFFFFFFFF);
+        title.setText("Compare: question " + compareQuestion.questionNumber
+                + " / " + compareQuestion.totalFiles);
+        sortModePanel.addView(title);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        Button left = makeSmallButton("A: " + fileName(compareQuestion.candidateOnLeft
+                ? compareQuestion.candidatePath : compareQuestion.comparedPath));
+        Button right = makeSmallButton("B: " + fileName(compareQuestion.candidateOnLeft
+                ? compareQuestion.comparedPath : compareQuestion.candidatePath));
+        row.addView(left, new LinearLayout.LayoutParams(0, 72, 1f));
+        row.addView(right, new LinearLayout.LayoutParams(0, 72, 1f));
+        sortModePanel.addView(row);
+        LinearLayout controls = new LinearLayout(this);
+        Button same = makeSmallButton("Same");
+        Button skip = makeSmallButton("Skip");
+        Button undo = makeSmallButton("Undo");
+        Button exit = makeSmallButton("Exit");
+        controls.addView(same);
+        controls.addView(skip);
+        controls.addView(undo);
+        controls.addView(exit);
+        sortModePanel.addView(controls);
+        left.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { answerCompare(CompareSortEngine.Answer.LEFT); }
+        });
+        right.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { answerCompare(CompareSortEngine.Answer.RIGHT); }
+        });
+        same.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { answerCompare(CompareSortEngine.Answer.SAME); }
+        });
+        skip.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { answerCompare(CompareSortEngine.Answer.SKIP); }
+        });
+        undo.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { undoCompare(); }
+        });
+        exit.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { exitCompareSort(false); }
+        });
+        preview.addView(sortModePanel, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM));
+    }
+
+    private String fileName(String path) {
+        if (path == null) return "";
+        int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        return slash < 0 ? path : path.substring(slash + 1);
+    }
+
+    private void answerCompare(CompareSortEngine.Answer answer) {
+        if (compareQuestion == null || !compareSortEngine.answer(answer)) return;
+        removeSortModePanel();
+        showCompareQuestion();
+    }
+
+    private void undoCompare() {
+        if (!compareSortEngine.undo()) {
+            Toast.makeText(this, "Nothing to undo", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        removeSortModePanel();
+        showCompareQuestion();
+    }
+
+    private void showCompareResult() {
+        final CompareSortEngine.Result result = compareSortEngine.finish();
+        new AlertDialog.Builder(this).setTitle("Compare complete")
+                .setMessage(result.orderedPaths.size() + " files ordered"
+                        + (result.unsurePaths.isEmpty() ? "" : "\n"
+                        + result.unsurePaths.size() + " unsure"))
+                .setPositiveButton("Save order", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        saveCompareOrder(result);
+                    }
+                }).setNeutralButton("Keep working", null)
+                .setNegativeButton("Discard", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        exitCompareSort(false);
+                    }
+                }).show();
+    }
+
+    private void saveCompareOrder(final CompareSortEngine.Result result) {
+        final List<MediaFile> snapshot = indexer.getFullIndex();
+        final Map<String, Integer> previous = new java.util.HashMap<String, Integer>();
+        final Map<String, Integer> ranks = new java.util.HashMap<String, Integer>();
+        for (int i = 0; i < result.orderedPaths.size(); i++) ranks.put(result.orderedPaths.get(i), i);
+        for (MediaFile file : snapshot) previous.put(file.getPath(), file.getManualOrder());
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                final List<MediaFile> ordered = new ArrayList<MediaFile>();
+                for (String path : result.orderedPaths) {
+                    MediaFile file = findInList(snapshot, path);
+                    if (file != null) ordered.add(file);
+                }
+                indexer.updateManualOrder(ordered);
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        smartOrderUndo = previous;
+                        sortManager.setSingleCriterion(SortManager.MANUAL_ORDER, "ASC");
+                        Toast.makeText(MainActivity.this, "Compare order saved",
+                                Toast.LENGTH_SHORT).show();
+                        exitCompareSort(true);
+                        scheduleRefresh();
+                    }
+                });
+            }
+        });
+    }
+
+    private void exitCompareSort(boolean keepOrder) {
+        compareQuestion = null;
+        removeSortModePanel();
+        if (sortCoordinator != null) {
+            sortCoordinator.setInteractivePause(false);
+            sortCoordinator.setMode(SortCoordinator.Mode.OFF);
+        }
+        if (smartSortEngine != null && getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getBoolean("smart_enabled", false)) smartSortEngine.setPaused(false);
+    }
+
+    private void startBatchGame() {
+        if (fullList == null || fullList.size() < 2) {
+            Toast.makeText(this, "Need at least 2 files.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        exitCompareSort(false);
+        if (sortCoordinator != null) sortCoordinator.setMode(SortCoordinator.Mode.GAME);
+        if (sortCoordinator != null) sortCoordinator.setInteractivePause(true);
+        if (smartSortEngine != null) smartSortEngine.setPaused(true);
+        final List<MediaFile> snapshot = getFullListSnapshot();
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                final BatchGameEngine.Round round = batchGameEngine.buildRound(snapshot,
+                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getInt("game_batch_size", 6),
+                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getInt("game_decoys", 1),
+                        smartResult == null ? null : smartResult.confidence,
+                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getString("smart_active_pile", ""),
+                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getInt("game_probe_every", 5));
+                mainHandler.post(new Runnable() {
+                    @Override public void run() { showGameRound(round); }
+                });
+            }
+        });
+    }
+
+    private void showGameRound(final BatchGameEngine.Round round) {
+        if (round == null) {
+            Toast.makeText(this, "No unfinished files", Toast.LENGTH_SHORT).show();
+            exitBatchGame(false);
+            return;
+        }
+        FrameLayout preview = findViewById(R.id.previewPanel);
+        if (preview == null) return;
+        sortModePanel = new LinearLayout(this);
+        sortModePanel.setOrientation(LinearLayout.VERTICAL);
+        sortModePanel.setPadding(10, 10, 10, 10);
+        sortModePanel.setBackgroundColor(0xEE161622);
+        TextView title = new TextView(this);
+        title.setTextColor(0xFFFFFFFF);
+        title.setText("Game round " + round.number + " — select a group");
+        sortModePanel.addView(title);
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        final List<MediaFile> selected = new ArrayList<MediaFile>();
+        for (final MediaFile file : round.files) {
+            Button cell = makeSmallButton(fileName(file.getPath()));
+            cell.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View view) {
+                    if (selected.contains(file)) selected.remove(file);
+                    else selected.add(file);
+                    view.setBackgroundColor(selected.contains(file) ? 0xFF2A2A6E : 0xFF2A2A3E);
+                }
+            });
+            grid.addView(cell);
+        }
+        sortModePanel.addView(grid);
+        LinearLayout controls = new LinearLayout(this);
+        Button tag = makeSmallButton("Tag selected");
+        Button none = makeSmallButton("None of these");
+        Button exit = makeSmallButton("Exit");
+        controls.addView(tag);
+        controls.addView(none);
+        controls.addView(exit);
+        sortModePanel.addView(controls);
+        tag.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                if (selected.isEmpty()) return;
+                showQuickTagPopup(new ArrayList<MediaFile>(selected));
+                startBatchGame();
+            }
+        });
+        none.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                for (MediaFile file : round.files) fileStatus.setSkipped(file.getPath());
+                batchGameEngine.nextRound();
+                startBatchGame();
+            }
+        });
+        exit.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { exitBatchGame(false); }
+        });
+        preview.addView(sortModePanel, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM));
+    }
+
+    private void submitBatchGameRound() {
+        Toast.makeText(this, "Select files in the current Game round", Toast.LENGTH_SHORT).show();
+    }
+
+    private void noneBatchGameRound() { Toast.makeText(this, "Use None of these in the Game panel", Toast.LENGTH_SHORT).show(); }
+    private void undoBatchGameRound() { undoLastAction(); }
+
+    private void exitBatchGame(boolean keepOrder) {
+        removeSortModePanel();
+        if (sortCoordinator != null) {
+            sortCoordinator.setInteractivePause(false);
+            sortCoordinator.setMode(SortCoordinator.Mode.OFF);
+        }
+        if (smartSortEngine != null && getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getBoolean("smart_enabled", false)) smartSortEngine.setPaused(false);
     }
 
     private void writeMetadataNow() {
@@ -6444,6 +6766,7 @@ private Spinner makeSpinner(String[] options) {
     @Override
     public void onScanProgress(int scanned, int total, String currentFile) {
         if (smartSortEngine != null) smartSortEngine.setScanRunning(true);
+        if (sortCoordinator != null) sortCoordinator.setScanRunning(true);
         mainHandler.post(new Runnable() {
             @Override public void run() {
                 if (scanProgress != null) {
@@ -6471,6 +6794,7 @@ private Spinner makeSpinner(String[] options) {
     @Override
     public void onScanComplete(List<MediaFile> allFiles) {
         if (smartSortEngine != null) smartSortEngine.setScanRunning(false);
+        if (sortCoordinator != null) sortCoordinator.setScanRunning(false);
         mainHandler.post(new Runnable() {
             @Override public void run() {
                 btnScan.setEnabled(true);
