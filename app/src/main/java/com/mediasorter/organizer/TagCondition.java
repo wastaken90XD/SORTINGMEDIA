@@ -1,7 +1,7 @@
 package com.mediasorter.organizer;
 
 import com.mediasorter.FileStatus;
-import com.mediasorter.TagText;
+import com.mediasorter.SearchManager;
 import com.mediasorter.models.MediaFile;
 import java.util.ArrayList;
 import java.util.List;
@@ -10,29 +10,41 @@ public class TagCondition extends Condition {
     public List<String> tags;
     public boolean matchAny;
     public boolean negate;
+    private final List<SearchManager.QueryParser> queryParsers =
+            new ArrayList<SearchManager.QueryParser>();
 
     public TagCondition(List<String> tags, boolean matchAny, boolean negate) {
-        this.tags = tags != null ? new ArrayList<>(tags) : new ArrayList<>();
+        this.tags = tags != null ? new ArrayList<String>(tags) : new ArrayList<String>();
         this.matchAny = matchAny;
         this.negate = negate;
+        for (String tagQuery : this.tags) {
+            if (tagQuery == null || tagQuery.trim().isEmpty()) {
+                queryParsers.add(null);
+                continue;
+            }
+            try {
+                queryParsers.add(SearchManager.QueryParser.parse(tagQuery));
+            } catch (SearchManager.InvalidQueryException invalid) {
+                // An invalid saved rule simply cannot match; parsing is still
+                // done once here, never once per file in AutoOrganizer.
+                queryParsers.add(null);
+            }
+        }
     }
 
     @Override
     public boolean matches(MediaFile file, FileStatus fileStatus) {
-        List<String> fileTags = file.getTags();
-        if (fileTags == null) fileTags = new ArrayList<>();
+        List<String> fileTags = file == null ? new ArrayList<String>() : file.getTags();
         boolean result;
         if (matchAny) {
             result = false;
-            for (String t : tags) {
-                String clean = TagText.plain(t);
-                if (!clean.isEmpty() && fileTags.contains(clean)) { result = true; break; }
+            for (SearchManager.QueryParser parser : queryParsers) {
+                if (parser != null && parser.matchesTags(fileTags)) { result = true; break; }
             }
         } else {
             result = true;
-            for (String t : tags) {
-                String clean = TagText.plain(t);
-                if (clean.isEmpty() || !fileTags.contains(clean)) { result = false; break; }
+            for (SearchManager.QueryParser parser : queryParsers) {
+                if (parser == null || !parser.matchesTags(fileTags)) { result = false; break; }
             }
         }
         return negate ? !result : result;

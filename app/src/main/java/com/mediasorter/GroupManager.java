@@ -24,7 +24,6 @@ public class GroupManager {
     private volatile String tagGroupPattern = "";
     private final Map<String, String> manualAssignments =
             new java.util.concurrent.ConcurrentHashMap<String, String>();
-    private final SearchManager tagQueryParser = new SearchManager();
     private volatile String lastError = "";
 
     public void setGroupBy(Group.GroupBy value) {
@@ -122,6 +121,11 @@ public class GroupManager {
     private List<Group> groupByTag(List<MediaFile> files) {
         Map<String, Group> map = new LinkedHashMap<String, Group>();
         Group untagged = new Group("Untagged", Group.GroupBy.TAG);
+        SearchManager.QueryParser tagPatternQuery = null;
+        if ("pattern".equals(tagGroupMode) && tagGroupPattern != null
+                && !tagGroupPattern.trim().isEmpty()) {
+            tagPatternQuery = SearchManager.QueryParser.parse(tagGroupPattern);
+        }
         for (MediaFile file : files) {
             if (file == null) continue;
             List<String> tags = sanitizedTags(file);
@@ -144,7 +148,7 @@ public class GroupManager {
                 }
             } else if ("pattern".equals(tagGroupMode)) {
                 for (String tag : tags) {
-                    if (tagQueryParser.matchesTagPattern(tag, tagGroupPattern)) {
+                    if (tagPatternQuery != null && tagPatternQuery.matchesText(tag)) {
                         add(map, tag, Group.GroupBy.TAG, file);
                         added = true;
                     }

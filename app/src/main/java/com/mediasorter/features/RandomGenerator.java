@@ -53,6 +53,20 @@ public final class RandomGenerator {
         return sb.toString();
     }
 
+    /** Exact inverse of sequenceLabel(int); returns -1 for invalid labels. */
+    public static int sequenceIndex(String label) {
+        if (label == null || label.length() < 2) return -1;
+        long value = 0L;
+        for (int i = 0; i < label.length(); i++) {
+            char c = label.charAt(i);
+            if (c < 'a' || c > 'z') return -1;
+            value = value * 26L + (c - 'a' + 1L);
+            if (value > (long) Integer.MAX_VALUE + 27L) return -1;
+        }
+        long index = value - 27L;
+        return index < 0L || index > Integer.MAX_VALUE ? -1 : (int) index;
+    }
+
     /**
      * Returns the first index whose sequenceLabel is not already taken
      * under prefix + "_seq_" + label.

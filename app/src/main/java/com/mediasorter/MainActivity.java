@@ -229,6 +229,7 @@ public class MainActivity extends Activity
     private final java.util.concurrent.ExecutorService statsExecutor =
             java.util.concurrent.Executors.newSingleThreadExecutor();
     private long refreshSequence;
+    private long tagBarSearchSequence;
     private long statsSequence;
     private boolean infoOverlayVisible;
     private Map<String, Integer> smartOrderUndo;
@@ -1954,14 +1955,15 @@ public class MainActivity extends Activity
 
     private void refreshTagBar() {
         if (tagBarAdapter == null || tagManager == null) return;
-        String query = tagBarSearch == null ? "" : tagBarSearch.getText().toString().trim().toLowerCase();
+        final String query = tagBarSearch == null
+                ? "" : tagBarSearch.getText().toString().trim();
         final Set<String> currentTags = new java.util.HashSet<String>();
         for (MediaFile file : getTagMenuTargets()) {
             if (file != null) {
                 for (String tag : file.getTags()) currentTags.add(TagText.plain(tag));
             }
         }
-        List<Tag> all = getOrderedTagChoices(getTagMenuTargets());
+        final List<Tag> all = getOrderedTagChoices(getTagMenuTargets());
         if (tagBarSortMode == TagBarSort.ALPHABETICAL) {
             java.util.Collections.sort(all, new java.util.Comparator<Tag>() {
                 @Override public int compare(Tag left, Tag right) {
@@ -1996,29 +1998,56 @@ public class MainActivity extends Activity
                 }
             });
         }
-        List<Tag> visible = new ArrayList<>();
-        for (Tag tag : all) {
-            if (query.isEmpty() || tag.getName().toLowerCase().contains(query)) visible.add(tag);
-        }
-        Map<String, Integer> counts = new java.util.HashMap<String, Integer>();
-        List<MediaFile> indexed = indexer == null ? new ArrayList<MediaFile>() : indexer.getIndex();
-        for (MediaFile file : indexed) {
-            for (String tag : file.getTags()) {
-                Integer old = counts.get(tag);
-                counts.put(tag, old == null ? 1 : old + 1);
-            }
-        }
-        Set<String> suggestedTags = new java.util.HashSet<String>();
+        final List<Tag> allSnapshot = new ArrayList<Tag>(all);
+        final Set<String> filters = new java.util.LinkedHashSet<String>(activeTagFilters);
+        final Set<String> suggestedTags = new java.util.HashSet<String>();
         if (smartResult != null && currentFile != null) {
             String suggestion = smartResult.suggestions.get(currentFile.getPath());
             if (suggestion != null && !suggestion.isEmpty()) suggestedTags.add(suggestion);
         }
-        tagBarAdapter.setData(visible, counts, activeTagFilters, suggestedTags);
-        if (tagBarContainer != null) {
-            boolean show = getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                    .getBoolean("show_tag_bar", true);
-            tagBarContainer.setVisibility(show ? View.VISIBLE : View.GONE);
-        }
+        final Set<String> suggestedSnapshot = new java.util.HashSet<String>(suggestedTags);
+        final long request = ++tagBarSearchSequence;
+        refreshExecutor.submit(new Runnable() {
+            @Override public void run() {
+                final Map<String, Integer> countSnapshot = new java.util.HashMap<String, Integer>();
+                List<MediaFile> indexed = indexer == null
+                        ? new ArrayList<MediaFile>() : indexer.getFullIndex();
+                for (MediaFile file : indexed) {
+                    for (String tag : file.getTags()) {
+                        Integer old = countSnapshot.get(tag);
+                        countSnapshot.put(tag, old == null ? 1 : old + 1);
+                    }
+                }
+                final List<Tag> visible = new ArrayList<Tag>();
+                try {
+                    SearchManager.QueryParser parser = SearchManager.QueryParser.parse(query);
+                    for (Tag tag : allSnapshot) {
+                        if (parser.matchesText(tag.getName())) visible.add(tag);
+                    }
+                } catch (SearchManager.InvalidQueryException invalid) {
+                    mainHandler.post(new Runnable() {
+                        @Override public void run() {
+                            if (request == tagBarSearchSequence) {
+                                Toast.makeText(MainActivity.this, "Invalid pattern",
+                                        Toast.LENGTH_SHORT).show();
+                            }
+                        }
+                    });
+                    return;
+                }
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        if (request != tagBarSearchSequence || tagBarAdapter == null) return;
+                        tagBarAdapter.setData(visible, countSnapshot, filters, suggestedSnapshot);
+                        if (tagBarContainer != null) {
+                            boolean show = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                    .getBoolean("show_tag_bar", true);
+                            tagBarContainer.setVisibility(show ? View.VISIBLE : View.GONE);
+                        }
+                    }
+                });
+            }
+        });
     }
 
     private void showTagBarContextMenu(final String tag, View anchor) {
@@ -2450,8 +2479,21 @@ public class MainActivity extends Activity
                 List<MediaFile> base = initialBase == null
                         ? new ArrayList<MediaFile>() : new ArrayList<>(initialBase);
                 if (!query.isEmpty()) {
-                    searchManager.setFullList(base);
-                    base = searchManager.search(query);
+                    try {
+                        searchManager.setFullList(base);
+                        SearchManager.QueryParser parser = searchManager.parseQuery(query);
+                        base = searchManager.search(parser);
+                    } catch (SearchManager.InvalidQueryException invalid) {
+                        mainHandler.post(new Runnable() {
+                            @Override public void run() {
+                                if (sequence == refreshSequence) {
+                                    Toast.makeText(MainActivity.this, "Invalid pattern",
+                                            Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                        });
+                        return;
+                    }
                 }
 
                 List<MediaFile> flattened = new ArrayList<>();
@@ -7644,21 +7686,10 @@ private Spinner makeSpinner(String[] options) {
             String label = name.substring(marker.length());
             int dot = label.lastIndexOf('.');
             if (dot > 0) label = label.substring(0, dot);
-            int index = sequenceLabelIndex(label);
+            int index = RandomGenerator.sequenceIndex(label);
             if (index > highest) highest = index;
         }
         return highest;
-    }
-
-    private int sequenceLabelIndex(String label) {
-        if (label == null || label.isEmpty()) return -1;
-        int value = 0;
-        for (int i = 0; i < label.length(); i++) {
-            char c = Character.toLowerCase(label.charAt(i));
-            if (c < 'a' || c > 'z') return -1;
-            value = value * 26 + (c - 'a' + 1);
-        }
-        return value - 27;
     }
 
     private void renameGalleryManualRange(final List<MediaFile> affected) {
