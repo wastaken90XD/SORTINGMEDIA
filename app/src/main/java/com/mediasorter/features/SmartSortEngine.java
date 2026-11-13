@@ -114,7 +114,7 @@ public class SmartSortEngine {
     private HandlerThread thread;
     private Handler worker;
     private final Listener listener;
-    private final SmartFeatureCache featureCache;
+    private SmartFeatureCache featureCache;
     private final boolean lowMemory;
     private final Set<String> featureFailures =
             Collections.synchronizedSet(new HashSet<String>());
@@ -174,6 +174,10 @@ public class SmartSortEngine {
 
     public void setCoordinator(com.mediasorter.SortCoordinator value) {
         coordinator = value;
+    }
+
+    public void setFeatureStore(com.mediasorter.FeatureStore store) {
+        if (store != null) featureCache = store.getCache();
     }
 
     public boolean isEnabled() { return enabled; }

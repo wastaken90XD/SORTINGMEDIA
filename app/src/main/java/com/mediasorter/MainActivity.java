@@ -1283,6 +1283,7 @@ public class MainActivity extends Activity
                 });
         smartSortEngine.setCoordinator(sortCoordinator);
         featureStore = new FeatureStore(this);
+        smartSortEngine.setFeatureStore(featureStore);
         sortSessionStore = new SortSessionStore(this);
         compareSortEngine = new CompareSortEngine();
         batchGameEngine = new BatchGameEngine();
@@ -3435,6 +3436,7 @@ public class MainActivity extends Activity
         final Map<String, Integer> ranks = new java.util.HashMap<String, Integer>();
         for (int i = 0; i < result.orderedPaths.size(); i++) ranks.put(result.orderedPaths.get(i), i);
         for (MediaFile file : snapshot) previous.put(file.getPath(), file.getManualOrder());
+        sortManager.setCompareRanks(ranks);
         sortCoordinator.post(new SortCoordinator.Task() {
             @Override public void run(SortCoordinator.TaskContext context) {
                 final List<MediaFile> ordered = new ArrayList<MediaFile>();
@@ -4950,7 +4952,8 @@ private Spinner makeSpinner(String[] options) {
                 "First tag value", "Tag rule match", "Flagged status",
                 "Skip status", "Done status", "Manual order", "Random shuffle",
                 "Path depth", "Color family", "Sequence group", "Random within group",
-                "Duplicate status", "Metadata presence", "Filename word count", "Smart Sort"
+                "Duplicate status", "Metadata presence", "Filename word count", "Smart Sort",
+                "Compare rank"
         };
         new AlertDialog.Builder(this)
                 .setTitle("Add criterion")
@@ -4996,6 +4999,7 @@ private Spinner makeSpinner(String[] options) {
             case 17: return SortManager.METADATA_PRESENCE;
             case 18: return SortManager.WORD_COUNT;
             case 19: return SortManager.SMART;
+            case 20: return SortManager.COMPARE_RANK;
             default: return SortManager.NAME;
         }
     }

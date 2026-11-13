@@ -50,6 +50,7 @@ public class SortManager {
     public static final String METADATA_PRESENCE = "METADATA_PRESENCE";
     public static final String WORD_COUNT = "WORD_COUNT";
     public static final String SMART = "SMART";
+    public static final String COMPARE_RANK = "COMPARE_RANK";
 
     public static class SortCriterion {
         public String id;
@@ -69,6 +70,8 @@ public class SortManager {
     private FileStatus fileStatus;
     private SharedPreferences prefs;
     private volatile java.util.Map<String, Integer> smartRanks =
+            new java.util.HashMap<String, Integer>();
+    private volatile java.util.Map<String, Integer> compareRanks =
             new java.util.HashMap<String, Integer>();
 
     public SortManager() {}
@@ -112,6 +115,11 @@ public class SortManager {
 
     public void setSmartRanks(java.util.Map<String, Integer> ranks) {
         smartRanks = ranks == null ? new java.util.HashMap<String, Integer>()
+                : new java.util.HashMap<String, Integer>(ranks);
+    }
+
+    public void setCompareRanks(java.util.Map<String, Integer> ranks) {
+        compareRanks = ranks == null ? new java.util.HashMap<String, Integer>()
                 : new java.util.HashMap<String, Integer>(ranks);
     }
 
@@ -281,6 +289,7 @@ public class SortManager {
         if (METADATA_PRESENCE.equals(id)) return "Metadata presence";
         if (WORD_COUNT.equals(id)) return "Filename word count";
         if (SMART.equals(id)) return "Smart Sort";
+        if (COMPARE_RANK.equals(id)) return "Compare rank";
         return "Name";
     }
 
@@ -301,6 +310,7 @@ public class SortManager {
         if (METADATA_PRESENCE.equals(id)) return desc ? "Metadata first" : "No metadata first";
         if (WORD_COUNT.equals(id)) return desc ? "More words" : "Fewer words";
         if (SMART.equals(id)) return "Smart ranking";
+        if (COMPARE_RANK.equals(id)) return "Compare order";
         return desc ? "Z-A" : "A-Z";
     }
 
@@ -327,7 +337,7 @@ public class SortManager {
                 || PATH_DEPTH.equals(id) || COLOR_FAMILY.equals(id)
                 || SEQUENCE_GROUP.equals(id) || RANDOM_WITHIN_GROUP.equals(id)
                 || DUPLICATE_STATUS.equals(id) || METADATA_PRESENCE.equals(id)
-                || WORD_COUNT.equals(id) || SMART.equals(id);
+                || WORD_COUNT.equals(id) || SMART.equals(id) || COMPARE_RANK.equals(id);
     }
 
     private String normalizeDirection(String direction) {
@@ -461,9 +471,10 @@ public class SortManager {
         if (DUPLICATE_STATUS.equals(id)) return Boolean.compare(left.isDuplicate(), right.isDuplicate());
         if (METADATA_PRESENCE.equals(id)) return Boolean.compare(left.hasMetadata(), right.hasMetadata());
         if (WORD_COUNT.equals(id)) return Integer.compare(wordCount(left.getName()), wordCount(right.getName()));
-        if (SMART.equals(id)) {
-            Integer leftRank = smartRanks.get(left.getPath());
-            Integer rightRank = smartRanks.get(right.getPath());
+        if (SMART.equals(id) || COMPARE_RANK.equals(id)) {
+            java.util.Map<String, Integer> ranks = SMART.equals(id) ? smartRanks : compareRanks;
+            Integer leftRank = ranks.get(left.getPath());
+            Integer rightRank = ranks.get(right.getPath());
             int max = Integer.MAX_VALUE;
             return Integer.compare(leftRank == null ? max : leftRank,
                     rightRank == null ? max : rightRank);

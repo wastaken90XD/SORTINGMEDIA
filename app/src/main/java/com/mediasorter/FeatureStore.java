@@ -17,6 +17,9 @@ public final class FeatureStore {
         public final float[] logSize;
         public final long[] modified;
         public final String[] folders;
+        public final String[] colorFamily;
+        public final String[] type;
+        public final String[] nameTokens;
 
         Snapshot(List<MediaFile> source) {
             files = new ArrayList<MediaFile>(source);
@@ -27,6 +30,9 @@ public final class FeatureStore {
             logSize = new float[size];
             modified = new long[size];
             folders = new String[size];
+            colorFamily = new String[size];
+            type = new String[size];
+            nameTokens = new String[size];
         }
     }
 
@@ -48,15 +54,26 @@ public final class FeatureStore {
             MediaFile file = safe.get(i);
             if (file == null) continue;
             result.modified[i] = file.getDateAdded();
+            SmartFeatureCache.Entry cached = cache.get(file.getPath(), file.getSize(),
+                    file.getDateAdded(), -1);
+            if (cached != null && cached.present) {
+                result.hashes[i] = cached.hash;
+                result.hashPresent[i] = true;
+            }
             result.logSize[i] = file.getSize() <= 0 ? 0f
                     : (float) (Math.log(file.getSize()) / Math.log(2d));
             result.aspect[i] = file.getWidth() > 0 && file.getHeight() > 0
                     ? file.getWidth() / (float) file.getHeight() : 0f;
+            result.colorFamily[i] = file.getColorFamily();
+            result.type[i] = file.getType() == null ? "" : file.getType().name();
+            result.nameTokens[i] = file.getName() == null ? ""
+                    : file.getName().toLowerCase(java.util.Locale.US).replaceAll("[^a-z0-9]+", " ").trim();
             java.io.File parent = new java.io.File(file.getPath()).getParentFile();
             result.folders[i] = parent == null ? "" : parent.getAbsolutePath();
         }
         return result;
     }
 
+    public SmartFeatureCache getCache() { return cache; }
     public void clearMemory() { cache.clearMemory(); }
 }
