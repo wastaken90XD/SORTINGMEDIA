@@ -3241,7 +3241,7 @@ public class MainActivity extends Activity
         tags.setTextColor(0xFFFFFFFF);
         form.addView(tags);
         final Spinner rule = new Spinner(this);
-        String[] rules = {"protect", "whole_group", "overwrite"};
+        String[] rules = {"protect", "whole_group", "overwrite", "keep_first"};
         rule.setAdapter(new ArrayAdapter<String>(this,
                 android.R.layout.simple_spinner_item, rules));
         String savedRule = getSharedPreferences("settings_prefs", MODE_PRIVATE)

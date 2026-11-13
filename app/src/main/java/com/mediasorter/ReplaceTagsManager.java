@@ -14,7 +14,7 @@ import java.util.Set;
  * and never uses the WindowManager page as a membership source.
  */
 public final class ReplaceTagsManager {
-    public enum SequenceRule { PROTECT, WHOLE_GROUP, OVERWRITE }
+    public enum SequenceRule { PROTECT, WHOLE_GROUP, OVERWRITE, KEEP_FIRST }
 
     public static final class Report {
         public int files;
@@ -73,7 +73,13 @@ public final class ReplaceTagsManager {
             List<String> previous = new ArrayList<String>(file.getTags());
             report.previousTags.put(file.getPath(), previous);
             Set<String> keep = new HashSet<String>();
+            boolean keptFirstLabel = false;
             for (String tag : previous) {
+                if (rule == SequenceRule.KEEP_FIRST && !keptFirstLabel
+                        && !matchesAny(tag, sequenceQueries)) {
+                    keep.add(tag);
+                    keptFirstLabel = true;
+                }
                 if (matchesAny(tag, protectQueries)) keep.add(tag);
                 Set<String> keys = fileGroups.get(file.getPath());
                 if (keys != null && rule == SequenceRule.WHOLE_GROUP
