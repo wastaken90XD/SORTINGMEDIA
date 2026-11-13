@@ -22,21 +22,26 @@ public final class CompareSortEngine {
         public final boolean candidateOnLeft;
         public final int questionNumber;
         public final int totalFiles;
-        Question(String candidate, String compared, boolean onLeft, int number, int total) {
+        public final boolean recheck;
+        Question(String candidate, String compared, boolean onLeft, int number, int total,
+                 boolean isRecheck) {
             candidatePath = candidate;
             comparedPath = compared;
             candidateOnLeft = onLeft;
             questionNumber = number;
             totalFiles = total;
+            recheck = isRecheck;
         }
     }
 
     public static final class Result {
         public final List<String> orderedPaths;
         public final List<String> unsurePaths;
-        Result(List<String> ordered, List<String> unsure) {
+        public final int inconsistencies;
+        Result(List<String> ordered, List<String> unsure, int errors) {
             orderedPaths = ordered;
             unsurePaths = unsure;
+            inconsistencies = errors;
         }
     }
 
@@ -61,6 +66,9 @@ public final class CompareSortEngine {
     private int high;
     private int questionCount;
     private int recheckEvery;
+    private int inconsistencies;
+    private AnswerRecord pendingRecheck;
+    private boolean rechecking;
     private boolean leftIsCandidate;
     private boolean initialized;
 
@@ -77,6 +85,9 @@ public final class CompareSortEngine {
         low = high = 0;
         questionCount = 0;
         recheckEvery = Math.max(0, recheck);
+        inconsistencies = 0;
+        pendingRecheck = null;
+        rechecking = false;
         initialized = true;
     }
 
@@ -88,6 +99,13 @@ public final class CompareSortEngine {
 
     public Question nextQuestion() {
         if (!initialized || isFinished()) return null;
+        if (!rechecking && pendingRecheck != null) {
+            rechecking = true;
+            leftIsCandidate = random.nextBoolean();
+            questionCount++;
+            return new Question(pendingRecheck.candidate, pendingRecheck.compared,
+                    leftIsCandidate, questionCount, totalFiles(), true);
+        }
         if (current == null) beginNext();
         if (current == null) return null;
         if (sorted.isEmpty()) {
@@ -100,11 +118,25 @@ public final class CompareSortEngine {
         String compared = sorted.get(Math.max(0, Math.min(sorted.size() - 1, mid)));
         leftIsCandidate = random.nextBoolean();
         questionCount++;
-        return new Question(current, compared, leftIsCandidate, questionCount, totalFiles());
+        return new Question(current, compared, leftIsCandidate, questionCount, totalFiles(), false);
     }
 
     public boolean answer(Answer answer) {
-        if (current == null || sorted.isEmpty() || answer == null) return false;
+        if (answer == null) return false;
+        if (rechecking && pendingRecheck != null) {
+            Answer mapped = answer;
+            if (!leftIsCandidate && answer != Answer.SAME && answer != Answer.SKIP) {
+                mapped = answer == Answer.LEFT ? Answer.RIGHT : Answer.LEFT;
+            }
+            if (mapped != pendingRecheck.answer) {
+                inconsistencies++;
+                pendingRecheck.answer = mapped;
+            }
+            pendingRecheck = null;
+            rechecking = false;
+            return true;
+        }
+        if (current == null || sorted.isEmpty()) return false;
         int mid = low + ((high - low) / 2);
         mid = Math.max(0, Math.min(sorted.size() - 1, mid));
         AnswerRecord record = new AnswerRecord();
@@ -137,10 +169,14 @@ public final class CompareSortEngine {
             record.mid = insertion;
             record.inserted = true;
         }
-        else if (recheckEvery > 0 && questionCount % recheckEvery == 0) {
-            // Rechecks are represented as an unsure pair; the next insertion
-            // remains deterministic and the review list can revisit it later.
-            String pair = record.candidate + "\n" + record.compared;
+        else if (recheckEvery > 0 && questionCount % recheckEvery == 0
+                && undo.size() > 1) {
+            AnswerRecord earlier = undo.get(random.nextInt(undo.size() - 1));
+            pendingRecheck = new AnswerRecord();
+            pendingRecheck.candidate = earlier.candidate;
+            pendingRecheck.compared = earlier.compared;
+            pendingRecheck.answer = earlier.answer;
+            String pair = earlier.candidate + "\n" + earlier.compared;
             Integer count = recheckCount.get(pair);
             recheckCount.put(pair, count == null ? 1 : count + 1);
         }
@@ -185,7 +221,7 @@ public final class CompareSortEngine {
 
     public Result finish() {
         if (current != null) finishCurrent(low);
-        return new Result(new ArrayList<String>(sorted), new ArrayList<String>(unsure));
+        return new Result(new ArrayList<String>(sorted), new ArrayList<String>(unsure), inconsistencies);
     }
 
     public JSONObjectState state() {
