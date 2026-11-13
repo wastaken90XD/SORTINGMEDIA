@@ -95,6 +95,9 @@ public final class SortCoordinator {
     }
 
     public int newGeneration() { return ++generation; }
+    public boolean isGenerationCurrent(int value) {
+        return !closed && value == generation;
+    }
     public void setPaused(boolean value) { paused = value; }
     public void setScanRunning(boolean value) { scanRunning = value; }
     public void setInteractivePause(boolean value) { interactivePause = value; }

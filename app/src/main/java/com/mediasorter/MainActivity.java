@@ -1913,32 +1913,39 @@ public class MainActivity extends Activity
                     firstVisible = ((GridLayoutManager) lm).findFirstVisibleItemPosition();
                 }
                 final int previousVisiblePos = firstVisible;
-                final List<MediaFile> pool = new ArrayList<MediaFile>(fullList);
+                final List<MediaFile> poolSource = fullList;
                 final int generation = (int) (refreshSequence & 0x7fffffff);
                 final SurpriseEngine.Mode mode = surpriseEngine == null
                         ? SurpriseEngine.Mode.UNIFORM
                         : surpriseEngine.getMode(getSharedPreferences("settings_prefs", MODE_PRIVATE));
                 final SmartSortEngine.Result smartSnapshot = smartResult;
-                if (mode == SurpriseEngine.Mode.UNIFORM || mode == SurpriseEngine.Mode.DECK
-                        || mode == SurpriseEngine.Mode.STRIDE) {
-                    MediaFile picked = surpriseEngine == null
-                            ? pool.get(RandomGenerator.pick(pool.size()))
-                            : surpriseEngine.pick(pool, mode, fileStatus, generation, smartSnapshot);
-                    applySurprisePick(picked, previousVisiblePos);
-                } else if (sortCoordinator != null) {
+                if (sortCoordinator != null) {
+                    final int taskGeneration = sortCoordinator.newGeneration();
                     sortCoordinator.post(new SortCoordinator.Task() {
-                        @Override public void run(SortCoordinator.TaskContext context) {
-                            final MediaFile picked = surpriseEngine == null ? null
+                        @Override public void run(final SortCoordinator.TaskContext context) {
+                            final List<MediaFile> pool = new ArrayList<MediaFile>(poolSource);
+                            context.checkpoint();
+                            final MediaFile picked = surpriseEngine == null
+                                    ? pool.get(RandomGenerator.pick(pool.size()))
                                     : surpriseEngine.pick(pool, mode, fileStatus, generation, smartSnapshot);
+                            context.checkpoint();
+                            if (!context.isCurrent()) return;
                             mainHandler.post(new Runnable() {
                                 @Override public void run() {
-                                    applySurprisePick(picked, previousVisiblePos);
+                                    if (sortCoordinator == null
+                                            || sortCoordinator.isGenerationCurrent(taskGeneration)) {
+                                        applySurprisePick(picked, previousVisiblePos);
+                                    }
                                 }
                             });
                         }
                     });
                 } else {
-                    final MediaFile picked = surpriseEngine == null ? null
+                    // Kept only for non-MainActivity callers/tests that do not
+                    // install the shared coordinator. MainActivity always does.
+                    final List<MediaFile> pool = new ArrayList<MediaFile>(poolSource);
+                    final MediaFile picked = surpriseEngine == null
+                            ? pool.get(RandomGenerator.pick(pool.size()))
                             : surpriseEngine.pick(pool, mode, fileStatus, generation, smartSnapshot);
                     applySurprisePick(picked, previousVisiblePos);
                 }
