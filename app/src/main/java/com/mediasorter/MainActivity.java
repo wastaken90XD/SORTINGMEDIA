@@ -3700,19 +3700,17 @@ public class MainActivity extends Activity
                 .setMessage(result.orderedPaths.size() + " files ordered"
                         + (result.unsurePaths.isEmpty() ? "" : "\n"
                         + result.unsurePaths.size() + " unsure"))
-                .setPositiveButton("Save order", new DialogInterface.OnClickListener() {
+                .setItems(new String[]{"Save order", "Save and rename sequence",
+                        "Keep working", "Discard"}, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
-                        saveCompareOrder(result);
-                    }
-                }).setNeutralButton("Keep working", null)
-                .setNegativeButton("Discard", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface dialog, int which) {
-                        exitCompareSort(false);
+                        if (which == 0) saveCompareOrder(result, false);
+                        else if (which == 1) saveCompareOrder(result, true);
+                        else if (which == 3) exitCompareSort(false);
                     }
                 }).show();
     }
 
-    private void saveCompareOrder(final CompareSortEngine.Result result) {
+    private void saveCompareOrder(final CompareSortEngine.Result result, final boolean rename) {
         final List<MediaFile> snapshot = indexer.getFullIndex();
         final Map<String, Integer> previous = new java.util.HashMap<String, Integer>();
         final Map<String, Integer> ranks = new java.util.HashMap<String, Integer>();
@@ -3734,6 +3732,7 @@ public class MainActivity extends Activity
                         Toast.makeText(MainActivity.this, "Compare order saved",
                                 Toast.LENGTH_SHORT).show();
                         exitCompareSort(true);
+                        if (rename) renameGalleryManualRange(ordered);
                         scheduleRefresh();
                     }
                 });
