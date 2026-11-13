@@ -2321,6 +2321,8 @@ public class MainActivity extends Activity
                 final SmartSortEngine.Result smartSnapshot = smartResult;
                 final boolean smartOn = getSharedPreferences("settings_prefs", MODE_PRIVATE)
                         .getBoolean("smart_enabled", false);
+                final SortCoordinator.Mode mode = sortCoordinator == null
+                        ? SortCoordinator.Mode.OFF : sortCoordinator.getMode();
                 final String activePile = getSharedPreferences("settings_prefs", MODE_PRIVATE)
                         .getString("smart_active_pile", "");
                 int pileTotal = 0;
@@ -2334,12 +2336,21 @@ public class MainActivity extends Activity
                 }
                 final int finalPileTotal = pileTotal;
                 final int finalPileSorted = pileSorted;
+                final int gameTagged = tagged;
+                final int compareQuestions = compareSortEngine == null ? 0
+                        : compareSortEngine.questionCount();
+                final int compareTotal = compareSortEngine == null ? 0
+                        : compareSortEngine.totalFiles();
                 final String text = smartOn && smartSnapshot != null
                         ? "Smart: " + smartSnapshot.labeled + " tagged, "
                                 + smartSnapshot.suggested + " suggested, "
                                 + smartSnapshot.unsure + " unsure"
                                 + (finalPileTotal > 0 ? "  " + activePile + ": "
                                 + finalPileSorted + " of " + finalPileTotal + " sorted" : "")
+                        : mode == SortCoordinator.Mode.COMPARE
+                        ? "Compare: " + compareQuestions + " of " + compareTotal + " answered"
+                        : mode == SortCoordinator.Mode.GAME
+                        ? "Game: " + gameTagged + " of " + countedPaths.size() + " tagged"
                         : "Total: " + totalSnapshot.size()
                                 + "  Filtered: " + countedPaths.size()
                                 + "  Tagged: " + tagged
