@@ -6909,7 +6909,8 @@ private Spinner makeSpinner(String[] options) {
         mainHandler.post(new Runnable() {
             @Override public void run() {
                 // Remove from adapter immediately for responsiveness,
-                // then do a full refresh to synchronise all data structures.
+                // then reconcile sessions/ranks and do a full refresh.
+                onPathsChanged(null, java.util.Collections.singleton(deletedPath));
                 mediaAdapter.removeFile(deletedPath);
                 scheduleRefresh();
             }
@@ -8222,6 +8223,7 @@ private Spinner makeSpinner(String[] options) {
                     java.util.List<java.io.File> sources = new ArrayList<>();
                     java.util.List<java.io.File> temporary = new ArrayList<>();
                     java.util.List<MediaFile> renamedFiles = new ArrayList<>();
+                    final Map<String, String> pathChanges = new java.util.HashMap<String, String>();
                     long stamp = System.currentTimeMillis();
                     for (int i = 0; i < affected.size(); i++) {
                         MediaFile file = affected.get(i);
@@ -8249,6 +8251,7 @@ private Spinner makeSpinner(String[] options) {
                         if (temp.renameTo(destination)) {
                             String oldPath = file.getPath();
                             file.setPath(destination.getAbsolutePath());
+                            pathChanges.put(oldPath, file.getPath());
                             groupManager.moveManualAssignment(oldPath, file.getPath());
                             android.content.SharedPreferences.Editor editor =
                                     getSharedPreferences("settings_prefs", MODE_PRIVATE).edit();
@@ -8269,6 +8272,7 @@ private Spinner makeSpinner(String[] options) {
                     // reconciliation request.
                     mainHandler.post(new Runnable() {
                         @Override public void run() {
+                            onPathsChanged(pathChanges, null);
                             for (MediaFile file : affected) {
                                 if (file != null) {
                                     indexer.rescan(new java.io.File(file.getPath()).getParent());

@@ -34,7 +34,9 @@ public class RenameAction extends Action {
         File original = new File(file.getPath());
         File renamed = new File(original.getParent(), preview.newName);
         if (original.renameTo(renamed)) {
+            String oldPath = file.getPath();
             file.setPath(renamed.getAbsolutePath());
+            PathChangeNotifier.renamed(context, oldPath, file.getPath());
             log.add("Renamed: " + preview.originalName + " -> " + preview.newName);
             return true;
         } else {

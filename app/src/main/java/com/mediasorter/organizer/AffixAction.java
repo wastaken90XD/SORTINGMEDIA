@@ -52,7 +52,9 @@ public class AffixAction extends Action {
             return false;
         }
         if (original.renameTo(renamed)) {
+            String oldPath = file.getPath();
             file.setPath(renamed.getAbsolutePath());
+            PathChangeNotifier.renamed(context, oldPath, file.getPath());
             log.add(("PREFIX".equals(position) ? "Prefixed: " : "Suffixed: ") + name + " -> " + newName);
             return true;
         } else {

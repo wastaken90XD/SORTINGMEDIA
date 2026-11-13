@@ -30,6 +30,7 @@ public class DeleteAction extends Action {
             if (!destDir.exists()) destDir.mkdirs();
             File destFile = new File(destDir, src.getName());
             if (src.renameTo(destFile)) {
+                PathChangeNotifier.removed(context, file.getPath());
                 log.add("Trashed: " + src.getName());
                 return true;
             } else {
@@ -38,6 +39,7 @@ public class DeleteAction extends Action {
             }
         } else {
             if (src.delete()) {
+                PathChangeNotifier.removed(context, file.getPath());
                 log.add("Deleted: " + src.getName());
                 return true;
             } else {
