@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import android.graphics.Rect;
+import android.graphics.Matrix;
 import com.mediasorter.features.RandomGenerator;
 import com.mediasorter.features.SurpriseEngine;
 import com.mediasorter.features.SmartSortEngine;
@@ -149,6 +150,14 @@ public class MainActivity extends Activity
     private CompareSortEngine.Question compareQuestion;
     private android.widget.LinearLayout sortModePanel;
     private boolean compareWarningShown;
+    private ImageView compareLeftImage;
+    private ImageView compareRightImage;
+    private Matrix compareMatrix = new Matrix();
+    private float compareScale = 1f;
+    private float compareLastTouchX;
+    private float compareLastTouchY;
+    private ScaleGestureDetector compareScaleDetector;
+    private boolean compareHighResolutionLoaded;
     private Runnable gameAfterTag;
     private BatchGameEngine.Round gameRound;
     private volatile com.mediasorter.features.SmartSortEngine.Result smartResult;
@@ -3500,6 +3509,9 @@ public class MainActivity extends Activity
             imageRow.addView(leftCell, new LinearLayout.LayoutParams(0, 170, 1f));
             imageRow.addView(rightCell, new LinearLayout.LayoutParams(0, 170, 1f));
         }
+        compareLeftImage = leftImage;
+        compareRightImage = rightImage;
+        configureCompareImageInteractions(leftImage, rightImage);
         sortModePanel.addView(imageRow);
         if (!compareWarningShown && compareQuestion.questionNumber >= comparePrefs.getInt(
                 "compare_warn_questions", 100)) {
@@ -3545,6 +3557,76 @@ public class MainActivity extends Activity
         preview.addView(sortModePanel, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM));
+    }
+
+    private void configureCompareImageInteractions(final ImageView left, final ImageView right) {
+        compareScale = 1f;
+        compareMatrix = new Matrix();
+        compareHighResolutionLoaded = false;
+        compareScaleDetector = new ScaleGestureDetector(this,
+                new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                    @Override public boolean onScale(ScaleGestureDetector detector) {
+                        float factor = detector.getScaleFactor();
+                        float next = Math.max(1f, Math.min(4f, compareScale * factor));
+                        compareMatrix.postScale(next / compareScale, next / compareScale,
+                                detector.getFocusX(), detector.getFocusY());
+                        compareScale = next;
+                        applyCompareMatrix(left, right);
+                        if (compareScale > 1.5f && !compareHighResolutionLoaded
+                                && getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getBoolean("compare_hires_on_zoom", true)) {
+                            compareHighResolutionLoaded = true;
+                            if (left != null && leftFileForCompare(left) != null && thumbnailLoader != null) {
+                                thumbnailLoader.load(leftFileForCompare(left), left);
+                            }
+                            if (right != null && rightFileForCompare(right) != null && thumbnailLoader != null) {
+                                thumbnailLoader.load(rightFileForCompare(right), right);
+                            }
+                        }
+                        return true;
+                    }
+                });
+        View.OnTouchListener listener = new View.OnTouchListener() {
+            @Override public boolean onTouch(View view, MotionEvent event) {
+                if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                    compareLastTouchX = event.getX();
+                    compareLastTouchY = event.getY();
+                } else if (event.getActionMasked() == MotionEvent.ACTION_MOVE
+                        && compareScale > 1f && event.getPointerCount() == 1) {
+                    compareMatrix.postTranslate(event.getX() - compareLastTouchX,
+                            event.getY() - compareLastTouchY);
+                    compareLastTouchX = event.getX();
+                    compareLastTouchY = event.getY();
+                    applyCompareMatrix(left, right);
+                }
+                if (compareScaleDetector != null) compareScaleDetector.onTouchEvent(event);
+                return true;
+            }
+        };
+        left.setOnTouchListener(listener);
+        right.setOnTouchListener(listener);
+    }
+
+    private void applyCompareMatrix(ImageView left, ImageView right) {
+        left.setScaleType(ImageView.ScaleType.MATRIX);
+        left.setImageMatrix(compareMatrix);
+        if (getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getBoolean("compare_sync_zoom", true)) {
+            right.setScaleType(ImageView.ScaleType.MATRIX);
+            right.setImageMatrix(new Matrix(compareMatrix));
+        }
+    }
+
+    private MediaFile leftFileForCompare(ImageView view) {
+        return view == compareLeftImage ? findFileByPath(compareQuestion == null ? null
+                : (compareQuestion.candidateOnLeft ? compareQuestion.candidatePath : compareQuestion.comparedPath))
+                : null;
+    }
+
+    private MediaFile rightFileForCompare(ImageView view) {
+        return view == compareRightImage ? findFileByPath(compareQuestion == null ? null
+                : (compareQuestion.candidateOnLeft ? compareQuestion.comparedPath : compareQuestion.candidatePath))
+                : null;
     }
 
     private LinearLayout compareCell(ImageView image, MediaFile file,
@@ -3661,6 +3743,9 @@ public class MainActivity extends Activity
 
     private void exitCompareSort(boolean keepOrder) {
         compareQuestion = null;
+        compareLeftImage = null;
+        compareRightImage = null;
+        compareScaleDetector = null;
         if (sortSessionStore != null) sortSessionStore.delete(SortSessionStore.COMPARE_FILE);
         removeSortModePanel();
         if (sortCoordinator != null) {
