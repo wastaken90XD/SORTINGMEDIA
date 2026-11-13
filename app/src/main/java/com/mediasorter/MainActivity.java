@@ -315,6 +315,13 @@ public class MainActivity extends Activity
             boolean smartEnabled = getSharedPreferences("settings_prefs", MODE_PRIVATE)
                     .getBoolean("smart_enabled", false);
             smartSortEngine.setEnabled(smartEnabled);
+            if (sortCoordinator != null && smartEnabled
+                    && sortCoordinator.getMode() == SortCoordinator.Mode.OFF) {
+                sortCoordinator.setMode(SortCoordinator.Mode.SMART);
+            } else if (sortCoordinator != null && !smartEnabled
+                    && sortCoordinator.getMode() == SortCoordinator.Mode.SMART) {
+                sortCoordinator.setMode(SortCoordinator.Mode.OFF);
+            }
             smartSortEngine.onResume();
             if (smartEnabled) {
                 smartSortEngine.request(indexer.getFullIndex());
@@ -1274,6 +1281,7 @@ public class MainActivity extends Activity
                         android.util.Log.w("MainActivity", "Sorting task failed", error);
                     }
                 });
+        smartSortEngine.setCoordinator(sortCoordinator);
         featureStore = new FeatureStore(this);
         sortSessionStore = new SortSessionStore(this);
         compareSortEngine = new CompareSortEngine();
@@ -3227,6 +3235,12 @@ public class MainActivity extends Activity
         if (action == GestureSettings.GestureAction.SMART_TOGGLE) {
             boolean enabled = !prefs.getBoolean("smart_enabled", false);
             prefs.edit().putBoolean("smart_enabled", enabled).apply();
+            if (sortCoordinator != null) {
+                if (enabled) sortCoordinator.setMode(SortCoordinator.Mode.SMART);
+                else if (sortCoordinator.getMode() == SortCoordinator.Mode.SMART) {
+                    sortCoordinator.setMode(SortCoordinator.Mode.OFF);
+                }
+            }
             if (smartSortEngine != null) {
                 smartSortEngine.setEnabled(enabled);
                 if (enabled) smartSortEngine.request(indexer.getFullIndex());

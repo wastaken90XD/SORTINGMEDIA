@@ -109,6 +109,8 @@ public class SmartSortEngine {
 
     private final android.content.SharedPreferences prefs;
     private final Handler mainHandler;
+    private com.mediasorter.SortCoordinator coordinator;
+    private volatile com.mediasorter.SortCoordinator.TaskContext coordinatorContext;
     private HandlerThread thread;
     private Handler worker;
     private final Listener listener;
@@ -170,6 +172,10 @@ public class SmartSortEngine {
         }
     }
 
+    public void setCoordinator(com.mediasorter.SortCoordinator value) {
+        coordinator = value;
+    }
+
     public boolean isEnabled() { return enabled; }
     public void setPaused(boolean value) { paused = value; }
     public void setScanRunning(boolean value) { scanRunning = value; }
@@ -185,14 +191,13 @@ public class SmartSortEngine {
     /** Takes one full-index snapshot per pass and never reads the WindowManager page. */
     public void request(final List<MediaFile> files) {
         if (!enabled || closed || files == null || files.isEmpty()) return;
-        ensureWorker();
         final int requestGeneration = ++generation;
         int configuredCap = Math.max(500, prefs.getInt("smart_max_pool", 5000));
         int cap = lowMemory ? Math.min(1500, configuredCap) : configuredCap;
         final List<MediaFile> snapshot = files.size() <= cap
                 ? new ArrayList<MediaFile>(files)
                 : new ArrayList<MediaFile>(files.subList(0, cap));
-        worker.post(new Runnable() {
+        Runnable work = new Runnable() {
             @Override public void run() {
                 Result result;
                 try {
@@ -212,7 +217,19 @@ public class SmartSortEngine {
                     }
                 });
             }
-        });
+        };
+        if (coordinator != null) {
+            coordinator.post(new com.mediasorter.SortCoordinator.Task() {
+                @Override public void run(com.mediasorter.SortCoordinator.TaskContext context) {
+                    coordinatorContext = context;
+                    try { work.run(); }
+                    finally { coordinatorContext = null; }
+                }
+            });
+        } else {
+            ensureWorker();
+            worker.post(work);
+        }
     }
 
     public void cancel() { generation++; }
@@ -1144,6 +1161,10 @@ public class SmartSortEngine {
 
     private void checkpoint(int requestGeneration) {
         if (requestGeneration != generation || closed) throw new CancelledPassException();
+        if (coordinatorContext != null) {
+            try { coordinatorContext.checkpoint(); }
+            catch (RuntimeException cancelled) { throw new CancelledPassException(); }
+        }
         int chunk = Math.max(5, Math.min(50, prefs.getInt("smart_chunk_ms", 20)
                 / (lowMemory ? 2 : 1)));
         while (scanRunning || paused || prefs.getBoolean("smart_paused", false)
