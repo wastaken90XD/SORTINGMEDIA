@@ -25,6 +25,7 @@ public final class ReplaceTagsManager {
         public final Map<String, List<String>> previousTags =
                 new LinkedHashMap<String, List<String>>();
         public final List<String> purgedGroups = new ArrayList<String>();
+        public final List<String> purgedTags = new ArrayList<String>();
     }
 
     private ReplaceTagsManager() {}
@@ -132,7 +133,10 @@ public final class ReplaceTagsManager {
                     if (remains) break;
                 }
                 if (!remains) {
-                    for (String tag : entry.getValue()) tagManager.deleteTag(tag);
+                    for (String tag : entry.getValue()) {
+                        tagManager.deleteTag(tag);
+                        report.purgedTags.add(tag);
+                    }
                     report.purgedGroups.add(entry.getKey());
                 }
             }

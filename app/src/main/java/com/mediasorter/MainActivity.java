@@ -170,6 +170,7 @@ public class MainActivity extends Activity
             new java.util.HashSet<String>();
     private Map<String, List<String>> smartPileUndo;
     private Map<String, List<String>> replaceTagsUndo;
+    private List<String> replaceTagsPurgedTags;
     private String smartOrderPreviousSequence;
     private boolean smartOrderPreviousEnabled;
     private SearchHistory searchHistory;
@@ -3321,6 +3322,7 @@ public class MainActivity extends Activity
                                 mainHandler.post(new Runnable() {
                                     @Override public void run() {
                                         replaceTagsUndo = report.previousTags;
+                                        replaceTagsPurgedTags = new ArrayList<String>(report.purgedTags);
                                         scheduleRefresh();
                                         Toast.makeText(MainActivity.this, "Tags replaced on "
                                                 + report.files + " files"
@@ -4129,12 +4131,16 @@ public class MainActivity extends Activity
         if (replaceTagsUndo != null && !replaceTagsUndo.isEmpty()) {
             final Map<String, List<String>> restore = replaceTagsUndo;
             replaceTagsUndo = null;
+            final List<String> purgedTags = replaceTagsPurgedTags == null
+                    ? new ArrayList<String>() : new ArrayList<String>(replaceTagsPurgedTags);
+            replaceTagsPurgedTags = null;
             final Map<String, MediaFile> filesToRestore = new java.util.HashMap<String, MediaFile>();
             for (MediaFile file : indexer.getFullIndex()) {
                 if (file != null && restore.containsKey(file.getPath())) filesToRestore.put(file.getPath(), file);
             }
             sortCoordinator.post(new SortCoordinator.Task() {
                 @Override public void run(SortCoordinator.TaskContext context) {
+                    for (String tag : purgedTags) tagManager.createTag(tag);
                     for (Map.Entry<String, List<String>> entry : restore.entrySet()) {
                         MediaFile file = filesToRestore.get(entry.getKey());
                         if (file == null) continue;
