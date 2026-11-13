@@ -624,6 +624,15 @@ public class SettingsActivity extends Activity {
     }
 
     private void addInteractiveSortSettingsSection(LinearLayout root) {
+        root.addView(makeTitle("Shared Sorting"));
+        root.addView(makeSpinnerRow("Duplicate mode:",
+                new String[]{"ignore", "collapse"},
+                "collapse".equals(settingsPrefs.getString("sort_dupes_mode", "ignore")) ? 1 : 0,
+                new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) {
+                        saveString("sort_dupes_mode", value);
+                    }
+                }));
         root.addView(makeTitle("Compare Sort"));
         root.addView(makeSpinnerRow("Compare layout:",
                 new String[]{"side_by_side", "stacked", "auto"},

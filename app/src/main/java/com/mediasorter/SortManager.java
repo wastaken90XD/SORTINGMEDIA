@@ -413,6 +413,21 @@ public class SortManager {
         Collections.sort(files, chain);
         if (randomWithinGroup) shuffleWithinGroups(files);
         if (random) RandomGenerator.shuffle(files);
+        if (prefs != null && "collapse".equalsIgnoreCase(
+                prefs.getString("sort_dupes_mode", "ignore"))) {
+            collapseExactDuplicates(files);
+        }
+    }
+
+    private void collapseExactDuplicates(List<MediaFile> files) {
+        java.util.HashSet<String> seen = new java.util.HashSet<String>();
+        for (int i = files.size() - 1; i >= 0; i--) {
+            MediaFile file = files.get(i);
+            if (file == null || file.getPartialHash() == null) continue;
+            String key = file.getSize() + ":" +
+                    com.mediasorter.HashScanner.hashToHex(file.getPartialHash());
+            if (!seen.add(key)) files.remove(i);
+        }
     }
 
     /** Shuffle each contiguous group without moving files between groups. */

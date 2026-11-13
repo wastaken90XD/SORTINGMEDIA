@@ -54,6 +54,7 @@ public final class SettingsExporter {
             "show_preview", "explorer_width_percent", "random_tag_format",
             "random_tag_custom_pattern", "toolbar_slots", "manual_groups",
             "group_tag_mode", "group_tag_position", "group_tag_pattern", "tag_bar_width",
+            "sort_dupes_mode",
             GestureSettings.KEY_MAX_GESTURE_STEPS,
             "smart_enabled", "smart_paused", "smart_order_mode", "smart_k_neighbors",
             "smart_suggest_threshold", "smart_min_labeled", "smart_random_fraction",
@@ -73,7 +74,7 @@ public final class SettingsExporter {
             "compare_hires_on_zoom", "game_batch_size", "game_batch_adaptive",
             "game_decoys", "game_probe_every", "game_none_cooldown",
             "game_none_max_returns", "game_order_min_group", "game_score_mode",
-            "game_timer_seconds", "game_prompt_text",
+            "game_timer_seconds", "game_prompt_text", "sort_profiles", "sort_profile_index",
             "replace_sequence_rule", "replace_sequence_patterns", "replace_protect_patterns",
             "replace_confirm_sequence_overwrite", "replace_show_group_report",
             "replace_purge_group_tags"
@@ -93,7 +94,7 @@ public final class SettingsExporter {
             "compare_recheck_every", "compare_warn_questions", "compare_undo_depth",
             "game_batch_size", "game_decoys", "game_probe_every", "game_none_cooldown",
             "game_none_max_returns", "game_order_min_group", "game_timer_seconds",
-            "surprise_w_uncertain", "surprise_candidate_cap"));
+            "sort_profile_index", "surprise_w_uncertain", "surprise_candidate_cap"));
 
     private static final Set<String> GESTURE_KEYS = new HashSet<String>(Arrays.asList(
             GestureConstants.INPUT_SWIPE_LEFT, GestureConstants.INPUT_SWIPE_RIGHT,

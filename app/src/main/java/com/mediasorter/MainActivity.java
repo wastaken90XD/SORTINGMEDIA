@@ -142,6 +142,7 @@ public class MainActivity extends Activity
     private SortCoordinator sortCoordinator;
     private FeatureStore featureStore;
     private SortSessionStore sortSessionStore;
+    private SortProfileManager sortProfileManager;
     private CompareSortEngine compareSortEngine;
     private BatchGameEngine batchGameEngine;
     private CompareSortEngine.Question compareQuestion;
@@ -1289,6 +1290,7 @@ public class MainActivity extends Activity
         featureStore = new FeatureStore(this);
         smartSortEngine.setFeatureStore(featureStore);
         sortSessionStore = new SortSessionStore(this);
+        sortProfileManager = new SortProfileManager(this);
         compareSortEngine = new CompareSortEngine();
         batchGameEngine = new BatchGameEngine();
         searchHistory  = new SearchHistory(this);
@@ -3407,7 +3409,10 @@ public class MainActivity extends Activity
     }
 
     private void applyNextSortProfile() {
-        Toast.makeText(this, "Sorting profiles are not configured", Toast.LENGTH_SHORT).show();
+        if (sortProfileManager == null) return;
+        String name = sortProfileManager.nextBuiltIn();
+        Toast.makeText(this, "Sorting profile applied: " + name, Toast.LENGTH_SHORT).show();
+        scheduleRefresh();
     }
 
     private void removeSortModePanel() {
