@@ -652,6 +652,7 @@ public class MainActivity extends Activity
         if (smartSortEngine != null) smartSortEngine.noteActivity();
         if (sortCoordinator != null) sortCoordinator.noteActivity();
         if (isVolumeKey(keyCode)) {
+            if (sortCoordinator != null) sortCoordinator.setVolumeHeld(true);
             if (isTextInputFocused()) return super.onKeyDown(keyCode, event);
             if (smartSortEngine != null) smartSortEngine.noteActivity();
             android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
@@ -751,6 +752,7 @@ public class MainActivity extends Activity
     @Override
     public boolean onKeyUp(int keyCode, android.view.KeyEvent event) {
         if (isVolumeKey(keyCode)) {
+            if (sortCoordinator != null) sortCoordinator.setVolumeHeld(false);
             boolean textFocused = isTextInputFocused();
             android.content.SharedPreferences sp = getSharedPreferences("settings_prefs", MODE_PRIVATE);
             boolean enabled = sp.getBoolean("volume_keys_enabled", true);
@@ -1555,6 +1557,14 @@ public class MainActivity extends Activity
         fileBrowser.setAdapter(mediaAdapter);
         fileBrowser.setHasFixedSize(true);
         fileBrowser.setItemViewCacheSize(30);
+        fileBrowser.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override public void onScrollStateChanged(@androidx.annotation.NonNull RecyclerView recyclerView,
+                                                       int newState) {
+                if (sortCoordinator != null) {
+                    sortCoordinator.setScrolling(newState != RecyclerView.SCROLL_STATE_IDLE);
+                }
+            }
+        });
 
         final GestureDetector fileListGestureDetector = new GestureDetector(this,
                 new GestureDetector.SimpleOnGestureListener() {
@@ -7989,6 +7999,9 @@ private Spinner makeSpinner(String[] options) {
                 @Override
                 public void onScrollStateChanged(@androidx.annotation.NonNull RecyclerView recyclerView,
                                                  int newState) {
+                    if (sortCoordinator != null) {
+                        sortCoordinator.setScrolling(newState != RecyclerView.SCROLL_STATE_IDLE);
+                    }
                     if (newState == RecyclerView.SCROLL_STATE_IDLE) {
                         galleryScrollSettled = true;
                         if (galleryFastScrolling) setGalleryFastScrolling(false);

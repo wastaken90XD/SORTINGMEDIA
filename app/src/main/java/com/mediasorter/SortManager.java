@@ -439,15 +439,34 @@ public class SortManager {
         }
     }
 
+    /**
+     * Collapse duplicate runs without dropping files.  The earlier
+     * implementation removed every duplicate after the first one, which made
+     * the setting destructive and also made list/gallery counts disagree.
+     * Groups retain the order of their first member and identical files remain
+     * adjacent in every presentation that consumes this sorted list.
+     */
     private void collapseExactDuplicates(List<MediaFile> files) {
-        java.util.HashSet<String> seen = new java.util.HashSet<String>();
-        for (int i = files.size() - 1; i >= 0; i--) {
+        java.util.LinkedHashMap<String, List<MediaFile>> groups =
+                new java.util.LinkedHashMap<String, List<MediaFile>>();
+        for (int i = 0; i < files.size(); i++) {
             MediaFile file = files.get(i);
-            if (file == null || file.getPartialHash() == null) continue;
-            String key = file.getSize() + ":" +
-                    com.mediasorter.HashScanner.hashToHex(file.getPartialHash());
-            if (!seen.add(key)) files.remove(i);
+            String key;
+            if (file == null || file.getPartialHash() == null) {
+                key = "unique:" + i;
+            } else {
+                key = "duplicate:" + file.getSize() + ":"
+                        + com.mediasorter.HashScanner.hashToHex(file.getPartialHash());
+            }
+            List<MediaFile> group = groups.get(key);
+            if (group == null) {
+                group = new ArrayList<MediaFile>();
+                groups.put(key, group);
+            }
+            group.add(file);
         }
+        files.clear();
+        for (List<MediaFile> group : groups.values()) files.addAll(group);
     }
 
     /** Shuffle each contiguous group without moving files between groups. */

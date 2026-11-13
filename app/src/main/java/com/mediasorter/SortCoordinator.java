@@ -34,7 +34,7 @@ public final class SortCoordinator {
             if (!isCurrent()) throw new CancelledTaskException();
             int chunk = Math.max(5, Math.min(50,
                     prefs.getInt("smart_chunk_ms", 20) / (lowMemory ? 2 : 1)));
-            while (paused || scanRunning || interactivePause || lowHeap()
+            while (paused || scanRunning || interactivePause || scrolling || volumeHeld || lowHeap()
                     || SystemClock.uptimeMillis() - lastActivity
                     < (long) prefs.getInt("rerank_idle_ms", 400) * (lowMemory ? 2L : 1L)) {
                 SystemClock.sleep(16L);
@@ -63,6 +63,8 @@ public final class SortCoordinator {
     private volatile boolean paused;
     private volatile boolean scanRunning;
     private volatile boolean interactivePause;
+    private volatile boolean scrolling;
+    private volatile boolean volumeHeld;
     private volatile boolean closed;
     private volatile long lastActivity;
     private volatile int generation;
@@ -96,6 +98,8 @@ public final class SortCoordinator {
     public void setPaused(boolean value) { paused = value; }
     public void setScanRunning(boolean value) { scanRunning = value; }
     public void setInteractivePause(boolean value) { interactivePause = value; }
+    public void setScrolling(boolean value) { scrolling = value; }
+    public void setVolumeHeld(boolean value) { volumeHeld = value; }
     public void noteActivity() { lastActivity = SystemClock.uptimeMillis(); }
     public void cancel() { generation++; }
 

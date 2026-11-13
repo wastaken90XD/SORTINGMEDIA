@@ -18,6 +18,7 @@ public class MacroCompositeAction extends Action {
     private final List<Action> actions;
     private int failedStepIndex = -1;
     private boolean lastUndoPartial;
+    private String lastCopiedPath;
     private final Map<String, Snapshot> snapshots = new HashMap<String, Snapshot>();
 
     private static class Snapshot {
@@ -39,6 +40,7 @@ public class MacroCompositeAction extends Action {
     public List<Action> getActions() { return actions; }
     public int getFailedStepIndex() { return failedStepIndex; }
     public boolean wasLastUndoPartial() { return lastUndoPartial; }
+    public String getLastCopiedPath() { return lastCopiedPath; }
 
     @Override public String describe() {
         return "Composite macro of " + actions.size() + " steps";
@@ -48,6 +50,7 @@ public class MacroCompositeAction extends Action {
     public boolean execute(MediaFile file, Context context, TagManager tagManager,
                            BatchRenameManager renamer, FileStatus fileStatus) {
         failedStepIndex = -1;
+        lastCopiedPath = null;
         if (file == null || actions.isEmpty()) return false;
         Snapshot snapshot = new Snapshot(file, fileStatus);
         snapshots.put(snapshot.path, snapshot);
@@ -61,10 +64,16 @@ public class MacroCompositeAction extends Action {
                 // reverse step order, so a later failed step cannot leave a
                 // half-applied selection behind.
                 undoActions(file, context, tagManager, renamer, fileStatus, completed);
+                if (lastCopiedPath != null) new File(lastCopiedPath).delete();
                 restoreSnapshot(snapshot, file, context, fileStatus);
                 return false;
             }
             completed++;
+            if (action instanceof CopyAction) {
+                lastCopiedPath = ((CopyAction) action).lastCopiedPath;
+            } else if (action instanceof MacroCompositeAction) {
+                lastCopiedPath = ((MacroCompositeAction) action).getLastCopiedPath();
+            }
         }
         return completed > 0;
     }

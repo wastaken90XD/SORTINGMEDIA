@@ -442,9 +442,14 @@ public class AutoOrganizer {
         entry.newTags = new ArrayList<String>(file.getTags());
         entry.newStatus = fileStatus.getStatus(file.getPath());
         entry.action = action;
-        if (action instanceof CopyAction && ((CopyAction) action).lastCopiedPath != null) {
+        String copiedPath = null;
+        if (action instanceof CopyAction) copiedPath = ((CopyAction) action).lastCopiedPath;
+        else if (action instanceof MacroCompositeAction) {
+            copiedPath = ((MacroCompositeAction) action).getLastCopiedPath();
+        }
+        if (copiedPath != null) {
             entry.wasCopied = true;
-            entry.newPath = ((CopyAction) action).lastCopiedPath;
+            entry.newPath = copiedPath;
         }
         if (!entry.newPath.equals(entry.originalPath) && !entry.wasCopied) {
             if (entry.newPath.contains("/.trash/")) {
