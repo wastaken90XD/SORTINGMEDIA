@@ -1841,9 +1841,9 @@ public class MainActivity extends Activity
                             ? pool.get(RandomGenerator.pick(pool.size()))
                             : surpriseEngine.pick(pool, mode, fileStatus, generation, smartSnapshot);
                     applySurprisePick(picked, previousVisiblePos);
-                } else {
-                    new Thread(new Runnable() {
-                        @Override public void run() {
+                } else if (sortCoordinator != null) {
+                    sortCoordinator.post(new SortCoordinator.Task() {
+                        @Override public void run(SortCoordinator.TaskContext context) {
                             final MediaFile picked = surpriseEngine == null ? null
                                     : surpriseEngine.pick(pool, mode, fileStatus, generation, smartSnapshot);
                             mainHandler.post(new Runnable() {
@@ -1852,7 +1852,11 @@ public class MainActivity extends Activity
                                 }
                             });
                         }
-                    }).start();
+                    });
+                } else {
+                    final MediaFile picked = surpriseEngine == null ? null
+                            : surpriseEngine.pick(pool, mode, fileStatus, generation, smartSnapshot);
+                    applySurprisePick(picked, previousVisiblePos);
                 }
             }
         });
@@ -2221,6 +2225,51 @@ public class MainActivity extends Activity
                         })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    /** Single path-reconciliation hook for sessions, ranks, highlight, and index objects. */
+    public void onPathsChanged(Map<String, String> oldToNew, Set<String> removed) {
+        Map<String, String> changes = oldToNew == null
+                ? new java.util.HashMap<String, String>() : new java.util.HashMap<String, String>(oldToNew);
+        Set<String> deleted = removed == null ? new java.util.HashSet<String>()
+                : new java.util.HashSet<String>(removed);
+        String oldCurrentPath = currentFile == null ? null : currentFile.getPath();
+        for (MediaFile file : indexer == null ? new ArrayList<MediaFile>() : indexer.getFullIndex()) {
+            if (file == null) continue;
+            String oldPath = file.getPath();
+            if (deleted.contains(oldPath)) continue;
+            String next = changes.get(oldPath);
+            if (next != null) file.setPath(next);
+        }
+        if (currentFile != null) {
+            if (deleted.contains(oldCurrentPath)) currentFile = null;
+            else {
+                String next = changes.get(oldCurrentPath);
+                if (next != null) currentFile.setPath(next);
+            }
+        }
+        if (smartResult != null) {
+            remapSmartPathMap(smartResult.ranks, changes, deleted);
+            remapSmartPathMap(smartResult.confidence, changes, deleted);
+            remapSmartPathMap(smartResult.suggestions, changes, deleted);
+            remapSmartPathMap(smartResult.groupPositions, changes, deleted);
+            remapSmartPathMap(smartResult.groupTotals, changes, deleted);
+        }
+        currentIndex = findIndexByPath(fullList, currentFile == null ? null : currentFile.getPath());
+        if (currentIndex >= 0) currentFile = fullList.get(currentIndex);
+        scheduleRefresh();
+    }
+
+    private <T> void remapSmartPathMap(Map<String, T> values, Map<String, String> changes,
+                                        Set<String> deleted) {
+        if (values == null || values.isEmpty()) return;
+        Map<String, T> copy = new java.util.HashMap<String, T>(values);
+        values.clear();
+        for (Map.Entry<String, T> entry : copy.entrySet()) {
+            if (deleted.contains(entry.getKey())) continue;
+            String next = changes.get(entry.getKey());
+            values.put(next == null ? entry.getKey() : next, entry.getValue());
+        }
     }
 
     private MediaFile findFileByPath(String path) {
