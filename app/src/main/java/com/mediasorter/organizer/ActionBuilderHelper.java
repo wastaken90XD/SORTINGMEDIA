@@ -42,6 +42,8 @@ public class ActionBuilderHelper {
         public Spinner affixPositionSpinner; // AffixAction
         public EditText affixTextEdit;       // AffixAction
         public CheckBox keepOrientationCheck;// StripMetadataAction
+        public EditText replacementTagsEdit; // ReplaceTagsAction
+        public Spinner replacementRuleSpinner; // ReplaceTagsAction
     }
 
     public ActionBuilderHelper(Context context) {
@@ -56,7 +58,8 @@ public class ActionBuilderHelper {
         layout.addView(makeLabel("Action type:"));
         String[] actTypes = {"Move", "Copy", "Delete (trash)", "Delete (permanent)",
                 "Add/Remove Tags", "Set/Clear Status", "Rename (pattern)",
-                "Set/Change Date", "Change Extension", "Add Prefix/Suffix", "Strip Metadata"};
+                "Set/Change Date", "Change Extension", "Add Prefix/Suffix", "Strip Metadata",
+                "Replace Tags"};
         final Spinner actSpinner = makeSpinner(actTypes);
         layout.addView(actSpinner);
 
@@ -78,6 +81,7 @@ public class ActionBuilderHelper {
         else if (existingAction instanceof ChangeExtensionAction) actSpinner.setSelection(8);
         else if (existingAction instanceof AffixAction) actSpinner.setSelection(9);
         else if (existingAction instanceof StripMetadataAction) actSpinner.setSelection(10);
+        else if (existingAction instanceof ReplaceTagsAction) actSpinner.setSelection(11);
 
         final ActionParamHolder actHolder = new ActionParamHolder();
         buildActionParams(actParamsContainer, actHolder, existingAction, actSpinner.getSelectedItemPosition());
@@ -307,6 +311,29 @@ public class ActionBuilderHelper {
                 }
                 container.addView(holder.keepOrientationCheck);
                 break;
+
+            case 11: // Replace Tags
+                container.addView(makeLabel("Replacement tags (comma-separated):"));
+                holder.replacementTagsEdit = new EditText(context);
+                holder.replacementTagsEdit.setTextColor(0xFFFFFFFF);
+                holder.replacementTagsEdit.setHint("tag_a, tag_b");
+                if (existingAction instanceof ReplaceTagsAction) {
+                    ReplaceTagsAction action = (ReplaceTagsAction) existingAction;
+                    holder.replacementTagsEdit.setText(join(action.replacementTags));
+                }
+                container.addView(withVariables(holder.replacementTagsEdit));
+                container.addView(makeLabel("Sequence handling:"));
+                holder.replacementRuleSpinner = makeSpinner(
+                        new String[]{"protect", "whole_group", "overwrite", "keep_first"});
+                if (existingAction instanceof ReplaceTagsAction) {
+                    String saved = ((ReplaceTagsAction) existingAction).sequenceRule;
+                    String[] values = {"protect", "whole_group", "overwrite", "keep_first"};
+                    for (int i = 0; i < values.length; i++) if (values[i].equals(saved)) {
+                        holder.replacementRuleSpinner.setSelection(i);
+                    }
+                }
+                container.addView(holder.replacementRuleSpinner);
+                break;
         }
     }
 
@@ -372,6 +399,15 @@ public class ActionBuilderHelper {
             case 10: // Strip Metadata
                 boolean keepOrient = holder.keepOrientationCheck != null && holder.keepOrientationCheck.isChecked();
                 return Action.stripMetadataAction(keepOrient);
+
+            case 11: // Replace Tags
+                List<String> replacement = parseCommaList(holder.replacementTagsEdit == null
+                        ? "" : holder.replacementTagsEdit.getText().toString());
+                String[] replacementRules = {"protect", "whole_group", "overwrite", "keep_first"};
+                int replacementIndex = holder.replacementRuleSpinner == null ? 1
+                        : holder.replacementRuleSpinner.getSelectedItemPosition();
+                replacementIndex = Math.max(0, Math.min(replacementRules.length - 1, replacementIndex));
+                return new ReplaceTagsAction(replacement, replacementRules[replacementIndex]);
         }
         return null;
     }
@@ -383,6 +419,16 @@ public class ActionBuilderHelper {
             case 2: return Action.Conflict.RENAME;
             default: return Action.Conflict.SKIP;
         }
+    }
+
+    private String join(List<String> values) {
+        StringBuilder result = new StringBuilder();
+        if (values != null) for (String value : values) {
+            if (value == null || value.trim().isEmpty()) continue;
+            if (result.length() > 0) result.append(", ");
+            result.append(value.trim());
+        }
+        return result.toString();
     }
 
     private List<String> parseCommaList(String text) {

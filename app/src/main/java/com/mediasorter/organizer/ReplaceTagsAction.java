@@ -33,8 +33,15 @@ public class ReplaceTagsAction extends Action {
         ReplaceTagsManager.SequenceRule rule;
         try { rule = ReplaceTagsManager.SequenceRule.valueOf(sequenceRule.toUpperCase(java.util.Locale.US)); }
         catch (Exception ignored) { rule = ReplaceTagsManager.SequenceRule.WHOLE_GROUP; }
+        android.content.SharedPreferences prefs = context == null ? null
+                : context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
+        String sequencePatterns = prefs == null ? "link_*,*_seq_*"
+                : prefs.getString("replace_sequence_patterns", "link_*,*_seq_*");
+        String protectPatterns = prefs == null ? ""
+                : prefs.getString("replace_protect_patterns", "");
+        boolean purge = prefs != null && prefs.getBoolean("replace_purge_group_tags", false);
         ReplaceTagsManager.apply(full, targets, replacementTags,
-                "link_*,*_seq_*", "", rule, tagManager);
+                sequencePatterns, protectPatterns, rule, tagManager, purge);
         return true;
     }
 }

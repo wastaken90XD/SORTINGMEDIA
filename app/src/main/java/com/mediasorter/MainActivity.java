@@ -168,10 +168,21 @@ public class MainActivity extends Activity
     private long gameRoundStartedAt;
     private int gameStreak;
     private int gameCompletedRounds;
+    private int gameTotalScore;
+    private int gamePerfectRounds;
+    private boolean gameRoundExpired;
+    private BatchGameEngine.RoundScore gameLastScore;
+    private List<MediaFile> gameLastTaggedGroup;
+    private boolean compareFromGame;
     private Map<String, List<String>> gameUndoTags;
     private Map<String, FileStatus.Status> gameUndoStatuses;
     private BatchGameEngine.Round gameUndoRound;
     private org.json.JSONObject gameUndoEngineState;
+    private BatchGameEngine.RoundScore gameUndoScore;
+    private int gameUndoStreak;
+    private int gameUndoTotalScore;
+    private int gameUndoPerfectRounds;
+    private List<MediaFile> gameUndoLastTaggedGroup;
     private List<MediaFile> gameSelectedFiles;
     private Runnable gameSubmitRunnable;
     private Runnable gameNoneRunnable;
@@ -2324,6 +2335,12 @@ public class MainActivity extends Activity
         if (replaceTagsUndo != null) remapSmartPathMap(replaceTagsUndo, changes, deleted);
         if (gameUndoTags != null) remapSmartPathMap(gameUndoTags, changes, deleted);
         if (gameUndoStatuses != null) remapSmartPathMap(gameUndoStatuses, changes, deleted);
+        if (gameLastTaggedGroup != null) {
+            for (int i = gameLastTaggedGroup.size() - 1; i >= 0; i--) {
+                MediaFile file = gameLastTaggedGroup.get(i);
+                if (file == null || deleted.contains(file.getPath())) gameLastTaggedGroup.remove(i);
+            }
+        }
         if (smartResult != null) {
             remapSmartPathMap(smartResult.ranks, changes, deleted);
             remapSmartPathMap(smartResult.confidence, changes, deleted);
@@ -3507,7 +3524,13 @@ public class MainActivity extends Activity
     }
 
     private void startCompareSort() {
-        if (fullList == null || fullList.size() < 2) {
+        startCompareSort(null);
+    }
+
+    private void startCompareSort(List<MediaFile> requestedFiles) {
+        List<MediaFile> requestedSnapshot = requestedFiles == null
+                ? getFullListSnapshot() : new ArrayList<MediaFile>(requestedFiles);
+        if (requestedSnapshot.size() < 2) {
             Toast.makeText(this, "Need at least 2 files.", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -3516,7 +3539,7 @@ public class MainActivity extends Activity
         if (smartSortEngine != null) smartSortEngine.setPaused(true);
         removeSortModePanel();
         compareWarningShown = false;
-        List<MediaFile> compareSnapshot = getFullListSnapshot();
+        List<MediaFile> compareSnapshot = requestedSnapshot;
         java.util.Set<String> comparePaths = new java.util.HashSet<String>();
         for (MediaFile file : compareSnapshot) if (file != null) comparePaths.add(file.getPath());
         final SharedPreferences comparePrefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
@@ -3525,7 +3548,8 @@ public class MainActivity extends Activity
                 comparePrefs.getInt("compare_undo_depth", 50));
         org.json.JSONObject savedCompare = sortSessionStore == null ? null
                 : sortSessionStore.load(SortSessionStore.COMPARE_FILE);
-        if (savedCompare != null && savedCompare.optJSONArray("pool") != null) {
+        if (requestedFiles == null && savedCompare != null
+                && savedCompare.optJSONArray("pool") != null) {
             compareSortEngine.restoreJson(savedCompare, comparePaths);
         } else {
             compareSortEngine.start(compareSnapshot,
@@ -3963,12 +3987,23 @@ public class MainActivity extends Activity
     }
 
     private void exitCompareSort(boolean keepOrder) {
+        boolean resumeGame = compareFromGame;
+        compareFromGame = false;
         compareQuestion = null;
         compareLeftImage = null;
         compareRightImage = null;
         compareScaleDetector = null;
         if (sortSessionStore != null) sortSessionStore.delete(SortSessionStore.COMPARE_FILE);
         removeSortModePanel();
+        if (resumeGame && gameRound != null) {
+            if (sortCoordinator != null) {
+                sortCoordinator.setInteractivePause(true);
+                sortCoordinator.setMode(SortCoordinator.Mode.GAME);
+            }
+            if (smartSortEngine != null) smartSortEngine.setPaused(true);
+            showGameRound(gameRound);
+            return;
+        }
         if (sortCoordinator != null) {
             sortCoordinator.setInteractivePause(false);
             sortCoordinator.setMode(SortCoordinator.Mode.OFF);
@@ -3986,6 +4021,9 @@ public class MainActivity extends Activity
         if (gameStartedAt == 0L) {
             gameStartedAt = System.currentTimeMillis();
             gameStreak = 0;
+            gameCompletedRounds = 0;
+            gameTotalScore = 0;
+            gamePerfectRounds = 0;
         }
         if (sortCoordinator != null) sortCoordinator.setMode(SortCoordinator.Mode.GAME);
         if (sortCoordinator != null) sortCoordinator.setInteractivePause(true);
@@ -4002,6 +4040,8 @@ public class MainActivity extends Activity
                 gameStartedAt = savedGame.optLong("game_started_at", gameStartedAt);
                 gameStreak = savedGame.optInt("game_streak", gameStreak);
                 gameCompletedRounds = savedGame.optInt("game_completed_rounds", gameCompletedRounds);
+                gameTotalScore = savedGame.optInt("game_total_score", gameTotalScore);
+                gamePerfectRounds = savedGame.optInt("game_perfect_rounds", gamePerfectRounds);
                 gameRound = restored;
                 showGameRound(restored);
                 return;
@@ -4040,6 +4080,8 @@ public class MainActivity extends Activity
                 state.put("game_started_at", gameStartedAt);
                 state.put("game_streak", gameStreak);
                 state.put("game_completed_rounds", gameCompletedRounds);
+                state.put("game_total_score", gameTotalScore);
+                state.put("game_perfect_rounds", gamePerfectRounds);
             } catch (Exception ignored) {}
             sortSessionStore.save(SortSessionStore.GAME_FILE, state);
         } else {
@@ -4058,6 +4100,7 @@ public class MainActivity extends Activity
         sortModePanel.setOrientation(LinearLayout.VERTICAL);
         sortModePanel.setPadding(10, 10, 10, 10);
         sortModePanel.setBackgroundColor(0xEE161622);
+        gameRoundExpired = false;
         TextView title = new TextView(this);
         title.setTextColor(0xFFFFFFFF);
         gameTitleView = title;
@@ -4070,16 +4113,24 @@ public class MainActivity extends Activity
         gameSelectedFiles = selected;
         gameSubmitRunnable = new Runnable() {
             @Override public void run() {
+                if (gameRoundExpired) {
+                    Toast.makeText(MainActivity.this, "Round timer expired", Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 if (selected.isEmpty()) {
                     Toast.makeText(MainActivity.this, "Select files in the current Game round",
                             Toast.LENGTH_SHORT).show();
                     return;
                 }
+                Set<String> selectedPaths = new java.util.HashSet<String>();
+                for (MediaFile file : selected) if (file != null) selectedPaths.add(file.getPath());
                 captureGameUndo(round, selected);
+                gameLastScore = batchGameEngine.score(round, selectedPaths, false);
+                applyGameScore(gameLastScore);
                 final List<MediaFile> chosen = new ArrayList<MediaFile>(selected);
                 gameAfterTag = new Runnable() {
                     @Override public void run() {
-                        gameStreak++;
+                        gameLastTaggedGroup = new ArrayList<MediaFile>(chosen);
                         gameCompletedRounds++;
                         batchGameEngine.nextRound();
                         gameRound = null;
@@ -4087,13 +4138,23 @@ public class MainActivity extends Activity
                         startBatchGame();
                     }
                 };
+                Toast.makeText(MainActivity.this, "Round score: "
+                        + gameLastScore.points + (gameLastScore.perfect ? " (perfect)" : ""),
+                        Toast.LENGTH_SHORT).show();
                 showQuickTagPopup(chosen);
             }
         };
         gameNoneRunnable = new Runnable() {
             @Override public void run() {
+                if (gameRoundExpired) {
+                    Toast.makeText(MainActivity.this, "Round timer expired", Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 captureGameUndo(round, round.files);
-                gameStreak = 0;
+                gameLastScore = batchGameEngine.score(round,
+                        new java.util.HashSet<String>(), true);
+                applyGameScore(gameLastScore);
+                gameLastTaggedGroup = null;
                 int maxReturns = getSharedPreferences("settings_prefs", MODE_PRIVATE)
                         .getInt("game_none_max_returns", 2);
                 for (MediaFile file : round.files) {
@@ -4164,6 +4225,20 @@ public class MainActivity extends Activity
         controls.addView(tag);
         controls.addView(none);
         controls.addView(undo);
+        if (gameLastTaggedGroup != null) {
+            final int minimumGroup = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                    .getInt("game_order_min_group", 4);
+            if (gameLastTaggedGroup.size() >= Math.max(1, minimumGroup)) {
+                Button compareGroup = makeSmallButton("Compare last group");
+                controls.addView(compareGroup);
+                compareGroup.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View view) {
+                        compareFromGame = true;
+                        startCompareSort(new ArrayList<MediaFile>(gameLastTaggedGroup));
+                    }
+                });
+            }
+        }
         controls.addView(exit);
         sortModePanel.addView(controls);
         tag.setOnClickListener(new View.OnClickListener() {
@@ -4187,6 +4262,22 @@ public class MainActivity extends Activity
                 Gravity.BOTTOM));
     }
 
+    private void applyGameScore(BatchGameEngine.RoundScore score) {
+        if (score == null) return;
+        if ("none".equals(getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("game_score_mode", "progress"))) {
+            gameStreak = 0;
+            return;
+        }
+        gameTotalScore += score.points;
+        if (score.perfect) {
+            gamePerfectRounds++;
+            gameStreak++;
+        } else {
+            gameStreak = 0;
+        }
+    }
+
     private void captureGameUndo(BatchGameEngine.Round round, List<MediaFile> targets) {
         gameUndoTags = new java.util.HashMap<String, List<String>>();
         gameUndoStatuses = new java.util.HashMap<String, FileStatus.Status>();
@@ -4197,6 +4288,12 @@ public class MainActivity extends Activity
         }
         gameUndoRound = round;
         gameUndoEngineState = batchGameEngine.toJson(null);
+        gameUndoScore = gameLastScore;
+        gameUndoStreak = gameStreak;
+        gameUndoTotalScore = gameTotalScore;
+        gameUndoPerfectRounds = gamePerfectRounds;
+        gameUndoLastTaggedGroup = gameLastTaggedGroup == null ? null
+                : new ArrayList<MediaFile>(gameLastTaggedGroup);
         gameUndoAvailable = !gameUndoTags.isEmpty();
     }
 
@@ -4212,6 +4309,7 @@ public class MainActivity extends Activity
             for (MediaFile file : fullList) if (!file.getTags().isEmpty()) tagged++;
             suffix = "  tagged " + tagged + "/" + total;
         }
+        if (!"none".equals(mode)) suffix += "  score " + gameTotalScore;
         int timerSeconds = getSharedPreferences("settings_prefs", MODE_PRIVATE)
                 .getInt("game_timer_seconds", 0);
         if (timerSeconds > 0 && gameRoundStartedAt > 0L) {
@@ -4231,6 +4329,15 @@ public class MainActivity extends Activity
         gameTimerRunnable = new Runnable() {
             @Override public void run() {
                 if (gameRound == null || gameTitleView == null) return;
+                long elapsed = (android.os.SystemClock.uptimeMillis() - gameRoundStartedAt) / 1000L;
+                if (elapsed >= seconds) {
+                    gameRoundExpired = true;
+                    updateGameTitle(gameRound);
+                    Toast.makeText(MainActivity.this, "Game round time expired",
+                            Toast.LENGTH_SHORT).show();
+                    gameTimerRunnable = null;
+                    return;
+                }
                 updateGameTitle(gameRound);
                 mainHandler.postDelayed(this, 1000L);
             }
@@ -4242,7 +4349,9 @@ public class MainActivity extends Activity
         int tagged = 0;
         for (MediaFile file : fullList) if (file != null && !file.getTags().isEmpty()) tagged++;
         new AlertDialog.Builder(this).setTitle("Batch Game complete")
-                .setMessage("Tagged " + tagged + " of " + fullList.size() + " files.")
+                .setMessage("Tagged " + tagged + " of " + fullList.size() + " files.\n"
+                        + "Score: " + gameTotalScore + "  Perfect rounds: " + gamePerfectRounds
+                        + "  Streak: " + gameStreak)
                 .setPositiveButton("Close", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         exitBatchGame(false);
@@ -4272,6 +4381,13 @@ public class MainActivity extends Activity
         gameUndoAvailable = false;
         if (gameUndoEngineState != null) batchGameEngine.restoreState(gameUndoEngineState);
         gameUndoEngineState = null;
+        gameLastScore = gameUndoScore;
+        gameStreak = gameUndoStreak;
+        gameTotalScore = gameUndoTotalScore;
+        gamePerfectRounds = gameUndoPerfectRounds;
+        gameLastTaggedGroup = gameUndoLastTaggedGroup;
+        gameUndoScore = null;
+        gameUndoLastTaggedGroup = null;
         Map<String, MediaFile> files = new java.util.HashMap<String, MediaFile>();
         for (MediaFile file : indexer.getFullIndex()) {
             if (file != null && restoreTags.containsKey(file.getPath())) files.put(file.getPath(), file);
@@ -4305,11 +4421,19 @@ public class MainActivity extends Activity
         gameTitleView = null;
         gameTimerView = null;
         gameRound = null;
+        compareFromGame = false;
+        gameLastTaggedGroup = null;
+        gameLastScore = null;
+        gameTotalScore = 0;
+        gamePerfectRounds = 0;
+        gameCompletedRounds = 0;
         gameSelectedFiles = null;
         gameSubmitRunnable = null;
         gameNoneRunnable = null;
         gameUndoRound = null;
         gameUndoEngineState = null;
+        gameUndoScore = null;
+        gameUndoLastTaggedGroup = null;
         gameUndoTags = null;
         gameUndoStatuses = null;
         gameUndoAvailable = false;

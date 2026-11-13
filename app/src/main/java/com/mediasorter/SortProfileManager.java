@@ -31,20 +31,30 @@ public final class SortProfileManager {
         SharedPreferences.Editor editor = prefs.edit();
         if (index == 0) {
             editor.putInt("smart_chunk_ms", 10).putInt("smart_pass_budget_ms", 800)
-                    .putInt("smart_k_neighbors", 3).putInt("smart_random_fraction", 20);
+                    .putInt("smart_k_neighbors", 3).putInt("smart_random_fraction", 20)
+                    .putBoolean("compare_prefetch", false).putBoolean("compare_hires_on_zoom", false)
+                    .putInt("game_batch_size", 6).putBoolean("game_batch_adaptive", false)
+                    .putInt("game_probe_every", 0);
         } else if (index == 2) {
             editor.putInt("smart_chunk_ms", 30).putInt("smart_pass_budget_ms", 3000)
                     .putInt("smart_k_neighbors", 8).putInt("smart_random_fraction", 5)
-                    .putInt("compare_recheck_every", 5).putInt("game_probe_every", 3);
+                    .putInt("compare_recheck_every", 5).putInt("compare_undo_depth", 100)
+                    .putBoolean("compare_prefetch", true).putBoolean("compare_hires_on_zoom", true)
+                    .putBoolean("game_batch_adaptive", true).putInt("game_probe_every", 3);
         } else if (index == 3) {
             editor.putInt("smart_chunk_ms", 8).putInt("smart_pass_budget_ms", 700)
                     .putInt("smart_k_neighbors", 2).putInt("smart_max_pool", 1500)
                     .putBoolean("smart_use_video_frames", false)
-                    .putInt("game_batch_size", 6);
+                    .putBoolean("compare_prefetch", false).putBoolean("compare_hires_on_zoom", false)
+                    .putInt("game_batch_size", 4).putBoolean("game_batch_adaptive", false)
+                    .putInt("game_probe_every", 0);
         } else {
             editor.putInt("smart_chunk_ms", 20).putInt("smart_pass_budget_ms", 1500)
                     .putInt("smart_k_neighbors", 5).putInt("smart_random_fraction", 15)
-                    .putInt("compare_recheck_every", 0).putInt("game_probe_every", 5);
+                    .putInt("compare_recheck_every", 0).putInt("compare_undo_depth", 50)
+                    .putBoolean("compare_prefetch", true).putBoolean("compare_hires_on_zoom", true)
+                    .putInt("game_batch_size", 6).putBoolean("game_batch_adaptive", false)
+                    .putInt("game_probe_every", 5);
         }
         editor.commit();
     }
@@ -76,6 +86,13 @@ public final class SortProfileManager {
                 .putInt("game_none_max_returns", 2)
                 .putString("game_score_mode", "progress")
                 .putInt("game_timer_seconds", 0)
+                .putString("sort_dupes_mode", "ignore")
+                .putString("replace_sequence_rule", "whole_group")
+                .putString("replace_sequence_patterns", "link_*,*_seq_*")
+                .putString("replace_protect_patterns", "")
+                .putBoolean("replace_confirm_sequence_overwrite", true)
+                .putBoolean("replace_show_group_report", true)
+                .putBoolean("replace_purge_group_tags", false)
                 .commit();
     }
 
