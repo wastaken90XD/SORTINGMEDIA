@@ -6,6 +6,7 @@ import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.DialogInterface;
+import android.content.SharedPreferences;
 import android.graphics.Rect;
 import com.mediasorter.features.RandomGenerator;
 import com.mediasorter.features.SurpriseEngine;
@@ -147,6 +148,7 @@ public class MainActivity extends Activity
     private BatchGameEngine batchGameEngine;
     private CompareSortEngine.Question compareQuestion;
     private android.widget.LinearLayout sortModePanel;
+    private boolean compareWarningShown;
     private Runnable gameAfterTag;
     private BatchGameEngine.Round gameRound;
     private volatile com.mediasorter.features.SmartSortEngine.Result smartResult;
@@ -3432,6 +3434,7 @@ public class MainActivity extends Activity
         if (sortCoordinator != null) sortCoordinator.setInteractivePause(true);
         if (smartSortEngine != null) smartSortEngine.setPaused(true);
         removeSortModePanel();
+        compareWarningShown = false;
         List<MediaFile> compareSnapshot = getFullListSnapshot();
         java.util.Set<String> comparePaths = new java.util.HashSet<String>();
         for (MediaFile file : compareSnapshot) if (file != null) comparePaths.add(file.getPath());
@@ -3469,8 +3472,13 @@ public class MainActivity extends Activity
                 ? compareQuestion.candidatePath : compareQuestion.comparedPath;
         final String rightPath = compareQuestion.candidateOnLeft
                 ? compareQuestion.comparedPath : compareQuestion.candidatePath;
+        final SharedPreferences comparePrefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        String compareLayout = comparePrefs.getString("compare_layout", "auto");
+        boolean stacked = "stacked".equals(compareLayout)
+                || ("auto".equals(compareLayout) && preview.getWidth() > 0
+                && preview.getWidth() < galleryDp(600));
         LinearLayout imageRow = new LinearLayout(this);
-        imageRow.setOrientation(LinearLayout.HORIZONTAL);
+        imageRow.setOrientation(stacked ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
         ImageView leftImage = new ImageView(this);
         ImageView rightImage = new ImageView(this);
         leftImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -3481,9 +3489,24 @@ public class MainActivity extends Activity
         MediaFile rightFile = findFileByPath(rightPath);
         if (leftFile != null && thumbnailLoader != null) thumbnailLoader.load(leftFile, leftImage);
         if (rightFile != null && thumbnailLoader != null) thumbnailLoader.load(rightFile, rightImage);
-        imageRow.addView(leftImage, new LinearLayout.LayoutParams(0, 150, 1f));
-        imageRow.addView(rightImage, new LinearLayout.LayoutParams(0, 150, 1f));
+        LinearLayout leftCell = compareCell(leftImage, leftFile, comparePrefs);
+        LinearLayout rightCell = compareCell(rightImage, rightFile, comparePrefs);
+        if (stacked) {
+            imageRow.addView(leftCell, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 170));
+            imageRow.addView(rightCell, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 170));
+        } else {
+            imageRow.addView(leftCell, new LinearLayout.LayoutParams(0, 170, 1f));
+            imageRow.addView(rightCell, new LinearLayout.LayoutParams(0, 170, 1f));
+        }
         sortModePanel.addView(imageRow);
+        if (!compareWarningShown && compareQuestion.questionNumber >= comparePrefs.getInt(
+                "compare_warn_questions", 100)) {
+            compareWarningShown = true;
+            Toast.makeText(this, "Many comparison questions; consider splitting the group.",
+                    Toast.LENGTH_LONG).show();
+        }
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         Button left = makeSmallButton("Pick A: " + fileName(leftPath));
@@ -3522,6 +3545,42 @@ public class MainActivity extends Activity
         preview.addView(sortModePanel, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM));
+    }
+
+    private LinearLayout compareCell(ImageView image, MediaFile file,
+                                     SharedPreferences prefs) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.addView(image, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        if (prefs.getBoolean("compare_show_caption", true)) {
+            TextView caption = new TextView(this);
+            caption.setTextColor(0xFFFFFFFF);
+            caption.setTextSize(10f);
+            caption.setGravity(Gravity.CENTER);
+            caption.setText(compareCaption(file, prefs.getString(
+                    "compare_caption_fields", "name,size")));
+            cell.addView(caption, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 28));
+        }
+        return cell;
+    }
+
+    private String compareCaption(MediaFile file, String fields) {
+        if (file == null) return "";
+        StringBuilder text = new StringBuilder();
+        String[] values = fields == null ? new String[]{"name"} : fields.split(",");
+        for (String raw : values) {
+            String field = raw.trim().toLowerCase(java.util.Locale.US);
+            if (field.isEmpty()) continue;
+            if (text.length() > 0) text.append("  •  ");
+            if ("name".equals(field)) text.append(file.getName());
+            else if ("size".equals(field)) text.append(file.getFormattedSize());
+            else if ("type".equals(field)) text.append(file.getType().name().toLowerCase(java.util.Locale.US));
+            else if ("tags".equals(field)) text.append(file.getTags().size()).append(" tags");
+            else if ("date".equals(field)) text.append(file.getDateAdded());
+        }
+        return text.toString();
     }
 
     private String fileName(String path) {
