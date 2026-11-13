@@ -7165,6 +7165,7 @@ private Spinner makeSpinner(String[] options) {
     public void onFileRemoved(String path) {
         mainHandler.post(new Runnable() {
             @Override public void run() {
+                onPathsChanged(null, java.util.Collections.singleton(path));
                 String oldCurrentPath = currentFile == null ? null : currentFile.getPath();
                 for (int i = fullList.size() - 1; i >= 0; i--) {
                     if (fullList.get(i).getPath().equals(path)) fullList.remove(i);
@@ -8966,8 +8967,12 @@ private Spinner makeSpinner(String[] options) {
                     out.close();
                     count++;
                 } else if (source.renameTo(target)) {
+                    String oldPath = file.getPath();
                     file.setPath(target.getAbsolutePath());
-                    indexer.removeFromIndexOnly(source.getAbsolutePath());
+                    Map<String, String> changed = new java.util.HashMap<String, String>();
+                    changed.put(oldPath, file.getPath());
+                    onPathsChanged(changed, null);
+                    indexer.removeFromIndexOnly(oldPath);
                     count++;
                 }
             } catch (Exception ignored) {}
