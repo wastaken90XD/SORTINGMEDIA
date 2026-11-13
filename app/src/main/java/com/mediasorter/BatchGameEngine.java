@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /** Worker-friendly round builder and session model for Batch Game. */
 public final class BatchGameEngine {
@@ -24,6 +26,8 @@ public final class BatchGameEngine {
     private final Random random = new Random();
     private int round;
     private int noneCooldown;
+    private int noneCooldownRounds = 3;
+    private int noneMaxReturns = 2;
     private final java.util.Map<String, Integer> noneReturns =
             new java.util.HashMap<String, Integer>();
 
@@ -35,7 +39,13 @@ public final class BatchGameEngine {
             for (MediaFile file : pool) {
                 if (file == null) continue;
                 if (activePile != null && !activePile.isEmpty() && !file.hasTag(activePile)) continue;
-                if (file.getTags().isEmpty()) candidates.add(file);
+                if (file.getTags().isEmpty() && noneCooldown <= 0
+                        && getNoneReturns(file.getPath()) < noneMaxReturns) candidates.add(file);
+            }
+            if (candidates.isEmpty()) {
+                for (MediaFile file : pool) {
+                    if (file != null && file.getTags().isEmpty()) candidates.add(file);
+                }
             }
         }
         if (candidates.isEmpty()) return null;
@@ -93,11 +103,15 @@ public final class BatchGameEngine {
     }
 
     public synchronized int getRound() { return round; }
+    public synchronized void setNonePolicy(int cooldown, int maxReturns) {
+        noneCooldownRounds = Math.max(0, cooldown);
+        noneMaxReturns = Math.max(1, maxReturns);
+    }
     public synchronized void reset() { round = 0; noneCooldown = 0; noneReturns.clear(); }
     public synchronized void noteNone(String path) {
         if (path == null) return;
         noneReturns.put(path, getNoneReturns(path) + 1);
-        noneCooldown = 3;
+        noneCooldown = noneCooldownRounds;
     }
     public synchronized int getNoneReturns(String path) {
         Integer value = noneReturns.get(path);
@@ -107,4 +121,31 @@ public final class BatchGameEngine {
         return noneCooldown <= 0 && getNoneReturns(path) < Math.max(1, maxReturns);
     }
     public synchronized void nextRound() { if (noneCooldown > 0) noneCooldown--; }
+
+    public synchronized JSONObject toJson(Round current) {
+        JSONObject object = new JSONObject();
+        try {
+            object.put("round", round);
+            object.put("none_cooldown", noneCooldown);
+            JSONArray paths = new JSONArray();
+            if (current != null) for (MediaFile file : current.files) {
+                if (file != null) paths.put(file.getPath());
+            }
+            object.put("paths", paths);
+        } catch (Exception ignored) {}
+        return object;
+    }
+
+    public synchronized Round restore(JSONObject object, List<MediaFile> pool) {
+        if (object == null || pool == null) return null;
+        Set<String> paths = new HashSet<String>();
+        JSONArray saved = object.optJSONArray("paths");
+        if (saved != null) for (int i = 0; i < saved.length(); i++) paths.add(saved.optString(i, ""));
+        List<MediaFile> files = new ArrayList<MediaFile>();
+        for (MediaFile file : pool) if (file != null && paths.contains(file.getPath())) files.add(file);
+        if (files.isEmpty()) return null;
+        round = object.optInt("round", round);
+        noneCooldown = object.optInt("none_cooldown", noneCooldown);
+        return new Round(round, files, files.get(0).getPath());
+    }
 }

@@ -667,6 +667,16 @@ public class SettingsActivity extends Activity {
                 new OnNumericChangeListener() {
                     @Override public void onChange(int value) { saveInt("game_probe_every", value); }
                 }));
+        root.addView(makeNumericInputRow("Game none cooldown rounds:",
+                settingsPrefs.getInt("game_none_cooldown", 3), 0, 20,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("game_none_cooldown", value); }
+                }));
+        root.addView(makeNumericInputRow("Game none max returns:",
+                settingsPrefs.getInt("game_none_max_returns", 2), 1, 10,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("game_none_max_returns", value); }
+                }));
         root.addView(makeSpinnerRow("Game score mode:",
                 new String[]{"none", "progress", "streak"},
                 gameScorePosition(), new OnSpinnerSelectedListener() {

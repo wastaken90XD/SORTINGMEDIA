@@ -147,6 +147,7 @@ public class MainActivity extends Activity
     private CompareSortEngine.Question compareQuestion;
     private android.widget.LinearLayout sortModePanel;
     private Runnable gameAfterTag;
+    private BatchGameEngine.Round gameRound;
     private volatile com.mediasorter.features.SmartSortEngine.Result smartResult;
     private volatile List<Group> smartGroups = new ArrayList<Group>();
     private final java.util.Set<String> dismissedSmartSuggestions =
@@ -3500,6 +3501,19 @@ public class MainActivity extends Activity
         if (sortCoordinator != null) sortCoordinator.setInteractivePause(true);
         if (smartSortEngine != null) smartSortEngine.setPaused(true);
         final List<MediaFile> snapshot = getFullListSnapshot();
+        android.content.SharedPreferences gamePrefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        batchGameEngine.setNonePolicy(gamePrefs.getInt("game_none_cooldown", 3),
+                gamePrefs.getInt("game_none_max_returns", 2));
+        org.json.JSONObject savedGame = sortSessionStore == null ? null
+                : sortSessionStore.load(SortSessionStore.GAME_FILE);
+        if (savedGame != null) {
+            BatchGameEngine.Round restored = batchGameEngine.restore(savedGame, snapshot);
+            if (restored != null) {
+                gameRound = restored;
+                showGameRound(restored);
+                return;
+            }
+        }
         sortCoordinator.post(new SortCoordinator.Task() {
             @Override public void run(SortCoordinator.TaskContext context) {
                 final BatchGameEngine.Round round = batchGameEngine.buildRound(snapshot,
@@ -3513,10 +3527,21 @@ public class MainActivity extends Activity
                         getSharedPreferences("settings_prefs", MODE_PRIVATE)
                                 .getInt("game_probe_every", 5));
                 mainHandler.post(new Runnable() {
-                    @Override public void run() { showGameRound(round); }
+                    @Override public void run() {
+                        gameRound = round;
+                        saveGameSession();
+                        showGameRound(round);
+                    }
                 });
             }
         });
+    }
+
+    private void saveGameSession() {
+        if (sortSessionStore != null && gameRound != null) {
+            sortSessionStore.save(SortSessionStore.GAME_FILE,
+                    batchGameEngine.toJson(gameRound));
+        }
     }
 
     private void showGameRound(final BatchGameEngine.Round round) {
@@ -3564,6 +3589,8 @@ public class MainActivity extends Activity
                 gameAfterTag = new Runnable() {
                     @Override public void run() {
                         batchGameEngine.nextRound();
+                        gameRound = null;
+                        saveGameSession();
                         startBatchGame();
                     }
                 };
@@ -3572,8 +3599,18 @@ public class MainActivity extends Activity
         });
         none.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
-                for (MediaFile file : round.files) fileStatus.setSkipped(file.getPath());
+                int maxReturns = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                        .getInt("game_none_max_returns", 2);
+                for (MediaFile file : round.files) {
+                    fileStatus.setSkipped(file.getPath());
+                    batchGameEngine.noteNone(file.getPath());
+                    if (batchGameEngine.getNoneReturns(file.getPath()) >= maxReturns) {
+                        tagManager.applyTag(file, "Unsorted");
+                    }
+                }
                 batchGameEngine.nextRound();
+                gameRound = null;
+                saveGameSession();
                 startBatchGame();
             }
         });
@@ -3594,6 +3631,8 @@ public class MainActivity extends Activity
 
     private void exitBatchGame(boolean keepOrder) {
         gameAfterTag = null;
+        gameRound = null;
+        if (sortSessionStore != null) sortSessionStore.delete(SortSessionStore.GAME_FILE);
         removeSortModePanel();
         if (sortCoordinator != null) {
             sortCoordinator.setInteractivePause(false);
