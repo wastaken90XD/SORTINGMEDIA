@@ -398,20 +398,21 @@ public class SurpriseEngine {
 
     private MediaFile pickLeastSure(List<MediaFile> pool, SmartSortEngine.Result smartResult) {
         MediaFile best = null;
-        int bestRank = Integer.MAX_VALUE;
-        if (smartResult != null && smartResult.ranks != null) {
+        float confidence = Float.MAX_VALUE;
+        if (smartResult != null && smartResult.confidence != null
+                && !smartResult.confidence.isEmpty()) {
             for (MediaFile file : pool) {
-                Integer rank = smartResult.ranks.get(file.getPath());
-                if (rank != null && rank < bestRank) {
-                    bestRank = rank;
+                Float value = smartResult.confidence.get(file.getPath());
+                if (value != null && value < confidence) {
+                    confidence = value;
                     best = file;
                 }
             }
+            if (best != null) return best;
         }
-        if (best != null) return best;
         if (smartResult != null && smartResult.ranks != null
                 && !smartResult.ranks.isEmpty()) return null;
-        float confidence = Float.MAX_VALUE;
+        confidence = Float.MAX_VALUE;
         boolean foundConfidence = false;
         for (MediaFile file : pool) {
             if (!SmartState.suggestedTag(file.getPath()).isEmpty()

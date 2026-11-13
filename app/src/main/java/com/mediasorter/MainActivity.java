@@ -2333,6 +2333,9 @@ public class MainActivity extends Activity
             String next = changes.get(oldPath);
             if (next != null) file.setPath(next);
         }
+        if (indexer != null) {
+            for (String path : deleted) indexer.removeFromIndexOnly(path);
+        }
         if (currentFile != null) {
             if (deleted.contains(oldCurrentPath)) currentFile = null;
             else {
