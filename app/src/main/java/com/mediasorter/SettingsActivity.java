@@ -684,6 +684,43 @@ public class SettingsActivity extends Activity {
                         saveString("game_score_mode", value);
                     }
                 }));
+        root.addView(makeTitle("Replace Tags"));
+        root.addView(makeSpinnerRow("Sequence rule:",
+                new String[]{"protect", "whole_group", "overwrite"},
+                replaceRulePosition(), new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) {
+                        saveString("replace_sequence_rule", value);
+                    }
+                }));
+        root.addView(makeTextInputRow("Sequence patterns:",
+                settingsPrefs.getString("replace_sequence_patterns", "link_*,*_seq_*"),
+                new OnTextChangeListener() {
+                    @Override public void onChange(String value) { saveString("replace_sequence_patterns", value); }
+                }));
+        root.addView(makeTextInputRow("Extra protect patterns:",
+                settingsPrefs.getString("replace_protect_patterns", ""),
+                new OnTextChangeListener() {
+                    @Override public void onChange(String value) { saveString("replace_protect_patterns", value); }
+                }));
+        root.addView(makeCheckBoxRow("Confirm sequence overwrites",
+                settingsPrefs.getBoolean("replace_confirm_sequence_overwrite", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("replace_confirm_sequence_overwrite", value); }
+                }));
+        root.addView(makeCheckBoxRow("Show sequence group report",
+                settingsPrefs.getBoolean("replace_show_group_report", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("replace_show_group_report", value); }
+                }));
+        root.addView(makeCheckBoxRow("Purge empty group tags",
+                settingsPrefs.getBoolean("replace_purge_group_tags", false), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("replace_purge_group_tags", value); }
+                }));
+    }
+
+    private int replaceRulePosition() {
+        String value = settingsPrefs.getString("replace_sequence_rule", "whole_group");
+        if ("protect".equals(value)) return 0;
+        if ("overwrite".equals(value)) return 2;
+        return 1;
     }
 
     private int compareLayoutPosition() {

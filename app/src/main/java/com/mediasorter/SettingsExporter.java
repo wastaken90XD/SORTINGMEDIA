@@ -73,7 +73,10 @@ public final class SettingsExporter {
             "compare_hires_on_zoom", "game_batch_size", "game_batch_adaptive",
             "game_decoys", "game_probe_every", "game_none_cooldown",
             "game_none_max_returns", "game_order_min_group", "game_score_mode",
-            "game_timer_seconds", "game_prompt_text"
+            "game_timer_seconds", "game_prompt_text",
+            "replace_sequence_rule", "replace_sequence_patterns", "replace_protect_patterns",
+            "replace_confirm_sequence_overwrite", "replace_show_group_report",
+            "replace_purge_group_tags"
     ));
 
     /** Integer settings must remain Integer in SharedPreferences after import. */

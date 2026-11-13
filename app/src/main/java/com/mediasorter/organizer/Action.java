@@ -45,6 +45,10 @@ public abstract class Action {
         return new TagAction(tagsToAdd, tagsToRemove);
     }
 
+    public static Action replaceTagsAction(List<String> replacementTags, String sequenceRule) {
+        return new ReplaceTagsAction(replacementTags, sequenceRule);
+    }
+
     public static Action statusAction(FileStatus.Status status, boolean clear) {
         return new StatusAction(status, clear);
     }
