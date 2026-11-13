@@ -69,6 +69,17 @@ public final class SmartFeatureCache {
         entries.put(path, value);
     }
 
+    /** Remap a cached key after a file rename without changing its metadata. */
+    public synchronized void remapPath(String oldPath, String newPath) {
+        if (oldPath == null || newPath == null || oldPath.equals(newPath)) return;
+        Entry value = entries.remove(oldPath);
+        if (value != null) entries.put(newPath, value);
+    }
+
+    public synchronized void removePath(String path) {
+        if (path != null) entries.remove(path);
+    }
+
     /** Release the in-memory cache when Smart is disabled; the disk cache remains reusable. */
     public synchronized void clearMemory() {
         entries.clear();

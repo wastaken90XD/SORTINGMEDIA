@@ -10,6 +10,7 @@ import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** Atomic, non-exported session persistence for Compare and Batch Game. */
@@ -58,6 +59,82 @@ public final class SortSessionStore {
 
     public synchronized void delete(String name) {
         if (name != null) new File(directory, name).delete();
+    }
+
+    /**
+     * Rewrites path values in a saved session in place. Arrays are filtered so
+     * deleted files cannot leave a dead current question or game cell behind.
+     * The session files contain only path strings and settings, but the walk is
+     * recursive so future session fields remain safe to add.
+     */
+    public static JSONObject remapPaths(JSONObject object, Map<String, String> oldToNew,
+                                        Set<String> removed) {
+        if (object == null) return null;
+        JSONArray names = object.names();
+        if (names == null) return object;
+        for (int i = 0; i < names.length(); i++) {
+            String key = names.optString(i, "");
+            if (key.isEmpty()) continue;
+            Object value = object.opt(key);
+            if (value instanceof JSONObject) {
+                if ("none_returns".equals(key)) {
+                    remapObjectKeys((JSONObject) value, oldToNew, removed);
+                }
+                remapPaths((JSONObject) value, oldToNew, removed);
+            } else if (value instanceof JSONArray) {
+                remapArray((JSONArray) value, oldToNew, removed);
+            } else if (value instanceof String) {
+                String next = remapPath((String) value, oldToNew, removed);
+                try { object.put(key, next == null ? "" : next); }
+                catch (Exception ignored) {}
+            }
+        }
+        return object;
+    }
+
+    private static void remapObjectKeys(JSONObject object, Map<String, String> oldToNew,
+                                         Set<String> removed) {
+        JSONArray names = object.names();
+        if (names == null) return;
+        Map<String, Object> values = new java.util.HashMap<String, Object>();
+        for (int i = 0; i < names.length(); i++) {
+            String key = names.optString(i, "");
+            values.put(key, object.opt(key));
+            object.remove(key);
+        }
+        for (Map.Entry<String, Object> entry : values.entrySet()) {
+            String next = remapPath(entry.getKey(), oldToNew, removed);
+            if (next == null || next.isEmpty()) continue;
+            try { object.put(next, entry.getValue()); }
+            catch (Exception ignored) {}
+        }
+    }
+
+    private static void remapArray(JSONArray array, Map<String, String> oldToNew,
+                                   Set<String> removed) {
+        for (int i = array.length() - 1; i >= 0; i--) {
+            Object value = array.opt(i);
+            if (value instanceof JSONObject) {
+                remapPaths((JSONObject) value, oldToNew, removed);
+            } else if (value instanceof JSONArray) {
+                remapArray((JSONArray) value, oldToNew, removed);
+            } else if (value instanceof String) {
+                String next = remapPath((String) value, oldToNew, removed);
+                if (next == null || next.isEmpty()) array.remove(i);
+                else {
+                    try { array.put(i, next); }
+                    catch (Exception ignored) {}
+                }
+            }
+        }
+    }
+
+    private static String remapPath(String path, Map<String, String> oldToNew,
+                                    Set<String> removed) {
+        if (path == null || path.isEmpty()) return path;
+        if (removed != null && removed.contains(path)) return null;
+        if (oldToNew != null && oldToNew.containsKey(path)) return oldToNew.get(path);
+        return path;
     }
 
     public static List<String> existingPaths(JSONArray array, Set<String> paths) {

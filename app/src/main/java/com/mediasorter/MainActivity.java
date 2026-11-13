@@ -38,6 +38,7 @@ import android.widget.TextView;
 import android.widget.LinearLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
+import android.widget.VideoView;
 import android.widget.CheckBox;
 import android.widget.Toast;
 import androidx.recyclerview.widget.GridLayoutManager;
@@ -161,16 +162,31 @@ public class MainActivity extends Activity
     private Runnable gameAfterTag;
     private BatchGameEngine.Round gameRound;
     private TextView gameTitleView;
+    private TextView gameTimerView;
     private Runnable gameTimerRunnable;
     private long gameStartedAt;
+    private long gameRoundStartedAt;
     private int gameStreak;
+    private int gameCompletedRounds;
+    private Map<String, List<String>> gameUndoTags;
+    private Map<String, FileStatus.Status> gameUndoStatuses;
+    private BatchGameEngine.Round gameUndoRound;
+    private org.json.JSONObject gameUndoEngineState;
+    private List<MediaFile> gameSelectedFiles;
+    private Runnable gameSubmitRunnable;
+    private Runnable gameNoneRunnable;
+    private boolean gameUndoAvailable;
     private volatile com.mediasorter.features.SmartSortEngine.Result smartResult;
     private volatile List<Group> smartGroups = new ArrayList<Group>();
     private final java.util.Set<String> dismissedSmartSuggestions =
             new java.util.HashSet<String>();
     private Map<String, List<String>> smartPileUndo;
+    private Map<String, Integer> compareOrderUndo;
+    private String compareOrderPreviousSequence;
     private Map<String, List<String>> replaceTagsUndo;
     private List<String> replaceTagsPurgedTags;
+    private Map<String, Integer> replaceTagsPurgedUsage;
+    private Map<String, Long> replaceTagsPurgedCreatedAt;
     private String smartOrderPreviousSequence;
     private boolean smartOrderPreviousEnabled;
     private SearchHistory searchHistory;
@@ -881,6 +897,20 @@ public class MainActivity extends Activity
     }
 
     private void executeVolumeMapping(int keyCode, boolean longPress) {
+        if (!longPress && compareQuestion != null) {
+            String pick = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                    .getString("compare_volume_pick", "off");
+            if ("up_left_down_right".equals(pick)) {
+                answerCompare(keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
+                        ? CompareSortEngine.Answer.LEFT : CompareSortEngine.Answer.RIGHT);
+                return;
+            }
+            if ("up_right_down_left".equals(pick)) {
+                answerCompare(keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
+                        ? CompareSortEngine.Answer.RIGHT : CompareSortEngine.Answer.LEFT);
+                return;
+            }
+        }
         List<GestureSettings.GestureStep> steps = getVolumeSteps(keyCode, longPress);
         if (!longPress && isPureVolumeNavigation(steps)) {
             queueVolumeNavigation(keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP ? 1 : -1);
@@ -2266,6 +2296,14 @@ public class MainActivity extends Activity
                 ? new java.util.HashMap<String, String>() : new java.util.HashMap<String, String>(oldToNew);
         Set<String> deleted = removed == null ? new java.util.HashSet<String>()
                 : new java.util.HashSet<String>(removed);
+        if (featureStore != null) featureStore.remapPaths(changes, deleted);
+        if (sortManager != null) sortManager.remapPaths(changes, deleted);
+        if (compareSortEngine != null) compareSortEngine.remapPaths(changes, deleted);
+        if (batchGameEngine != null) batchGameEngine.remapPaths(changes, deleted);
+        if (sortSessionStore != null && (!changes.isEmpty() || !deleted.isEmpty())) {
+            remapSavedSortSession(SortSessionStore.COMPARE_FILE, changes, deleted);
+            remapSavedSortSession(SortSessionStore.GAME_FILE, changes, deleted);
+        }
         String oldCurrentPath = currentFile == null ? null : currentFile.getPath();
         for (MediaFile file : indexer == null ? new ArrayList<MediaFile>() : indexer.getFullIndex()) {
             if (file == null) continue;
@@ -2281,6 +2319,11 @@ public class MainActivity extends Activity
                 if (next != null) currentFile.setPath(next);
             }
         }
+        if (smartOrderUndo != null) remapSmartPathMap(smartOrderUndo, changes, deleted);
+        if (compareOrderUndo != null) remapSmartPathMap(compareOrderUndo, changes, deleted);
+        if (replaceTagsUndo != null) remapSmartPathMap(replaceTagsUndo, changes, deleted);
+        if (gameUndoTags != null) remapSmartPathMap(gameUndoTags, changes, deleted);
+        if (gameUndoStatuses != null) remapSmartPathMap(gameUndoStatuses, changes, deleted);
         if (smartResult != null) {
             remapSmartPathMap(smartResult.ranks, changes, deleted);
             remapSmartPathMap(smartResult.confidence, changes, deleted);
@@ -2291,6 +2334,14 @@ public class MainActivity extends Activity
         currentIndex = findIndexByPath(fullList, currentFile == null ? null : currentFile.getPath());
         if (currentIndex >= 0) currentFile = fullList.get(currentIndex);
         scheduleRefresh();
+    }
+
+    private void remapSavedSortSession(String fileName, Map<String, String> changes,
+                                       Set<String> deleted) {
+        org.json.JSONObject saved = sortSessionStore.load(fileName);
+        if (saved == null) return;
+        SortSessionStore.remapPaths(saved, changes, deleted);
+        sortSessionStore.save(fileName, saved);
     }
 
     private <T> void remapSmartPathMap(Map<String, T> values, Map<String, String> changes,
@@ -3304,9 +3355,17 @@ public class MainActivity extends Activity
                 && !preview.keptGroups.isEmpty()) {
             message += "\nKept groups: " + preview.keptGroups;
         }
-        new AlertDialog.Builder(this).setTitle("Confirm Replace Tags")
+        final boolean sequenceOverwrite = rule == ReplaceTagsManager.SequenceRule.OVERWRITE
+                && getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getBoolean("replace_confirm_sequence_overwrite", true);
+        if (sequenceOverwrite) {
+            message += "\n\nWARNING: this replaces complete sequence-group tags."
+                    + " Press Overwrite sequences only if that is intentional.";
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(sequenceOverwrite ? "Confirm sequence overwrite" : "Confirm Replace Tags")
                 .setMessage(message)
-                .setPositiveButton("Replace", new DialogInterface.OnClickListener() {
+                .setPositiveButton(sequenceOverwrite ? "Overwrite sequences" : "Replace", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         sortCoordinator.post(new SortCoordinator.Task() {
                             @Override public void run(SortCoordinator.TaskContext context) {
@@ -3323,6 +3382,8 @@ public class MainActivity extends Activity
                                     @Override public void run() {
                                         replaceTagsUndo = report.previousTags;
                                         replaceTagsPurgedTags = new ArrayList<String>(report.purgedTags);
+                                        replaceTagsPurgedUsage = new java.util.HashMap<String, Integer>(report.purgedUsage);
+                                        replaceTagsPurgedCreatedAt = new java.util.HashMap<String, Long>(report.purgedCreatedAt);
                                         scheduleRefresh();
                                         Toast.makeText(MainActivity.this, "Tags replaced on "
                                                 + report.files + " files"
@@ -3458,14 +3519,19 @@ public class MainActivity extends Activity
         List<MediaFile> compareSnapshot = getFullListSnapshot();
         java.util.Set<String> comparePaths = new java.util.HashSet<String>();
         for (MediaFile file : compareSnapshot) if (file != null) comparePaths.add(file.getPath());
+        final SharedPreferences comparePrefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        compareSortEngine.configure(
+                comparePrefs.getBoolean("compare_randomize_sides", true),
+                comparePrefs.getInt("compare_undo_depth", 50));
         org.json.JSONObject savedCompare = sortSessionStore == null ? null
                 : sortSessionStore.load(SortSessionStore.COMPARE_FILE);
         if (savedCompare != null && savedCompare.optJSONArray("pool") != null) {
             compareSortEngine.restoreJson(savedCompare, comparePaths);
         } else {
             compareSortEngine.start(compareSnapshot,
-                    getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                            .getInt("compare_recheck_every", 0));
+                    comparePrefs.getInt("compare_recheck_every", 0),
+                    comparePrefs.getBoolean("compare_randomize_sides", true),
+                    comparePrefs.getInt("compare_undo_depth", 50));
         }
         saveCompareSession();
         showCompareQuestion();
@@ -3479,20 +3545,21 @@ public class MainActivity extends Activity
         }
         FrameLayout preview = findViewById(R.id.previewPanel);
         if (preview == null) return;
+        final SharedPreferences comparePrefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
         sortModePanel = new LinearLayout(this);
         sortModePanel.setOrientation(LinearLayout.VERTICAL);
         sortModePanel.setPadding(12, 12, 12, 12);
         sortModePanel.setBackgroundColor(0xEE161622);
         TextView title = new TextView(this);
         title.setTextColor(0xFFFFFFFF);
-        title.setText("Compare: question " + compareQuestion.questionNumber
-                + " / " + compareQuestion.totalFiles);
+        title.setText("Compare: " + comparePrefs.getString("compare_question", "which goes first?")
+                + "  " + compareQuestion.questionNumber + " / " + compareQuestion.totalFiles
+                + (compareQuestion.recheck ? "  (recheck)" : ""));
         sortModePanel.addView(title);
         final String leftPath = compareQuestion.candidateOnLeft
                 ? compareQuestion.candidatePath : compareQuestion.comparedPath;
         final String rightPath = compareQuestion.candidateOnLeft
                 ? compareQuestion.comparedPath : compareQuestion.candidatePath;
-        final SharedPreferences comparePrefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
         String compareLayout = comparePrefs.getString("compare_layout", "auto");
         boolean stacked = "stacked".equals(compareLayout)
                 || ("auto".equals(compareLayout) && preview.getWidth() > 0
@@ -3505,10 +3572,8 @@ public class MainActivity extends Activity
         rightImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
         leftImage.setBackgroundColor(0xFF252538);
         rightImage.setBackgroundColor(0xFF252538);
-        MediaFile leftFile = findFileByPath(leftPath);
-        MediaFile rightFile = findFileByPath(rightPath);
-        if (leftFile != null && thumbnailLoader != null) thumbnailLoader.load(leftFile, leftImage);
-        if (rightFile != null && thumbnailLoader != null) thumbnailLoader.load(rightFile, rightImage);
+        final MediaFile leftFile = findFileByPath(leftPath);
+        final MediaFile rightFile = findFileByPath(rightPath);
         LinearLayout leftCell = compareCell(leftImage, leftFile, comparePrefs);
         LinearLayout rightCell = compareCell(rightImage, rightFile, comparePrefs);
         if (stacked) {
@@ -3524,6 +3589,23 @@ public class MainActivity extends Activity
         compareRightImage = rightImage;
         configureCompareImageInteractions(leftImage, rightImage);
         sortModePanel.addView(imageRow);
+        imageRow.post(new Runnable() {
+            @Override public void run() {
+                int rowWidth = Math.max(galleryDp(240), imageRow.getWidth());
+                int cellWidth = stacked ? rowWidth : Math.max(galleryDp(120), rowWidth / 2);
+                int cellHeight = Math.max(galleryDp(120), galleryDp(170));
+                loadCompareImageAtSize(leftImage, leftFile, cellWidth, cellHeight);
+                loadCompareImageAtSize(rightImage, rightFile, cellWidth, cellHeight);
+                if (thumbnailLoader != null && comparePrefs.getBoolean("compare_prefetch", true)) {
+                    List<String> paths = compareSortEngine.getPrefetchPaths(3);
+                    for (String path : paths) {
+                        if (path.equals(leftPath) || path.equals(rightPath)) continue;
+                        MediaFile next = findFileByPath(path);
+                        if (next != null) thumbnailLoader.precacheAtSize(next, cellWidth, cellHeight);
+                    }
+                }
+            }
+        });
         if (!compareWarningShown && compareQuestion.questionNumber >= comparePrefs.getInt(
                 "compare_warn_questions", 100)) {
             compareWarningShown = true;
@@ -3570,6 +3652,12 @@ public class MainActivity extends Activity
                 Gravity.BOTTOM));
     }
 
+    private void loadCompareImageAtSize(ImageView image, MediaFile file,
+                                        int width, int height) {
+        if (image == null || file == null || thumbnailLoader == null) return;
+        thumbnailLoader.loadAtSize(file, image, Math.max(1, width), Math.max(1, height));
+    }
+
     private void configureCompareImageInteractions(final ImageView left, final ImageView right) {
         compareScale = 1f;
         compareMatrix = new Matrix();
@@ -3587,11 +3675,15 @@ public class MainActivity extends Activity
                                 && getSharedPreferences("settings_prefs", MODE_PRIVATE)
                                 .getBoolean("compare_hires_on_zoom", true)) {
                             compareHighResolutionLoaded = true;
-                            if (left != null && leftFileForCompare(left) != null && thumbnailLoader != null) {
-                                thumbnailLoader.load(leftFileForCompare(left), left);
+                            if (left != null && leftFileForCompare(left) != null) {
+                                loadCompareImageAtSize(left, leftFileForCompare(left),
+                                        Math.max(galleryDp(240), left.getWidth() * 2),
+                                        Math.max(galleryDp(240), left.getHeight() * 2));
                             }
-                            if (right != null && rightFileForCompare(right) != null && thumbnailLoader != null) {
-                                thumbnailLoader.load(rightFileForCompare(right), right);
+                            if (right != null && rightFileForCompare(right) != null) {
+                                loadCompareImageAtSize(right, rightFileForCompare(right),
+                                        Math.max(galleryDp(240), right.getWidth() * 2),
+                                        Math.max(galleryDp(240), right.getHeight() * 2));
                             }
                         }
                         return true;
@@ -3640,11 +3732,31 @@ public class MainActivity extends Activity
                 : null;
     }
 
-    private LinearLayout compareCell(ImageView image, MediaFile file,
+    private LinearLayout compareCell(final ImageView image, final MediaFile file,
                                      SharedPreferences prefs) {
         LinearLayout cell = new LinearLayout(this);
         cell.setOrientation(LinearLayout.VERTICAL);
-        cell.addView(image, new LinearLayout.LayoutParams(
+        FrameLayout mediaFrame = new FrameLayout(this);
+        mediaFrame.setBackgroundColor(0xFF252538);
+        mediaFrame.addView(image, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        final VideoView video = new VideoView(this);
+        video.setVisibility(View.GONE);
+        video.setTag(file == null ? "" : file.getPath());
+        mediaFrame.addView(video, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        image.setTag(video);
+        image.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View view) {
+                return startCompareVideo(file, image, video);
+            }
+        });
+        video.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                stopCompareVideo(file, image, video);
+            }
+        });
+        cell.addView(mediaFrame, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         if (prefs.getBoolean("compare_show_caption", true)) {
             TextView caption = new TextView(this);
@@ -3657,6 +3769,41 @@ public class MainActivity extends Activity
                     LinearLayout.LayoutParams.MATCH_PARENT, 28));
         }
         return cell;
+    }
+
+    private boolean startCompareVideo(final MediaFile file, final ImageView image,
+                                      final VideoView video) {
+        if (file == null || file.getType() != MediaFile.Type.VIDEO) return false;
+        try {
+            image.setVisibility(View.GONE);
+            video.setVisibility(View.VISIBLE);
+            video.setVideoURI(android.net.Uri.fromFile(new File(file.getPath())));
+            video.setOnPreparedListener(new android.media.MediaPlayer.OnPreparedListener() {
+                @Override public void onPrepared(android.media.MediaPlayer player) {
+                    boolean muted = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                            .getBoolean("compare_video_muted", true);
+                    player.setVolume(muted ? 0f : 1f, muted ? 0f : 1f);
+                    player.setLooping(true);
+                    video.start();
+                }
+            });
+            video.setOnErrorListener(new android.media.MediaPlayer.OnErrorListener() {
+                @Override public boolean onError(android.media.MediaPlayer player, int what, int extra) {
+                    stopCompareVideo(file, image, video);
+                    return true;
+                }
+            });
+            return true;
+        } catch (Exception error) {
+            stopCompareVideo(file, image, video);
+            return false;
+        }
+    }
+
+    private void stopCompareVideo(MediaFile file, ImageView image, VideoView video) {
+        try { video.stopPlayback(); } catch (Exception ignored) {}
+        video.setVisibility(View.GONE);
+        image.setVisibility(View.VISIBLE);
     }
 
     private String compareCaption(MediaFile file, String fields) {
@@ -3707,24 +3854,88 @@ public class MainActivity extends Activity
 
     private void showCompareResult() {
         final CompareSortEngine.Result result = compareSortEngine.finish();
+        final boolean hasReview = !result.unsurePairs.isEmpty();
+        String[] actions = hasReview
+                ? new String[]{"Save order", "Save and rename sequence", "Review unsure",
+                        "Keep working", "Discard"}
+                : new String[]{"Save order", "Save and rename sequence", "Keep working", "Discard"};
         new AlertDialog.Builder(this).setTitle("Compare complete")
                 .setMessage(result.orderedPaths.size() + " files ordered"
                         + (result.unsurePaths.isEmpty() ? "" : "\n"
-                        + result.unsurePaths.size() + " unsure"))
-                .setItems(new String[]{"Save order", "Save and rename sequence",
-                        "Keep working", "Discard"}, new DialogInterface.OnClickListener() {
+                        + result.unsurePaths.size() + " unsure")
+                        + (result.inconsistencies == 0 ? "" : "\n"
+                        + result.inconsistencies + " inconsistent rechecks"))
+                .setItems(actions, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
                         if (which == 0) saveCompareOrder(result, false);
                         else if (which == 1) saveCompareOrder(result, true);
-                        else if (which == 3) exitCompareSort(false);
+                        else if (hasReview && which == 2) showUnsureReview(result);
+                        else if ((!hasReview && which == 3) || (hasReview && which == 4)) {
+                            exitCompareSort(false);
+                        }
                     }
                 }).show();
+    }
+
+    private void showUnsureReview(final CompareSortEngine.Result result) {
+        if (result == null || result.unsurePairs.isEmpty()) {
+            showCompareResult();
+            return;
+        }
+        String[] labels = new String[result.unsurePairs.size()];
+        for (int i = 0; i < result.unsurePairs.size(); i++) {
+            CompareSortEngine.UncertainPair pair = result.unsurePairs.get(i);
+            labels[i] = fileName(pair.candidatePath) + "  ?  " + fileName(pair.comparedPath);
+        }
+        new AlertDialog.Builder(this).setTitle("Review unsure pairs")
+                .setItems(labels, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, final int which) {
+                        final CompareSortEngine.UncertainPair pair = result.unsurePairs.get(which);
+                        new AlertDialog.Builder(MainActivity.this)
+                                .setTitle("Which goes first?")
+                                .setMessage(fileName(pair.candidatePath) + "\n\n" + fileName(pair.comparedPath))
+                                .setNegativeButton("Compared first", new DialogInterface.OnClickListener() {
+                                    @Override public void onClick(DialogInterface d, int w) {
+                                        if (compareSortEngine.resolveUnsurePair(which,
+                                                CompareSortEngine.Answer.RIGHT)) {
+                                            saveCompareSession();
+                                            showCompareResult();
+                                        }
+                                    }
+                                })
+                                .setNeutralButton("Same", new DialogInterface.OnClickListener() {
+                                    @Override public void onClick(DialogInterface d, int w) {
+                                        if (compareSortEngine.resolveUnsurePair(which,
+                                                CompareSortEngine.Answer.SAME)) {
+                                            saveCompareSession();
+                                            showCompareResult();
+                                        }
+                                    }
+                                })
+                                .setPositiveButton("Candidate first", new DialogInterface.OnClickListener() {
+                                    @Override public void onClick(DialogInterface d, int w) {
+                                        if (compareSortEngine.resolveUnsurePair(which,
+                                                CompareSortEngine.Answer.LEFT)) {
+                                            saveCompareSession();
+                                            showCompareResult();
+                                        }
+                                    }
+                                })
+                                .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                                    @Override public void onCancel(DialogInterface d) {}
+                                }).show();
+                    }
+                })
+                .setNegativeButton("Close", null)
+                .show();
     }
 
     private void saveCompareOrder(final CompareSortEngine.Result result, final boolean rename) {
         final List<MediaFile> snapshot = indexer.getFullIndex();
         final Map<String, Integer> previous = new java.util.HashMap<String, Integer>();
         final Map<String, Integer> ranks = new java.util.HashMap<String, Integer>();
+        compareOrderPreviousSequence = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("sort_sequence", "");
         for (int i = 0; i < result.orderedPaths.size(); i++) ranks.put(result.orderedPaths.get(i), i);
         for (MediaFile file : snapshot) previous.put(file.getPath(), file.getManualOrder());
         sortManager.setCompareRanks(ranks);
@@ -3738,7 +3949,7 @@ public class MainActivity extends Activity
                 indexer.updateManualOrder(ordered);
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
-                        smartOrderUndo = previous;
+                        compareOrderUndo = previous;
                         sortManager.setSingleCriterion(SortManager.MANUAL_ORDER, "ASC");
                         Toast.makeText(MainActivity.this, "Compare order saved",
                                 Toast.LENGTH_SHORT).show();
@@ -3773,7 +3984,7 @@ public class MainActivity extends Activity
         }
         exitCompareSort(false);
         if (gameStartedAt == 0L) {
-            gameStartedAt = android.os.SystemClock.uptimeMillis();
+            gameStartedAt = System.currentTimeMillis();
             gameStreak = 0;
         }
         if (sortCoordinator != null) sortCoordinator.setMode(SortCoordinator.Mode.GAME);
@@ -3788,6 +3999,9 @@ public class MainActivity extends Activity
         if (savedGame != null) {
             BatchGameEngine.Round restored = batchGameEngine.restore(savedGame, snapshot);
             if (restored != null) {
+                gameStartedAt = savedGame.optLong("game_started_at", gameStartedAt);
+                gameStreak = savedGame.optInt("game_streak", gameStreak);
+                gameCompletedRounds = savedGame.optInt("game_completed_rounds", gameCompletedRounds);
                 gameRound = restored;
                 showGameRound(restored);
                 return;
@@ -3804,7 +4018,9 @@ public class MainActivity extends Activity
                         getSharedPreferences("settings_prefs", MODE_PRIVATE)
                                 .getString("smart_active_pile", ""),
                         getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                                .getInt("game_probe_every", 5));
+                                .getInt("game_probe_every", 5),
+                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getBoolean("game_batch_adaptive", false));
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
                         gameRound = round;
@@ -3817,9 +4033,17 @@ public class MainActivity extends Activity
     }
 
     private void saveGameSession() {
-        if (sortSessionStore != null && gameRound != null) {
-            sortSessionStore.save(SortSessionStore.GAME_FILE,
-                    batchGameEngine.toJson(gameRound));
+        if (sortSessionStore == null) return;
+        if (gameRound != null) {
+            org.json.JSONObject state = batchGameEngine.toJson(gameRound);
+            try {
+                state.put("game_started_at", gameStartedAt);
+                state.put("game_streak", gameStreak);
+                state.put("game_completed_rounds", gameCompletedRounds);
+            } catch (Exception ignored) {}
+            sortSessionStore.save(SortSessionStore.GAME_FILE, state);
+        } else {
+            sortSessionStore.delete(SortSessionStore.GAME_FILE);
         }
     }
 
@@ -3839,47 +4063,36 @@ public class MainActivity extends Activity
         gameTitleView = title;
         updateGameTitle(round);
         sortModePanel.addView(title);
+        gameRoundStartedAt = android.os.SystemClock.uptimeMillis();
         startGameTimer();
-        LinearLayout grid = new LinearLayout(this);
-        grid.setOrientation(LinearLayout.VERTICAL);
+
         final List<MediaFile> selected = new ArrayList<MediaFile>();
-        for (final MediaFile file : round.files) {
-            Button cell = makeSmallButton(fileName(file.getPath()));
-            cell.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View view) {
-                    if (selected.contains(file)) selected.remove(file);
-                    else selected.add(file);
-                    view.setBackgroundColor(selected.contains(file) ? 0xFF2A2A6E : 0xFF2A2A3E);
+        gameSelectedFiles = selected;
+        gameSubmitRunnable = new Runnable() {
+            @Override public void run() {
+                if (selected.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Select files in the current Game round",
+                            Toast.LENGTH_SHORT).show();
+                    return;
                 }
-            });
-            grid.addView(cell);
-        }
-        sortModePanel.addView(grid);
-        LinearLayout controls = new LinearLayout(this);
-        Button tag = makeSmallButton("Tag selected");
-        Button none = makeSmallButton("None of these");
-        Button exit = makeSmallButton("Exit");
-        controls.addView(tag);
-        controls.addView(none);
-        controls.addView(exit);
-        sortModePanel.addView(controls);
-        tag.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View view) {
-                if (selected.isEmpty()) return;
+                captureGameUndo(round, selected);
+                final List<MediaFile> chosen = new ArrayList<MediaFile>(selected);
                 gameAfterTag = new Runnable() {
                     @Override public void run() {
                         gameStreak++;
+                        gameCompletedRounds++;
                         batchGameEngine.nextRound();
                         gameRound = null;
                         saveGameSession();
                         startBatchGame();
                     }
                 };
-                showQuickTagPopup(new ArrayList<MediaFile>(selected));
+                showQuickTagPopup(chosen);
             }
-        });
-        none.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View view) {
+        };
+        gameNoneRunnable = new Runnable() {
+            @Override public void run() {
+                captureGameUndo(round, round.files);
                 gameStreak = 0;
                 int maxReturns = getSharedPreferences("settings_prefs", MODE_PRIVATE)
                         .getInt("game_none_max_returns", 2);
@@ -3890,11 +4103,81 @@ public class MainActivity extends Activity
                         tagManager.applyTag(file, "Unsorted");
                     }
                 }
+                gameCompletedRounds++;
                 batchGameEngine.nextRound();
                 gameRound = null;
                 saveGameSession();
                 startBatchGame();
             }
+        };
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        int columns = round.files.size() <= 6 ? 3 : 4;
+        LinearLayout row = null;
+        for (final MediaFile file : round.files) {
+            if (row == null || row.getChildCount() >= columns) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                grid.addView(row, new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, galleryDp(112)));
+            }
+            final LinearLayout cell = new LinearLayout(this);
+            cell.setOrientation(LinearLayout.VERTICAL);
+            cell.setGravity(Gravity.CENTER);
+            cell.setPadding(galleryDp(2), galleryDp(2), galleryDp(2), galleryDp(2));
+            cell.setBackgroundColor(0xFF2A2A3E);
+            final ImageView image = new ImageView(this);
+            image.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            TextView caption = new TextView(this);
+            caption.setTextColor(0xFFFFFFFF);
+            caption.setTextSize(9f);
+            caption.setGravity(Gravity.CENTER);
+            caption.setSingleLine(true);
+            caption.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+            caption.setText(fileName(file.getPath()));
+            cell.addView(image, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+            cell.addView(caption, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, galleryDp(22)));
+            cell.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View view) {
+                    if (selected.contains(file)) selected.remove(file);
+                    else selected.add(file);
+                    cell.setBackgroundColor(selected.contains(file) ? 0xFF2A2A6E : 0xFF2A2A3E);
+                }
+            });
+            row.addView(cell, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+            if (thumbnailLoader != null) thumbnailLoader.load(file, image);
+        }
+        sortModePanel.addView(grid);
+        TextView prompt = new TextView(this);
+        prompt.setTextColor(0xFFBBBBBB);
+        prompt.setText(getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("game_prompt_text", "Group these files and choose a tag"));
+        sortModePanel.addView(prompt);
+        LinearLayout controls = new LinearLayout(this);
+        Button tag = makeSmallButton("Submit group");
+        Button none = makeSmallButton("None of these");
+        Button undo = makeSmallButton("Undo round");
+        Button exit = makeSmallButton("Exit");
+        controls.addView(tag);
+        controls.addView(none);
+        controls.addView(undo);
+        controls.addView(exit);
+        sortModePanel.addView(controls);
+        tag.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                if (gameSubmitRunnable != null) gameSubmitRunnable.run();
+            }
+        });
+        none.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                if (gameNoneRunnable != null) gameNoneRunnable.run();
+            }
+        });
+        undo.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { undoBatchGameRound(); }
         });
         exit.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) { exitBatchGame(false); }
@@ -3902,6 +4185,19 @@ public class MainActivity extends Activity
         preview.addView(sortModePanel, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM));
+    }
+
+    private void captureGameUndo(BatchGameEngine.Round round, List<MediaFile> targets) {
+        gameUndoTags = new java.util.HashMap<String, List<String>>();
+        gameUndoStatuses = new java.util.HashMap<String, FileStatus.Status>();
+        if (targets != null) for (MediaFile file : targets) {
+            if (file == null || file.getPath() == null) continue;
+            gameUndoTags.put(file.getPath(), new ArrayList<String>(file.getTags()));
+            gameUndoStatuses.put(file.getPath(), fileStatus.getStatus(file.getPath()));
+        }
+        gameUndoRound = round;
+        gameUndoEngineState = batchGameEngine.toJson(null);
+        gameUndoAvailable = !gameUndoTags.isEmpty();
     }
 
     private void updateGameTitle(BatchGameEngine.Round round) {
@@ -3915,6 +4211,14 @@ public class MainActivity extends Activity
             int tagged = 0;
             for (MediaFile file : fullList) if (!file.getTags().isEmpty()) tagged++;
             suffix = "  tagged " + tagged + "/" + total;
+        }
+        int timerSeconds = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getInt("game_timer_seconds", 0);
+        if (timerSeconds > 0 && gameRoundStartedAt > 0L) {
+            long elapsed = (android.os.SystemClock.uptimeMillis() - gameRoundStartedAt) / 1000L;
+            long remaining = Math.max(0L, timerSeconds - elapsed);
+            suffix += "  time " + (remaining / 60) + ":"
+                    + String.format(java.util.Locale.US, "%02d", remaining % 60);
         }
         gameTitleView.setText("Game round " + round.number + " — select a group" + suffix);
     }
@@ -3947,19 +4251,70 @@ public class MainActivity extends Activity
     }
 
     private void submitBatchGameRound() {
-        Toast.makeText(this, "Select files in the current Game round", Toast.LENGTH_SHORT).show();
+        if (gameSubmitRunnable != null) gameSubmitRunnable.run();
+        else Toast.makeText(this, "Select files in the current Game round", Toast.LENGTH_SHORT).show();
     }
 
-    private void noneBatchGameRound() { Toast.makeText(this, "Use None of these in the Game panel", Toast.LENGTH_SHORT).show(); }
-    private void undoBatchGameRound() { undoLastAction(); }
+    private void noneBatchGameRound() {
+        if (gameNoneRunnable != null) gameNoneRunnable.run();
+        else Toast.makeText(this, "Use None of these in the Game panel", Toast.LENGTH_SHORT).show();
+    }
+
+    private void undoBatchGameRound() {
+        if (!gameUndoAvailable || gameUndoTags == null || gameUndoTags.isEmpty()) {
+            undoLastAction();
+            return;
+        }
+        final Map<String, List<String>> restoreTags = gameUndoTags;
+        final Map<String, FileStatus.Status> restoreStatuses = gameUndoStatuses;
+        gameUndoTags = null;
+        gameUndoStatuses = null;
+        gameUndoAvailable = false;
+        if (gameUndoEngineState != null) batchGameEngine.restoreState(gameUndoEngineState);
+        gameUndoEngineState = null;
+        Map<String, MediaFile> files = new java.util.HashMap<String, MediaFile>();
+        for (MediaFile file : indexer.getFullIndex()) {
+            if (file != null && restoreTags.containsKey(file.getPath())) files.put(file.getPath(), file);
+        }
+        for (Map.Entry<String, List<String>> entry : restoreTags.entrySet()) {
+            MediaFile file = files.get(entry.getKey());
+            if (file == null) continue;
+            for (String tag : new ArrayList<String>(file.getTags())) {
+                if (!entry.getValue().contains(tag)) tagManager.removeTag(file, tag);
+            }
+            for (String tag : entry.getValue()) if (!file.hasTag(tag)) tagManager.applyTag(file, tag);
+            FileStatus.Status status = restoreStatuses.get(entry.getKey());
+            if (status == null || status == FileStatus.Status.NONE) fileStatus.clearStatus(entry.getKey());
+            else if (status == FileStatus.Status.SKIPPED) fileStatus.setSkipped(entry.getKey());
+            else if (status == FileStatus.Status.FLAGGED) fileStatus.setFlagged(entry.getKey());
+            else if (status == FileStatus.Status.DONE) fileStatus.setDone(entry.getKey());
+        }
+        gameRound = gameUndoRound;
+        gameUndoRound = null;
+        saveGameSession();
+        removeSortModePanel();
+        if (gameRound != null) showGameRound(gameRound);
+        scheduleRefresh();
+        Toast.makeText(this, "Game round undone", Toast.LENGTH_SHORT).show();
+    }
 
     private void exitBatchGame(boolean keepOrder) {
         gameAfterTag = null;
         if (gameTimerRunnable != null) mainHandler.removeCallbacks(gameTimerRunnable);
         gameTimerRunnable = null;
         gameTitleView = null;
+        gameTimerView = null;
         gameRound = null;
+        gameSelectedFiles = null;
+        gameSubmitRunnable = null;
+        gameNoneRunnable = null;
+        gameUndoRound = null;
+        gameUndoEngineState = null;
+        gameUndoTags = null;
+        gameUndoStatuses = null;
+        gameUndoAvailable = false;
         gameStartedAt = 0L;
+        gameRoundStartedAt = 0L;
         if (sortSessionStore != null) sortSessionStore.delete(SortSessionStore.GAME_FILE);
         removeSortModePanel();
         if (sortCoordinator != null) {
@@ -4133,14 +4488,27 @@ public class MainActivity extends Activity
             replaceTagsUndo = null;
             final List<String> purgedTags = replaceTagsPurgedTags == null
                     ? new ArrayList<String>() : new ArrayList<String>(replaceTagsPurgedTags);
+            final Map<String, Integer> purgedUsage = replaceTagsPurgedUsage == null
+                    ? new java.util.HashMap<String, Integer>()
+                    : new java.util.HashMap<String, Integer>(replaceTagsPurgedUsage);
+            final Map<String, Long> purgedCreatedAt = replaceTagsPurgedCreatedAt == null
+                    ? new java.util.HashMap<String, Long>()
+                    : new java.util.HashMap<String, Long>(replaceTagsPurgedCreatedAt);
             replaceTagsPurgedTags = null;
+            replaceTagsPurgedUsage = null;
+            replaceTagsPurgedCreatedAt = null;
             final Map<String, MediaFile> filesToRestore = new java.util.HashMap<String, MediaFile>();
             for (MediaFile file : indexer.getFullIndex()) {
                 if (file != null && restore.containsKey(file.getPath())) filesToRestore.put(file.getPath(), file);
             }
             sortCoordinator.post(new SortCoordinator.Task() {
                 @Override public void run(SortCoordinator.TaskContext context) {
-                    for (String tag : purgedTags) tagManager.createTag(tag);
+                    for (String tag : purgedTags) {
+                        Integer usage = purgedUsage.get(tag);
+                        Long created = purgedCreatedAt.get(tag);
+                        tagManager.restoreTag(tag, usage == null ? 0 : usage,
+                                created == null ? 0L : created);
+                    }
                     for (Map.Entry<String, List<String>> entry : restore.entrySet()) {
                         MediaFile file = filesToRestore.get(entry.getKey());
                         if (file == null) continue;
@@ -4159,6 +4527,20 @@ public class MainActivity extends Activity
                     });
                 }
             });
+            return;
+        }
+        if (compareOrderUndo != null && !compareOrderUndo.isEmpty()) {
+            Map<String, Integer> restore = compareOrderUndo;
+            compareOrderUndo = null;
+            indexer.restoreManualOrders(restore);
+            getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
+                    .putString("sort_sequence", compareOrderPreviousSequence == null
+                            || compareOrderPreviousSequence.isEmpty()
+                            ? "[{\"id\":\"NAME\",\"direction\":\"ASC\"}]"
+                            : compareOrderPreviousSequence).apply();
+            compareOrderPreviousSequence = null;
+            scheduleRefresh();
+            Toast.makeText(this, "Compare order undone", Toast.LENGTH_SHORT).show();
             return;
         }
         if (smartPileUndo != null && !smartPileUndo.isEmpty()) {

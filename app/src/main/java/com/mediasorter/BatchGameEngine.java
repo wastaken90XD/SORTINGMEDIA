@@ -34,6 +34,13 @@ public final class BatchGameEngine {
     public synchronized Round buildRound(List<MediaFile> pool, int batchSize, int decoys,
                                           Map<String, Float> confidence,
                                           String activePile, int probeEvery) {
+        return buildRound(pool, batchSize, decoys, confidence, activePile, probeEvery, false);
+    }
+
+    public synchronized Round buildRound(List<MediaFile> pool, int batchSize, int decoys,
+                                          Map<String, Float> confidence,
+                                          String activePile, int probeEvery,
+                                          boolean adaptive) {
         List<MediaFile> candidates = new ArrayList<MediaFile>();
         if (pool != null) {
             for (MediaFile file : pool) {
@@ -60,7 +67,8 @@ public final class BatchGameEngine {
                 return Float.compare(distance(seed, left), distance(seed, right));
             }
         });
-        int targetSize = Math.max(4, Math.min(12, batchSize));
+        int targetSize = adaptive ? adaptiveBatchSize(batchSize, candidates, confidence)
+                : Math.max(4, Math.min(12, batchSize));
         for (MediaFile file : nearest) {
             if (result.size() >= targetSize) break;
             result.add(file);
@@ -79,6 +87,26 @@ public final class BatchGameEngine {
             }
         }
         return new Round(round, result, seed.getPath());
+    }
+
+    private int adaptiveBatchSize(int requested, List<MediaFile> candidates,
+                                  Map<String, Float> confidence) {
+        int size = Math.max(4, Math.min(12, requested));
+        if (confidence == null || confidence.isEmpty()) return size;
+        float total = 0f;
+        int counted = 0;
+        for (MediaFile file : candidates) {
+            Float value = confidence.get(file.getPath());
+            if (value == null) continue;
+            total += value;
+            counted++;
+        }
+        if (counted == 0) return size;
+        float average = total / counted;
+        if (average < .35f) size += 2;
+        else if (average < .55f) size += 1;
+        else if (average > .85f) size -= 1;
+        return Math.max(4, Math.min(12, size));
     }
 
     private MediaFile leastConfident(List<MediaFile> files, Map<String, Float> confidence) {
@@ -122,11 +150,29 @@ public final class BatchGameEngine {
     }
     public synchronized void nextRound() { if (noneCooldown > 0) noneCooldown--; }
 
+    /** Remap cooldown bookkeeping after a file rename or removal. */
+    public synchronized void remapPaths(Map<String, String> oldToNew, Set<String> removed) {
+        Map<String, Integer> remapped = new java.util.HashMap<String, Integer>();
+        for (Map.Entry<String, Integer> entry : noneReturns.entrySet()) {
+            String path = entry.getKey();
+            if (removed != null && removed.contains(path)) continue;
+            String next = oldToNew == null ? path : oldToNew.get(path);
+            remapped.put(next == null ? path : next, entry.getValue());
+        }
+        noneReturns.clear();
+        noneReturns.putAll(remapped);
+    }
+
     public synchronized JSONObject toJson(Round current) {
         JSONObject object = new JSONObject();
         try {
             object.put("round", round);
             object.put("none_cooldown", noneCooldown);
+            JSONObject returns = new JSONObject();
+            for (Map.Entry<String, Integer> entry : noneReturns.entrySet()) {
+                returns.put(entry.getKey(), entry.getValue());
+            }
+            object.put("none_returns", returns);
             JSONArray paths = new JSONArray();
             if (current != null) for (MediaFile file : current.files) {
                 if (file != null) paths.put(file.getPath());
@@ -134,6 +180,20 @@ public final class BatchGameEngine {
             object.put("paths", paths);
         } catch (Exception ignored) {}
         return object;
+    }
+
+    public synchronized void restoreState(JSONObject object) {
+        if (object == null) return;
+        round = object.optInt("round", round);
+        noneCooldown = object.optInt("none_cooldown", noneCooldown);
+        noneReturns.clear();
+        JSONObject returns = object.optJSONObject("none_returns");
+        if (returns == null) return;
+        java.util.Iterator<String> keys = returns.keys();
+        while (keys.hasNext()) {
+            String path = keys.next();
+            if (!path.isEmpty()) noneReturns.put(path, returns.optInt(path, 0));
+        }
     }
 
     public synchronized Round restore(JSONObject object, List<MediaFile> pool) {
@@ -146,6 +206,14 @@ public final class BatchGameEngine {
         if (files.isEmpty()) return null;
         round = object.optInt("round", round);
         noneCooldown = object.optInt("none_cooldown", noneCooldown);
+        JSONObject returns = object.optJSONObject("none_returns");
+        if (returns != null) {
+            java.util.Iterator<String> keys = returns.keys();
+            while (keys.hasNext()) {
+                String path = keys.next();
+                if (!path.isEmpty()) noneReturns.put(path, returns.optInt(path, 0));
+            }
+        }
         return new Round(round, files, files.get(0).getPath());
     }
 }

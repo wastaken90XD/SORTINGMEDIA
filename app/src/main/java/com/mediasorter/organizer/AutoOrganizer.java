@@ -442,7 +442,11 @@ public class AutoOrganizer {
         entry.newTags = new ArrayList<String>(file.getTags());
         entry.newStatus = fileStatus.getStatus(file.getPath());
         entry.action = action;
-        if (!entry.newPath.equals(entry.originalPath)) {
+        if (action instanceof CopyAction && ((CopyAction) action).lastCopiedPath != null) {
+            entry.wasCopied = true;
+            entry.newPath = ((CopyAction) action).lastCopiedPath;
+        }
+        if (!entry.newPath.equals(entry.originalPath) && !entry.wasCopied) {
             if (entry.newPath.contains("/.trash/")) {
                 entry.wasTrashed = true;
                 entry.trashPath = entry.newPath;
@@ -571,12 +575,18 @@ public class AutoOrganizer {
                         && !entry.newPath.equals(entry.originalPath)) {
                     File current = new File(entry.newPath);
                     File original = new File(entry.originalPath);
-                    if (current.exists() && current.renameTo(original)) restored++;
+                    if (current.exists() && current.renameTo(original)) {
+                        PathChangeNotifier.renamed(context, entry.newPath, entry.originalPath);
+                        restored++;
+                    }
                 }
                 if (entry.wasTrashed && entry.trashPath != null) {
                     File trashed = new File(entry.trashPath);
                     File original = new File(entry.originalPath);
-                    if (trashed.exists() && !original.exists() && trashed.renameTo(original)) restored++;
+                    if (trashed.exists() && !original.exists() && trashed.renameTo(original)) {
+                        PathChangeNotifier.renamed(context, entry.trashPath, entry.originalPath);
+                        restored++;
+                    }
                 }
                 if (entry.wasCopied && entry.newPath != null) {
                     File copy = new File(entry.newPath);

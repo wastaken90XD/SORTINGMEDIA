@@ -1,6 +1,7 @@
 package com.mediasorter;
 
 import com.mediasorter.models.MediaFile;
+import com.mediasorter.models.Tag;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -26,6 +27,8 @@ public final class ReplaceTagsManager {
                 new LinkedHashMap<String, List<String>>();
         public final List<String> purgedGroups = new ArrayList<String>();
         public final List<String> purgedTags = new ArrayList<String>();
+        public final Map<String, Integer> purgedUsage = new HashMap<String, Integer>();
+        public final Map<String, Long> purgedCreatedAt = new HashMap<String, Long>();
     }
 
     private ReplaceTagsManager() {}
@@ -134,6 +137,13 @@ public final class ReplaceTagsManager {
                 }
                 if (!remains) {
                     for (String tag : entry.getValue()) {
+                        for (Tag catalogTag : tagManager.getAllTags()) {
+                            if (catalogTag != null && tag.equals(catalogTag.getName())) {
+                                report.purgedUsage.put(tag, catalogTag.getUsageCount());
+                                report.purgedCreatedAt.put(tag, catalogTag.getCreatedAt());
+                                break;
+                            }
+                        }
                         tagManager.deleteTag(tag);
                         report.purgedTags.add(tag);
                     }
@@ -179,7 +189,13 @@ public final class ReplaceTagsManager {
             List<String> previous = new ArrayList<String>(file.getTags());
             report.previousTags.put(file.getPath(), previous);
             Set<String> keep = new HashSet<String>();
+            boolean keptFirstLabel = false;
             for (String tag : previous) {
+                if (rule == SequenceRule.KEEP_FIRST && !keptFirstLabel
+                        && !matchesAny(tag, sequenceQueries)) {
+                    keep.add(tag);
+                    keptFirstLabel = true;
+                }
                 if (matchesAny(tag, protectQueries)) keep.add(tag);
                 Set<String> keys = fileGroups.get(file.getPath());
                 if (keys != null && rule == SequenceRule.WHOLE_GROUP

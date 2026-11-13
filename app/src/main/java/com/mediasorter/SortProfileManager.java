@@ -51,16 +51,25 @@ public final class SortProfileManager {
 
     public void resetInteractiveDefaults() {
         SharedPreferences.Editor editor = prefs.edit();
-        editor.putString("compare_layout", "auto")
+        editor.putString(KEY, "[]")
+                .putInt(INDEX, -1)
+                .putString("compare_layout", "auto")
                 .putBoolean("compare_randomize_sides", true)
                 .putInt("compare_recheck_every", 0)
                 .putBoolean("compare_sync_zoom", true)
                 .putBoolean("compare_show_caption", true)
-                .putBoolean("compare_volume_pick", true)
+                .putString("compare_question", "which goes first?")
+                .putString("compare_caption_fields", "name,size")
+                .putString("compare_volume_pick", "off")
+                .putBoolean("compare_video_muted", true)
+                .putBoolean("compare_prefetch", true)
+                .putBoolean("compare_hires_on_zoom", true)
                 .putInt("compare_warn_questions", 100)
                 .putInt("compare_undo_depth", 50)
                 .putInt("game_batch_size", 6)
-                .putBoolean("game_batch_adaptive", true)
+                .putBoolean("game_batch_adaptive", false)
+                .putInt("game_order_min_group", 4)
+                .putString("game_prompt_text", "Group these files and choose a tag")
                 .putInt("game_decoys", 1)
                 .putInt("game_probe_every", 5)
                 .putInt("game_none_cooldown", 3)
@@ -68,6 +77,38 @@ public final class SortProfileManager {
                 .putString("game_score_mode", "progress")
                 .putInt("game_timer_seconds", 0)
                 .commit();
+    }
+
+    /** Returns the validated custom profile document, or an empty array. */
+    public JSONArray getCustomProfiles() {
+        JSONArray result = new JSONArray();
+        String raw = prefs.getString(KEY, "[]");
+        try {
+            JSONArray saved = new JSONArray(raw);
+            for (int i = 0; i < saved.length() && i < 10; i++) {
+                JSONObject profile = saved.optJSONObject(i);
+                if (profile != null) result.put(profile);
+            }
+        } catch (Exception ignored) {}
+        return result;
+    }
+
+    /** Saves at most ten object profiles; invalid JSON is rejected unchanged. */
+    public boolean saveCustomProfiles(String raw) {
+        try {
+            JSONArray saved = new JSONArray(raw == null || raw.trim().isEmpty() ? "[]" : raw);
+            JSONArray valid = new JSONArray();
+            for (int i = 0; i < saved.length(); i++) {
+                JSONObject profile = saved.optJSONObject(i);
+                if (profile == null) return false;
+                if (valid.length() >= 10) return false;
+                valid.put(profile);
+            }
+            prefs.edit().putString(KEY, valid.toString()).apply();
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     public static String[] builtInNames() { return BUILT_INS.clone(); }

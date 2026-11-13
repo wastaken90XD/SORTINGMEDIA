@@ -74,6 +74,19 @@ public final class FeatureStore {
         return result;
     }
 
+    /** Keep feature cache keys aligned with organizer path mutations. */
+    public void remapPaths(Map<String, String> oldToNew, java.util.Set<String> removed) {
+        if (removed != null) {
+            for (String path : removed) cache.removePath(path);
+        }
+        if (oldToNew != null) {
+            for (Map.Entry<String, String> entry : oldToNew.entrySet()) {
+                cache.remapPath(entry.getKey(), entry.getValue());
+            }
+        }
+        cache.save();
+    }
+
     public SmartFeatureCache getCache() { return cache; }
     public void clearMemory() { cache.clearMemory(); }
 }

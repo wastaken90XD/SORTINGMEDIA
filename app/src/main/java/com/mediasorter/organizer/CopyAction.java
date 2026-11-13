@@ -14,6 +14,8 @@ import java.nio.channels.FileChannel;
 public class CopyAction extends Action {
     public String destFolder;
     public Action.Conflict conflict;
+    /** Destination from the last successful execution, used by one-step undo. */
+    public String lastCopiedPath;
 
     public CopyAction(String destFolder, Action.Conflict conflict) {
         this.destFolder = destFolder;
@@ -26,6 +28,7 @@ public class CopyAction extends Action {
     @Override
     public boolean execute(MediaFile file, Context context,
             TagManager tagManager, BatchRenameManager renamer, FileStatus fileStatus) {
+        lastCopiedPath = null;
         File src = new File(file.getPath());
         File destDir = new File(destFolder);
         if (!destDir.exists()) destDir.mkdirs();
@@ -48,6 +51,7 @@ public class CopyAction extends Action {
         }
         try {
             copyFile(src, destFile);
+            lastCopiedPath = destFile.getAbsolutePath();
             log.add("Copied: " + src.getName() + " to " + destFile.getParent());
             return true;
         } catch (IOException e) {

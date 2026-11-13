@@ -633,6 +633,34 @@ public class SettingsActivity extends Activity {
                         saveString("sort_dupes_mode", value);
                     }
                 }));
+        final SortProfileManager profileManager = new SortProfileManager(this);
+        root.addView(makeTextInputRow("Custom sort profiles JSON (max 10):",
+                settingsPrefs.getString("sort_profiles", "[]"),
+                new OnTextChangeListener() {
+                    @Override public void onChange(String value) {
+                        if (!profileManager.saveCustomProfiles(value)) {
+                            // Keep the last valid document while the user is typing.
+                            return;
+                        }
+                    }
+                }));
+        Button resetSorting = makeButton("Reset sorting defaults");
+        resetSorting.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                new AlertDialog.Builder(SettingsActivity.this)
+                        .setTitle("Reset sorting defaults?")
+                        .setMessage("Compare, Game, and Replace Tags settings will return to their defaults.")
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Reset", new DialogInterface.OnClickListener() {
+                            @Override public void onClick(DialogInterface dialog, int which) {
+                                profileManager.resetInteractiveDefaults();
+                                Toast.makeText(SettingsActivity.this,
+                                        "Sorting defaults reset", Toast.LENGTH_SHORT).show();
+                            }
+                        }).show();
+            }
+        });
+        root.addView(resetSorting);
         root.addView(makeTitle("Compare Sort"));
         root.addView(makeSpinnerRow("Compare layout:",
                 new String[]{"side_by_side", "stacked", "auto"},
@@ -644,6 +672,45 @@ public class SettingsActivity extends Activity {
         root.addView(makeCheckBoxRow("Randomize Compare sides",
                 settingsPrefs.getBoolean("compare_randomize_sides", true), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("compare_randomize_sides", value); }
+                }));
+        root.addView(makeSpinnerRow("Compare question:",
+                new String[]{"which goes first?", "which is better?", "which belongs first?"},
+                compareQuestionPosition(), new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) {
+                        saveString("compare_question", value);
+                    }
+                }));
+        root.addView(makeCheckBoxRow("Synchronize Compare zoom",
+                settingsPrefs.getBoolean("compare_sync_zoom", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("compare_sync_zoom", value); }
+                }));
+        root.addView(makeCheckBoxRow("Show Compare captions",
+                settingsPrefs.getBoolean("compare_show_caption", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("compare_show_caption", value); }
+                }));
+        root.addView(makeTextInputRow("Compare caption fields:",
+                settingsPrefs.getString("compare_caption_fields", "name,size"),
+                new OnTextChangeListener() {
+                    @Override public void onChange(String value) { saveString("compare_caption_fields", value); }
+                }));
+        root.addView(makeSpinnerRow("Compare volume pick:",
+                new String[]{"off", "up_left_down_right", "up_right_down_left"},
+                compareVolumePosition(), new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) {
+                        saveString("compare_volume_pick", value);
+                    }
+                }));
+        root.addView(makeCheckBoxRow("Mute long-press video preview",
+                settingsPrefs.getBoolean("compare_video_muted", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("compare_video_muted", value); }
+                }));
+        root.addView(makeCheckBoxRow("Prefetch next Compare images",
+                settingsPrefs.getBoolean("compare_prefetch", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("compare_prefetch", value); }
+                }));
+        root.addView(makeCheckBoxRow("Reload high resolution on zoom",
+                settingsPrefs.getBoolean("compare_hires_on_zoom", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("compare_hires_on_zoom", value); }
                 }));
         root.addView(makeNumericInputRow("Compare recheck every (0-100):",
                 settingsPrefs.getInt("compare_recheck_every", 0), 0, 100,
@@ -661,6 +728,20 @@ public class SettingsActivity extends Activity {
                     @Override public void onChange(int value) { saveInt("compare_undo_depth", value); }
                 }));
         root.addView(makeTitle("Batch Game"));
+        root.addView(makeCheckBoxRow("Adaptive Game batch size",
+                settingsPrefs.getBoolean("game_batch_adaptive", false), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("game_batch_adaptive", value); }
+                }));
+        root.addView(makeTextInputRow("Game prompt text:",
+                settingsPrefs.getString("game_prompt_text", "Group these files and choose a tag"),
+                new OnTextChangeListener() {
+                    @Override public void onChange(String value) { saveString("game_prompt_text", value); }
+                }));
+        root.addView(makeNumericInputRow("Minimum files for Game order:",
+                settingsPrefs.getInt("game_order_min_group", 4), 1, 12,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("game_order_min_group", value); }
+                }));
         root.addView(makeNumericInputRow("Game batch size (4-12):",
                 settingsPrefs.getInt("game_batch_size", 6), 4, 12,
                 new OnNumericChangeListener() {
@@ -742,6 +823,20 @@ public class SettingsActivity extends Activity {
         if ("side_by_side".equals(value)) return 0;
         if ("stacked".equals(value)) return 1;
         return 2;
+    }
+
+    private int compareQuestionPosition() {
+        String value = settingsPrefs.getString("compare_question", "which goes first?");
+        if ("which is better?".equals(value)) return 1;
+        if ("which belongs first?".equals(value)) return 2;
+        return 0;
+    }
+
+    private int compareVolumePosition() {
+        String value = settingsPrefs.getString("compare_volume_pick", "off");
+        if ("up_left_down_right".equals(value)) return 1;
+        if ("up_right_down_left".equals(value)) return 2;
+        return 0;
     }
 
     private int gameScorePosition() {

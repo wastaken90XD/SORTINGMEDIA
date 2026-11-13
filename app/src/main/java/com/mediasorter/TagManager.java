@@ -161,6 +161,30 @@ public class TagManager {
         notifyTagsChanged();
     }
 
+    /** Restore a purged catalog row, including usage and creation metadata. */
+    public void restoreTag(String name, int usageCount, long createdAt) {
+        final String plain = TagText.plain(name);
+        if (plain.isEmpty()) return;
+        final Tag tag;
+        final boolean existingRow;
+        synchronized (tagMap) {
+            Tag existing = tagMap.get(plain);
+            existingRow = existing != null;
+            tag = existing == null ? new Tag(plain) : existing;
+            tag.setUsageCount(Math.max(0, usageCount));
+            if (createdAt > 0L) tag.setCreatedAt(createdAt);
+            tagMap.put(plain, tag);
+        }
+        executor.submit(new Runnable() {
+            @Override public void run() {
+                if (existingRow) db.tagDao().update(tag);
+                else db.tagDao().insert(tag);
+                notifyTagsChanged();
+            }
+        });
+        notifyTagsChanged();
+    }
+
     // ── Apply ─────────────────────────────────────────────────────────────────
 
     public void applyTag(MediaFile file, String tagName) {

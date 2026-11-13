@@ -123,6 +123,26 @@ public class SortManager {
                 : new java.util.HashMap<String, Integer>(ranks);
     }
 
+    /** Keep rank criteria valid after organizer path mutations. */
+    public synchronized void remapPaths(java.util.Map<String, String> oldToNew,
+                                         java.util.Set<String> removed) {
+        remapRankMap(smartRanks, oldToNew, removed);
+        remapRankMap(compareRanks, oldToNew, removed);
+    }
+
+    private void remapRankMap(java.util.Map<String, Integer> ranks,
+                              java.util.Map<String, String> oldToNew,
+                              java.util.Set<String> removed) {
+        if (ranks == null || ranks.isEmpty()) return;
+        java.util.Map<String, Integer> copy = new java.util.HashMap<String, Integer>(ranks);
+        ranks.clear();
+        for (java.util.Map.Entry<String, Integer> entry : copy.entrySet()) {
+            if (removed != null && removed.contains(entry.getKey())) continue;
+            String next = oldToNew == null ? entry.getKey() : oldToNew.get(entry.getKey());
+            ranks.put(next == null ? entry.getKey() : next, entry.getValue());
+        }
+    }
+
     public List<SortCriterion> getSortSequence() {
         List<SortCriterion> result = new ArrayList<>();
         if (prefs != null) {

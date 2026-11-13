@@ -141,9 +141,11 @@ public class MacroCompositeAction extends Action {
         try {
             File current = new File(file.getPath());
             File original = new File(snapshot.path);
-            if (!current.getAbsolutePath().equals(original.getAbsolutePath())
-                    && current.exists() && !original.exists()) {
-                current.renameTo(original);
+            String currentPath = current.getAbsolutePath();
+            if (!currentPath.equals(original.getAbsolutePath())
+                    && current.exists() && !original.exists()
+                    && current.renameTo(original)) {
+                PathChangeNotifier.renamed(context, currentPath, original.getAbsolutePath());
             }
             file.setPath(snapshot.path);
             file.setTags(snapshot.tags);
