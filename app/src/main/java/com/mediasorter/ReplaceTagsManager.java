@@ -101,6 +101,55 @@ public final class ReplaceTagsManager {
         return report;
     }
 
+    public static Report preview(List<MediaFile> fullSnapshot, Set<String> targetPaths,
+                                 List<String> replacementTags, String sequencePatterns,
+                                 String protectPatterns, SequenceRule rule) {
+        Report report = new Report();
+        if (fullSnapshot == null || targetPaths == null) return report;
+        List<SearchManager.QueryParser> sequenceQueries = compilePatterns(sequencePatterns);
+        List<SearchManager.QueryParser> protectQueries = compilePatterns(protectPatterns);
+        Map<String, Set<String>> groups = new LinkedHashMap<String, Set<String>>();
+        Map<String, Set<String>> fileGroups = new HashMap<String, Set<String>>();
+        for (MediaFile file : fullSnapshot) {
+            if (file == null || file.getPath() == null) continue;
+            for (String tag : file.getTags()) {
+                if (!matchesAny(tag, sequenceQueries)) continue;
+                String key = groupKey(tag);
+                Set<String> members = groups.get(key);
+                if (members == null) { members = new HashSet<String>(); groups.put(key, members); }
+                members.add(file.getPath());
+                Set<String> keys = fileGroups.get(file.getPath());
+                if (keys == null) { keys = new HashSet<String>(); fileGroups.put(file.getPath(), keys); }
+                keys.add(key);
+            }
+        }
+        Map<String, Boolean> complete = new HashMap<String, Boolean>();
+        for (Map.Entry<String, Set<String>> entry : groups.entrySet()) {
+            boolean all = targetPaths.containsAll(entry.getValue());
+            complete.put(entry.getKey(), all);
+            if (all) report.fullySelectedGroups++;
+            else { report.partialGroups++; report.keptGroups.add(entry.getKey()); }
+        }
+        for (MediaFile file : fullSnapshot) {
+            if (file == null || !targetPaths.contains(file.getPath())) continue;
+            report.files++;
+            List<String> previous = new ArrayList<String>(file.getTags());
+            report.previousTags.put(file.getPath(), previous);
+            Set<String> keep = new HashSet<String>();
+            for (String tag : previous) {
+                if (matchesAny(tag, protectQueries)) keep.add(tag);
+                Set<String> keys = fileGroups.get(file.getPath());
+                if (keys != null && rule == SequenceRule.WHOLE_GROUP
+                        && matchesAny(tag, sequenceQueries)) {
+                    for (String key : keys) if (!Boolean.TRUE.equals(complete.get(key))) keep.add(tag);
+                } else if (keys != null && rule == SequenceRule.PROTECT
+                        && matchesAny(tag, sequenceQueries)) keep.add(tag);
+            }
+            for (String tag : previous) if (!keep.contains(tag)) report.removedInstances++;
+        }
+        return report;
+    }
+
     private static List<SearchManager.QueryParser> compilePatterns(String raw) {
         List<SearchManager.QueryParser> result = new ArrayList<SearchManager.QueryParser>();
         if (raw == null || raw.trim().isEmpty()) return result;

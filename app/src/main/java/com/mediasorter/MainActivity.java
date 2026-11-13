@@ -153,6 +153,7 @@ public class MainActivity extends Activity
     private final java.util.Set<String> dismissedSmartSuggestions =
             new java.util.HashSet<String>();
     private Map<String, List<String>> smartPileUndo;
+    private Map<String, List<String>> replaceTagsUndo;
     private String smartOrderPreviousSequence;
     private boolean smartOrderPreviousEnabled;
     private SearchHistory searchHistory;
@@ -1441,6 +1442,7 @@ public class MainActivity extends Activity
                                                             "Analyze colors",
                                                             "Delete selected",
                                                             "Auto-Link Sequential",
+                                                            "Replace tags selected",
                                                             "Cancel"
                                                     },
                                                     new DialogInterface.OnClickListener() {
@@ -1452,6 +1454,7 @@ public class MainActivity extends Activity
                                                             else if (which == 4) showColorAnalysisDialog();
                                                             else if (which == 5) showBatchDeleteDialog();
                                                             else if (which == 6) showAutoLinkSequentialDialog();
+                                                            else if (which == 7) showReplaceTagsDialog();
                                                             else exitActiveSelectMode();
                                                         }
                                                     })
@@ -2830,6 +2833,7 @@ public class MainActivity extends Activity
             case GAME_UNDO_ROUND: undoBatchGameRound(); break;
             case GAME_EXIT: exitBatchGame(false); break;
             case GAME_RESUME: startBatchGame(); break;
+            case REPLACE_TAGS: showReplaceTagsDialog(); break;
             case OPEN_GALLERY: setGalleryMode(true, true); break;
             case TOGGLE_GALLERY: setGalleryMode(!galleryModeActive, true); break;
             case OPEN_DASHBOARD: openDashboard(); break;
@@ -3206,6 +3210,107 @@ public class MainActivity extends Activity
             }
         }
         Toast.makeText(this, "No unfinished Smart pile found", Toast.LENGTH_SHORT).show();
+    }
+
+    private void showReplaceTagsDialog() {
+        final List<String> paths = getActiveSelectedPaths();
+        if (paths.isEmpty() && currentFileReference() != null) paths.add(currentFileReference().getPath());
+        final List<MediaFile> snapshot = indexer.getFullIndex();
+        final Set<String> targets = new java.util.HashSet<String>(paths);
+        if (targets.isEmpty()) {
+            Toast.makeText(this, "No files selected", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        final EditText tags = new EditText(this);
+        tags.setHint("Replacement tags, comma separated");
+        tags.setTextColor(0xFFFFFFFF);
+        form.addView(tags);
+        final Spinner rule = new Spinner(this);
+        String[] rules = {"protect", "whole_group", "overwrite"};
+        rule.setAdapter(new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_item, rules));
+        String savedRule = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("replace_sequence_rule", "whole_group");
+        for (int i = 0; i < rules.length; i++) if (rules[i].equals(savedRule)) rule.setSelection(i);
+        form.addView(rule);
+        new AlertDialog.Builder(this).setTitle("Replace tags")
+                .setMessage("Replace tags on " + targets.size() + " files")
+                .setView(form)
+                .setPositiveButton("Preview", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        final List<String> replacement = new ArrayList<String>();
+                        for (String value : tags.getText().toString().split(",")) {
+                            if (!value.trim().isEmpty()) replacement.add(value.trim());
+                        }
+                        final ReplaceTagsManager.SequenceRule selectedRule;
+                        try {
+                            selectedRule = ReplaceTagsManager.SequenceRule.valueOf(
+                                    String.valueOf(rule.getSelectedItem()).toUpperCase(java.util.Locale.US));
+                        } catch (Exception error) {
+                            Toast.makeText(MainActivity.this, "Invalid sequence rule", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        sortCoordinator.post(new SortCoordinator.Task() {
+                            @Override public void run(SortCoordinator.TaskContext context) {
+                                final ReplaceTagsManager.Report report = ReplaceTagsManager.preview(
+                                        snapshot, targets, replacement,
+                                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                                .getString("replace_sequence_patterns", "link_*,*_seq_*"),
+                                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                                .getString("replace_protect_patterns", ""),
+                                        selectedRule);
+                                mainHandler.post(new Runnable() {
+                                    @Override public void run() {
+                                        confirmReplaceTags(snapshot, targets, replacement,
+                                                selectedRule, report);
+                                    }
+                                });
+                            }
+                        });
+                    }
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void confirmReplaceTags(final List<MediaFile> snapshot, final Set<String> targets,
+                                    final List<String> replacement,
+                                    final ReplaceTagsManager.SequenceRule rule,
+                                    final ReplaceTagsManager.Report preview) {
+        String message = "Replace tags on " + preview.files + " files. Remove "
+                + preview.removedInstances + " tag instances. Sequence groups: "
+                + preview.fullySelectedGroups + " fully selected, "
+                + preview.partialGroups + " partly selected.";
+        if (getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getBoolean("replace_show_group_report", true)
+                && !preview.keptGroups.isEmpty()) {
+            message += "\nKept groups: " + preview.keptGroups;
+        }
+        new AlertDialog.Builder(this).setTitle("Confirm Replace Tags")
+                .setMessage(message)
+                .setPositiveButton("Replace", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        sortCoordinator.post(new SortCoordinator.Task() {
+                            @Override public void run(SortCoordinator.TaskContext context) {
+                                final ReplaceTagsManager.Report report = ReplaceTagsManager.apply(
+                                        snapshot, targets, replacement,
+                                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                                .getString("replace_sequence_patterns", "link_*,*_seq_*"),
+                                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                                .getString("replace_protect_patterns", ""),
+                                        rule, tagManager);
+                                mainHandler.post(new Runnable() {
+                                    @Override public void run() {
+                                        replaceTagsUndo = report.previousTags;
+                                        scheduleRefresh();
+                                        Toast.makeText(MainActivity.this, "Tags replaced on "
+                                                + report.files + " files", Toast.LENGTH_SHORT).show();
+                                    }
+                                });
+                            }
+                        });
+                    }
+                }).setNegativeButton("Cancel", null).show();
     }
 
     private void moveCurrentToSmartPile() {
@@ -3811,6 +3916,35 @@ public class MainActivity extends Activity
     }
 
     private void undoLastAction() {
+        if (replaceTagsUndo != null && !replaceTagsUndo.isEmpty()) {
+            final Map<String, List<String>> restore = replaceTagsUndo;
+            replaceTagsUndo = null;
+            final Map<String, MediaFile> filesToRestore = new java.util.HashMap<String, MediaFile>();
+            for (MediaFile file : indexer.getFullIndex()) {
+                if (file != null && restore.containsKey(file.getPath())) filesToRestore.put(file.getPath(), file);
+            }
+            sortCoordinator.post(new SortCoordinator.Task() {
+                @Override public void run(SortCoordinator.TaskContext context) {
+                    for (Map.Entry<String, List<String>> entry : restore.entrySet()) {
+                        MediaFile file = filesToRestore.get(entry.getKey());
+                        if (file == null) continue;
+                        List<String> desired = entry.getValue();
+                        for (String tag : new ArrayList<String>(file.getTags())) {
+                            if (!desired.contains(tag)) tagManager.removeTag(file, tag);
+                        }
+                        for (String tag : desired) if (!file.hasTag(tag)) tagManager.applyTag(file, tag);
+                    }
+                    mainHandler.post(new Runnable() {
+                        @Override public void run() {
+                            scheduleRefresh();
+                            Toast.makeText(MainActivity.this, "Replace Tags undone",
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                }
+            });
+            return;
+        }
         if (smartPileUndo != null && !smartPileUndo.isEmpty()) {
             final Map<String, List<String>> restore = smartPileUndo;
             smartPileUndo = null;

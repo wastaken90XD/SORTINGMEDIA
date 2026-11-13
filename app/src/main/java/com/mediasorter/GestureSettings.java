@@ -62,6 +62,7 @@ public class GestureSettings {
         GAME_UNDO_ROUND,
         GAME_EXIT,
         GAME_RESUME,
+        REPLACE_TAGS,
         CYCLE_TAG_PRESETS,
         NEXT_PAGE,
         PREVIOUS_PAGE,
