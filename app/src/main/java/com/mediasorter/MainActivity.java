@@ -146,6 +146,7 @@ public class MainActivity extends Activity
     private BatchGameEngine batchGameEngine;
     private CompareSortEngine.Question compareQuestion;
     private android.widget.LinearLayout sortModePanel;
+    private Runnable gameAfterTag;
     private volatile com.mediasorter.features.SmartSortEngine.Result smartResult;
     private volatile List<Group> smartGroups = new ArrayList<Group>();
     private final java.util.Set<String> dismissedSmartSuggestions =
@@ -3560,8 +3561,13 @@ public class MainActivity extends Activity
         tag.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
                 if (selected.isEmpty()) return;
+                gameAfterTag = new Runnable() {
+                    @Override public void run() {
+                        batchGameEngine.nextRound();
+                        startBatchGame();
+                    }
+                };
                 showQuickTagPopup(new ArrayList<MediaFile>(selected));
-                startBatchGame();
             }
         });
         none.setOnClickListener(new View.OnClickListener() {
@@ -3587,6 +3593,7 @@ public class MainActivity extends Activity
     private void undoBatchGameRound() { undoLastAction(); }
 
     private void exitBatchGame(boolean keepOrder) {
+        gameAfterTag = null;
         removeSortModePanel();
         if (sortCoordinator != null) {
             sortCoordinator.setInteractivePause(false);
@@ -6044,6 +6051,11 @@ private Spinner makeSpinner(String[] options) {
                                 targets.size() == 1 ? "Tags updated"
                                                     : "Tagged " + targets.size() + " files",
                                 Toast.LENGTH_SHORT).show();
+                        if (gameAfterTag != null) {
+                            Runnable nextRound = gameAfterTag;
+                            gameAfterTag = null;
+                            nextRound.run();
+                        }
                     }
                 })
                 .setNeutralButton("＋ New tag", new DialogInterface.OnClickListener() {
