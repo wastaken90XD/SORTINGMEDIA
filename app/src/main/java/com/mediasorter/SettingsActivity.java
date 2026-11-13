@@ -686,6 +686,11 @@ public class SettingsActivity extends Activity {
                 new OnNumericChangeListener() {
                     @Override public void onChange(int value) { saveInt("game_none_max_returns", value); }
                 }));
+        root.addView(makeNumericInputRow("Game timer seconds (0 = off):",
+                settingsPrefs.getInt("game_timer_seconds", 0), 0, 3600,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("game_timer_seconds", value); }
+                }));
         root.addView(makeSpinnerRow("Game score mode:",
                 new String[]{"none", "progress", "streak"},
                 gameScorePosition(), new OnSpinnerSelectedListener() {

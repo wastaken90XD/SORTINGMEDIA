@@ -160,6 +160,10 @@ public class MainActivity extends Activity
     private boolean compareHighResolutionLoaded;
     private Runnable gameAfterTag;
     private BatchGameEngine.Round gameRound;
+    private TextView gameTitleView;
+    private Runnable gameTimerRunnable;
+    private long gameStartedAt;
+    private int gameStreak;
     private volatile com.mediasorter.features.SmartSortEngine.Result smartResult;
     private volatile List<Group> smartGroups = new ArrayList<Group>();
     private final java.util.Set<String> dismissedSmartSuggestions =
@@ -3766,6 +3770,10 @@ public class MainActivity extends Activity
             return;
         }
         exitCompareSort(false);
+        if (gameStartedAt == 0L) {
+            gameStartedAt = android.os.SystemClock.uptimeMillis();
+            gameStreak = 0;
+        }
         if (sortCoordinator != null) sortCoordinator.setMode(SortCoordinator.Mode.GAME);
         if (sortCoordinator != null) sortCoordinator.setInteractivePause(true);
         if (smartSortEngine != null) smartSortEngine.setPaused(true);
@@ -3815,8 +3823,7 @@ public class MainActivity extends Activity
 
     private void showGameRound(final BatchGameEngine.Round round) {
         if (round == null) {
-            Toast.makeText(this, "No unfinished files", Toast.LENGTH_SHORT).show();
-            exitBatchGame(false);
+            showGameSummary();
             return;
         }
         FrameLayout preview = findViewById(R.id.previewPanel);
@@ -3827,8 +3834,10 @@ public class MainActivity extends Activity
         sortModePanel.setBackgroundColor(0xEE161622);
         TextView title = new TextView(this);
         title.setTextColor(0xFFFFFFFF);
-        title.setText("Game round " + round.number + " — select a group");
+        gameTitleView = title;
+        updateGameTitle(round);
         sortModePanel.addView(title);
+        startGameTimer();
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
         final List<MediaFile> selected = new ArrayList<MediaFile>();
@@ -3857,6 +3866,7 @@ public class MainActivity extends Activity
                 if (selected.isEmpty()) return;
                 gameAfterTag = new Runnable() {
                     @Override public void run() {
+                        gameStreak++;
                         batchGameEngine.nextRound();
                         gameRound = null;
                         saveGameSession();
@@ -3868,6 +3878,7 @@ public class MainActivity extends Activity
         });
         none.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
+                gameStreak = 0;
                 int maxReturns = getSharedPreferences("settings_prefs", MODE_PRIVATE)
                         .getInt("game_none_max_returns", 2);
                 for (MediaFile file : round.files) {
@@ -3891,6 +3902,48 @@ public class MainActivity extends Activity
                 Gravity.BOTTOM));
     }
 
+    private void updateGameTitle(BatchGameEngine.Round round) {
+        if (gameTitleView == null || round == null) return;
+        String mode = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("game_score_mode", "progress");
+        String suffix = "";
+        if ("streak".equals(mode)) suffix = "  streak " + gameStreak;
+        else if ("progress".equals(mode)) {
+            int total = fullList.size();
+            int tagged = 0;
+            for (MediaFile file : fullList) if (!file.getTags().isEmpty()) tagged++;
+            suffix = "  tagged " + tagged + "/" + total;
+        }
+        gameTitleView.setText("Game round " + round.number + " — select a group" + suffix);
+    }
+
+    private void startGameTimer() {
+        if (gameTimerRunnable != null) mainHandler.removeCallbacks(gameTimerRunnable);
+        int seconds = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getInt("game_timer_seconds", 0);
+        if (seconds <= 0) return;
+        gameTimerRunnable = new Runnable() {
+            @Override public void run() {
+                if (gameRound == null || gameTitleView == null) return;
+                updateGameTitle(gameRound);
+                mainHandler.postDelayed(this, 1000L);
+            }
+        };
+        mainHandler.post(gameTimerRunnable);
+    }
+
+    private void showGameSummary() {
+        int tagged = 0;
+        for (MediaFile file : fullList) if (file != null && !file.getTags().isEmpty()) tagged++;
+        new AlertDialog.Builder(this).setTitle("Batch Game complete")
+                .setMessage("Tagged " + tagged + " of " + fullList.size() + " files.")
+                .setPositiveButton("Close", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        exitBatchGame(false);
+                    }
+                }).show();
+    }
+
     private void submitBatchGameRound() {
         Toast.makeText(this, "Select files in the current Game round", Toast.LENGTH_SHORT).show();
     }
@@ -3900,7 +3953,11 @@ public class MainActivity extends Activity
 
     private void exitBatchGame(boolean keepOrder) {
         gameAfterTag = null;
+        if (gameTimerRunnable != null) mainHandler.removeCallbacks(gameTimerRunnable);
+        gameTimerRunnable = null;
+        gameTitleView = null;
         gameRound = null;
+        gameStartedAt = 0L;
         if (sortSessionStore != null) sortSessionStore.delete(SortSessionStore.GAME_FILE);
         removeSortModePanel();
         if (sortCoordinator != null) {
