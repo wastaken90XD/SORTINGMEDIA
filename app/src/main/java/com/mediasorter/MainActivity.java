@@ -5471,8 +5471,12 @@ private Spinner makeSpinner(String[] options) {
                 .setMessage(file.getName())
                 .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) {
-                        boolean deleted = indexer.deleteFile(file.getPath());
+                        String removedPath = file.getPath();
+                        boolean deleted = indexer.deleteFile(removedPath);
                         if (deleted) {
+                            Set<String> removed = new java.util.HashSet<String>();
+                            removed.add(removedPath);
+                            onPathsChanged(null, removed);
                             // Full refresh rebuilds everything consistently
                             scheduleRefresh();
                             Toast.makeText(MainActivity.this, "Deleted", Toast.LENGTH_SHORT).show();
@@ -5542,6 +5546,7 @@ private Spinner makeSpinner(String[] options) {
                             final int missing = skipped[0];
                             mainHandler.post(new Runnable() {
                                 @Override public void run() {
+                                    onPathsChanged(null, new java.util.HashSet<String>(selectionPaths));
                                     exitActiveSelectMode();
                                     btnScan.setText("SCAN");
                                     btnScan.setOnClickListener(new View.OnClickListener() {
@@ -6491,7 +6496,12 @@ private Spinner makeSpinner(String[] options) {
                                 return;
                             }
                             if (src.renameTo(dst)) {
-                                file.setPath(dst.getAbsolutePath());
+                                String oldPath = file.getPath();
+                                String newPath = dst.getAbsolutePath();
+                                file.setPath(newPath);
+                                Map<String, String> changed = new java.util.HashMap<String, String>();
+                                changed.put(oldPath, newPath);
+                                onPathsChanged(changed, null);
                                 scheduleRefresh();
                                 Toast.makeText(MainActivity.this, "File renamed successfully", Toast.LENGTH_SHORT).show();
                             } else {
