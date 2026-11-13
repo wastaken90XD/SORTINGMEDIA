@@ -47,6 +47,7 @@ public final class CompareSortEngine {
         int high;
         int mid;
         Answer answer;
+        boolean inserted;
     }
 
     private final Random random = new Random();
@@ -89,7 +90,12 @@ public final class CompareSortEngine {
         if (!initialized || isFinished()) return null;
         if (current == null) beginNext();
         if (current == null) return null;
-        if (sorted.isEmpty()) return null;
+        if (sorted.isEmpty()) {
+            finishCurrent(0);
+            if (pool.isEmpty()) return null;
+            beginNext();
+        }
+        if (current == null || sorted.isEmpty()) return null;
         int mid = low + ((high - low) / 2);
         String compared = sorted.get(Math.max(0, Math.min(sorted.size() - 1, mid)));
         leftIsCandidate = random.nextBoolean();
@@ -121,9 +127,16 @@ public final class CompareSortEngine {
             high = mid;
         } else {
             if (!unsure.contains(current)) unsure.add(current);
+            record.mid = mid;
             finishCurrent(mid);
+            record.inserted = true;
         }
-        if (current != null && (high <= low || sorted.size() == 0)) finishCurrent(low);
+        if (current != null && (high <= low || sorted.size() == 0)) {
+            int insertion = low;
+            finishCurrent(insertion);
+            record.mid = insertion;
+            record.inserted = true;
+        }
         else if (recheckEvery > 0 && questionCount % recheckEvery == 0) {
             // Rechecks are represented as an unsure pair; the next insertion
             // remains deterministic and the review list can revisit it later.
@@ -151,6 +164,18 @@ public final class CompareSortEngine {
     public boolean undo() {
         if (undo.isEmpty()) return false;
         AnswerRecord record = undo.remove(undo.size() - 1);
+        if (record.inserted) {
+            int position = Math.max(0, Math.min(sorted.size() - 1, record.mid));
+            if (position < sorted.size() && record.candidate.equals(sorted.get(position))) {
+                sorted.remove(position);
+                current = record.candidate;
+                low = record.low;
+                high = record.high;
+                if (record.answer == Answer.SKIP) unsure.remove(current);
+                return true;
+            }
+            return false;
+        }
         if (current == null || !record.candidate.equals(current)) return false;
         low = record.low;
         high = record.high;

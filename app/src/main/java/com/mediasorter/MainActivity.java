@@ -35,6 +35,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.LinearLayout;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.CheckBox;
 import android.widget.Toast;
 import androidx.recyclerview.widget.GridLayoutManager;
@@ -3341,14 +3342,31 @@ public class MainActivity extends Activity
         title.setText("Compare: question " + compareQuestion.questionNumber
                 + " / " + compareQuestion.totalFiles);
         sortModePanel.addView(title);
+        final String leftPath = compareQuestion.candidateOnLeft
+                ? compareQuestion.candidatePath : compareQuestion.comparedPath;
+        final String rightPath = compareQuestion.candidateOnLeft
+                ? compareQuestion.comparedPath : compareQuestion.candidatePath;
+        LinearLayout imageRow = new LinearLayout(this);
+        imageRow.setOrientation(LinearLayout.HORIZONTAL);
+        ImageView leftImage = new ImageView(this);
+        ImageView rightImage = new ImageView(this);
+        leftImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        rightImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        leftImage.setBackgroundColor(0xFF252538);
+        rightImage.setBackgroundColor(0xFF252538);
+        MediaFile leftFile = findFileByPath(leftPath);
+        MediaFile rightFile = findFileByPath(rightPath);
+        if (leftFile != null && thumbnailLoader != null) thumbnailLoader.load(leftFile, leftImage);
+        if (rightFile != null && thumbnailLoader != null) thumbnailLoader.load(rightFile, rightImage);
+        imageRow.addView(leftImage, new LinearLayout.LayoutParams(0, 150, 1f));
+        imageRow.addView(rightImage, new LinearLayout.LayoutParams(0, 150, 1f));
+        sortModePanel.addView(imageRow);
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        Button left = makeSmallButton("A: " + fileName(compareQuestion.candidateOnLeft
-                ? compareQuestion.candidatePath : compareQuestion.comparedPath));
-        Button right = makeSmallButton("B: " + fileName(compareQuestion.candidateOnLeft
-                ? compareQuestion.comparedPath : compareQuestion.candidatePath));
-        row.addView(left, new LinearLayout.LayoutParams(0, 72, 1f));
-        row.addView(right, new LinearLayout.LayoutParams(0, 72, 1f));
+        Button left = makeSmallButton("Pick A: " + fileName(leftPath));
+        Button right = makeSmallButton("Pick B: " + fileName(rightPath));
+        row.addView(left, new LinearLayout.LayoutParams(0, 56, 1f));
+        row.addView(right, new LinearLayout.LayoutParams(0, 56, 1f));
         sortModePanel.addView(row);
         LinearLayout controls = new LinearLayout(this);
         Button same = makeSmallButton("Same");
