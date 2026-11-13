@@ -24,6 +24,7 @@ public final class ReplaceTagsManager {
         public final List<String> keptGroups = new ArrayList<String>();
         public final Map<String, List<String>> previousTags =
                 new LinkedHashMap<String, List<String>>();
+        public final List<String> purgedGroups = new ArrayList<String>();
     }
 
     private ReplaceTagsManager() {}
@@ -32,11 +33,20 @@ public final class ReplaceTagsManager {
                                List<String> replacementTags, String sequencePatterns,
                                String protectPatterns, SequenceRule rule,
                                TagManager tagManager) {
+        return apply(fullSnapshot, targetPaths, replacementTags, sequencePatterns,
+                protectPatterns, rule, tagManager, false);
+    }
+
+    public static Report apply(List<MediaFile> fullSnapshot, Set<String> targetPaths,
+                               List<String> replacementTags, String sequencePatterns,
+                               String protectPatterns, SequenceRule rule,
+                               TagManager tagManager, boolean purgeGroupTags) {
         Report report = new Report();
         if (fullSnapshot == null || targetPaths == null || tagManager == null) return report;
         List<SearchManager.QueryParser> sequenceQueries = compilePatterns(sequencePatterns);
         List<SearchManager.QueryParser> protectQueries = compilePatterns(protectPatterns);
         Map<String, Set<String>> groups = new LinkedHashMap<String, Set<String>>();
+        Map<String, Set<String>> groupTags = new LinkedHashMap<String, Set<String>>();
         Map<String, Set<String>> fileGroups = new HashMap<String, Set<String>>();
         for (MediaFile file : fullSnapshot) {
             if (file == null || file.getPath() == null) continue;
@@ -49,6 +59,9 @@ public final class ReplaceTagsManager {
                     groups.put(key, members);
                 }
                 members.add(file.getPath());
+                Set<String> tagValues = groupTags.get(key);
+                if (tagValues == null) { tagValues = new HashSet<String>(); groupTags.put(key, tagValues); }
+                tagValues.add(tag);
                 Set<String> keys = fileGroups.get(file.getPath());
                 if (keys == null) {
                     keys = new HashSet<String>();
@@ -103,6 +116,26 @@ public final class ReplaceTagsManager {
                 }
             }
             for (String tag : keep) if (!file.hasTag(tag)) tagManager.applyTag(file, tag);
+        }
+        if (purgeGroupTags) {
+            for (Map.Entry<String, Set<String>> entry : groupTags.entrySet()) {
+                boolean remains = false;
+                for (MediaFile file : fullSnapshot) {
+                    if (file == null) continue;
+                    for (String tag : file.getTags()) {
+                        if (matchesAny(tag, sequenceQueries)
+                                && entry.getKey().equals(groupKey(tag))) {
+                            remains = true;
+                            break;
+                        }
+                    }
+                    if (remains) break;
+                }
+                if (!remains) {
+                    for (String tag : entry.getValue()) tagManager.deleteTag(tag);
+                    report.purgedGroups.add(entry.getKey());
+                }
+            }
         }
         return report;
     }

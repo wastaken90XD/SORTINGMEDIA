@@ -3311,13 +3311,18 @@ public class MainActivity extends Activity
                                                 .getString("replace_sequence_patterns", "link_*,*_seq_*"),
                                         getSharedPreferences("settings_prefs", MODE_PRIVATE)
                                                 .getString("replace_protect_patterns", ""),
-                                        rule, tagManager);
+                                        rule, tagManager,
+                                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                                .getBoolean("replace_purge_group_tags", false));
                                 mainHandler.post(new Runnable() {
                                     @Override public void run() {
                                         replaceTagsUndo = report.previousTags;
                                         scheduleRefresh();
                                         Toast.makeText(MainActivity.this, "Tags replaced on "
-                                                + report.files + " files", Toast.LENGTH_SHORT).show();
+                                                + report.files + " files"
+                                                + (report.purgedGroups.isEmpty() ? "" : " (purged "
+                                                + report.purgedGroups.size() + " groups)"),
+                                                Toast.LENGTH_SHORT).show();
                                     }
                                 });
                             }
