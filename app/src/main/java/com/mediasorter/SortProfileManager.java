@@ -13,6 +13,20 @@ public final class SortProfileManager {
     private static final String KEY = "sort_profiles";
     private static final String INDEX = "sort_profile_index";
     private static final String[] BUILT_INS = {"Fast", "Balanced", "Careful", "Low memory"};
+    private static final Set<String> PROFILE_KEYS = new HashSet<String>(Arrays.asList(
+            "smart_chunk_ms", "smart_pass_budget_ms", "smart_k_neighbors", "smart_random_fraction",
+            "smart_max_pool", "smart_use_video_frames", "rerank_idle_ms",
+            "compare_layout", "compare_question", "compare_randomize_sides",
+            "compare_recheck_every", "compare_sync_zoom", "compare_show_caption",
+            "compare_caption_fields", "compare_volume_pick", "compare_video_muted",
+            "compare_warn_questions", "compare_undo_depth", "compare_prefetch",
+            "compare_hires_on_zoom", "game_batch_size", "game_batch_adaptive",
+            "game_decoys", "game_probe_every", "game_none_cooldown",
+            "game_none_max_returns", "game_order_min_group", "game_score_mode",
+            "game_timer_seconds", "game_prompt_text", "sort_dupes_mode",
+            "replace_sequence_rule", "replace_sequence_patterns", "replace_protect_patterns",
+            "replace_confirm_sequence_overwrite", "replace_show_group_report",
+            "replace_purge_group_tags"));
     private final SharedPreferences prefs;
 
     public SortProfileManager(Context context) {
@@ -24,6 +38,52 @@ public final class SortProfileManager {
         applyBuiltIn(index);
         prefs.edit().putInt(INDEX, index).apply();
         return BUILT_INS[index];
+    }
+
+    /** Cycles through built-ins and validated custom JSON profiles. */
+    public String nextProfile() {
+        JSONArray custom = getCustomProfiles();
+        int total = BUILT_INS.length + custom.length();
+        if (total <= 0) return "Balanced";
+        int index = (prefs.getInt(INDEX, -1) + 1) % total;
+        String name;
+        if (index < BUILT_INS.length) {
+            applyBuiltIn(index);
+            name = BUILT_INS[index];
+        } else {
+            JSONObject profile = custom.optJSONObject(index - BUILT_INS.length);
+            name = applyCustom(profile, index - BUILT_INS.length);
+        }
+        prefs.edit().putInt(INDEX, index).apply();
+        return name;
+    }
+
+    private String applyCustom(JSONObject profile, int index) {
+        if (profile == null) return "Custom " + (index + 1);
+        JSONObject values = profile.optJSONObject("settings");
+        if (values == null) values = profile;
+        SharedPreferences.Editor editor = prefs.edit();
+        java.util.Iterator<String> keys = values.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            if (!PROFILE_KEYS.contains(key)) continue;
+            Object value = values.opt(key);
+            if (value instanceof Boolean) editor.putBoolean(key, (Boolean) value);
+            else if (value instanceof Number) {
+                double number = ((Number) value).doubleValue();
+                if (number == Math.rint(number) && number >= Integer.MIN_VALUE
+                        && number <= Integer.MAX_VALUE) {
+                    editor.putInt(key, (int) number);
+                } else {
+                    editor.putFloat(key, (float) number);
+                }
+            } else if (value != null && value != JSONObject.NULL) {
+                editor.putString(key, String.valueOf(value));
+            }
+        }
+        editor.apply();
+        String name = profile.optString("name", "").trim();
+        return name.isEmpty() ? "Custom " + (index + 1) : name;
     }
 
     public void applyBuiltIn(int index) {

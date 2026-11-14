@@ -3530,7 +3530,7 @@ public class MainActivity extends Activity
 
     private void applyNextSortProfile() {
         if (sortProfileManager == null) return;
-        String name = sortProfileManager.nextBuiltIn();
+        String name = sortProfileManager.nextProfile();
         Toast.makeText(this, "Sorting profile applied: " + name, Toast.LENGTH_SHORT).show();
         scheduleRefresh();
     }
