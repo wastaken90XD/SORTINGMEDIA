@@ -781,7 +781,7 @@ public class SettingsActivity extends Activity {
                 }));
         root.addView(makeTitle("Replace Tags"));
         root.addView(makeSpinnerRow("Sequence rule:",
-                new String[]{"protect", "whole_group", "overwrite"},
+                new String[]{"protect", "whole_group", "overwrite", "keep_first"},
                 replaceRulePosition(), new OnSpinnerSelectedListener() {
                     @Override public void onSelected(String value, int position) {
                         saveString("replace_sequence_rule", value);
@@ -815,6 +815,7 @@ public class SettingsActivity extends Activity {
         String value = settingsPrefs.getString("replace_sequence_rule", "whole_group");
         if ("protect".equals(value)) return 0;
         if ("overwrite".equals(value)) return 2;
+        if ("keep_first".equals(value)) return 3;
         return 1;
     }
 
