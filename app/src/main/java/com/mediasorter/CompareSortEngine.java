@@ -432,6 +432,27 @@ public final class CompareSortEngine {
             object.put("randomize_sides", randomizeSides);
             object.put("undo_depth", maxUndoDepth);
             object.put("unsure", toJsonArray(unsure));
+            JSONArray undoRecords = new JSONArray();
+            for (AnswerRecord record : undo) {
+                JSONObject value = new JSONObject();
+                value.put("candidate", record.candidate);
+                value.put("compared", record.compared);
+                value.put("low", record.low);
+                value.put("high", record.high);
+                value.put("mid", record.mid);
+                value.put("answer", record.answer == null ? "" : record.answer.name());
+                value.put("inserted", record.inserted);
+                undoRecords.put(value);
+            }
+            object.put("undo_records", undoRecords);
+            if (pendingRecheck != null) {
+                JSONObject pending = new JSONObject();
+                pending.put("candidate", pendingRecheck.candidate);
+                pending.put("compared", pendingRecheck.compared);
+                pending.put("answer", pendingRecheck.answer == null ? ""
+                        : pendingRecheck.answer.name());
+                object.put("pending_recheck", pending);
+            }
             JSONArray pairs = new JSONArray();
             for (UncertainPair pair : unsurePairs) {
                 JSONObject value = new JSONObject();
@@ -480,6 +501,41 @@ public final class CompareSortEngine {
         randomizeSides = object.optBoolean("randomize_sides", randomizeSides);
         maxUndoDepth = Math.max(1, Math.min(500, object.optInt("undo_depth", maxUndoDepth)));
         restore(state);
+        JSONArray savedUndo = object.optJSONArray("undo_records");
+        if (savedUndo != null) for (int i = 0; i < savedUndo.length(); i++) {
+            JSONObject value = savedUndo.optJSONObject(i);
+            if (value == null) continue;
+            String candidate = value.optString("candidate", "");
+            String compared = value.optString("compared", "");
+            if (!existingPaths.contains(candidate) || !existingPaths.contains(compared)) continue;
+            AnswerRecord record = new AnswerRecord();
+            record.candidate = candidate;
+            record.compared = compared;
+            record.low = value.optInt("low", 0);
+            record.high = value.optInt("high", 0);
+            record.mid = value.optInt("mid", 0);
+            try { record.answer = Answer.valueOf(value.optString("answer", "")); }
+            catch (Exception ignored) { continue; }
+            record.inserted = value.optBoolean("inserted", false);
+            undo.add(record);
+        }
+        trimUndo();
+        JSONObject pending = object.optJSONObject("pending_recheck");
+        if (pending != null) {
+            String candidate = pending.optString("candidate", "");
+            String compared = pending.optString("compared", "");
+            if (existingPaths.contains(candidate) && existingPaths.contains(compared)) {
+                pendingRecheck = new AnswerRecord();
+                pendingRecheck.candidate = candidate;
+                pendingRecheck.compared = compared;
+                try {
+                    pendingRecheck.answer = Answer.valueOf(pending.optString("answer", ""));
+                } catch (Exception ignored) {
+                    pendingRecheck = null;
+                }
+            }
+        }
+        rechecking = false;
     }
 
     /** Remap a live session after an organizer rename or delete. */
