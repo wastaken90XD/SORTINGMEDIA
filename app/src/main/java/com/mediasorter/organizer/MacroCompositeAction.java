@@ -19,6 +19,7 @@ public class MacroCompositeAction extends Action {
     private int failedStepIndex = -1;
     private boolean lastUndoPartial;
     private String lastCopiedPath;
+    private String lastTrashPath;
     private final Map<String, Snapshot> snapshots = new HashMap<String, Snapshot>();
 
     private static class Snapshot {
@@ -41,6 +42,7 @@ public class MacroCompositeAction extends Action {
     public int getFailedStepIndex() { return failedStepIndex; }
     public boolean wasLastUndoPartial() { return lastUndoPartial; }
     public String getLastCopiedPath() { return lastCopiedPath; }
+    public String getLastTrashPath() { return lastTrashPath; }
 
     @Override public String describe() {
         return "Composite macro of " + actions.size() + " steps";
@@ -51,6 +53,7 @@ public class MacroCompositeAction extends Action {
                            BatchRenameManager renamer, FileStatus fileStatus) {
         failedStepIndex = -1;
         lastCopiedPath = null;
+        lastTrashPath = null;
         if (file == null || actions.isEmpty()) return false;
         Snapshot snapshot = new Snapshot(file, fileStatus);
         snapshots.put(snapshot.path, snapshot);
@@ -71,8 +74,11 @@ public class MacroCompositeAction extends Action {
             completed++;
             if (action instanceof CopyAction) {
                 lastCopiedPath = ((CopyAction) action).lastCopiedPath;
+            } else if (action instanceof DeleteAction) {
+                lastTrashPath = ((DeleteAction) action).lastMovedPath;
             } else if (action instanceof MacroCompositeAction) {
                 lastCopiedPath = ((MacroCompositeAction) action).getLastCopiedPath();
+                lastTrashPath = ((MacroCompositeAction) action).getLastTrashPath();
             }
         }
         return completed > 0;

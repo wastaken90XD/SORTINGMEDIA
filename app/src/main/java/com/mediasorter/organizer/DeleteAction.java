@@ -10,6 +10,8 @@ import java.io.File;
 public class DeleteAction extends Action {
     public boolean useTrash;
     public String trashFolder;
+    /** Destination from the last successful trash move, for organizer undo. */
+    public String lastMovedPath;
 
     public DeleteAction(boolean useTrash, String trashFolder) {
         this.useTrash = useTrash;
@@ -24,12 +26,14 @@ public class DeleteAction extends Action {
     @Override
     public boolean execute(MediaFile file, Context context,
             TagManager tagManager, BatchRenameManager renamer, FileStatus fileStatus) {
+        lastMovedPath = null;
         File src = new File(file.getPath());
         if (useTrash && trashFolder != null && !trashFolder.isEmpty()) {
             File destDir = new File(trashFolder);
             if (!destDir.exists()) destDir.mkdirs();
             File destFile = new File(destDir, src.getName());
             if (src.renameTo(destFile)) {
+                lastMovedPath = destFile.getAbsolutePath();
                 PathChangeNotifier.removed(context, file.getPath());
                 log.add("Trashed: " + src.getName());
                 return true;

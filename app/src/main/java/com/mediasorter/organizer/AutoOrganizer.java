@@ -443,15 +443,25 @@ public class AutoOrganizer {
         entry.newStatus = fileStatus.getStatus(file.getPath());
         entry.action = action;
         String copiedPath = null;
+        String movedTrashPath = null;
         if (action instanceof CopyAction) copiedPath = ((CopyAction) action).lastCopiedPath;
         else if (action instanceof MacroCompositeAction) {
             copiedPath = ((MacroCompositeAction) action).getLastCopiedPath();
         }
+        if (action instanceof DeleteAction) movedTrashPath = ((DeleteAction) action).lastMovedPath;
+        else if (action instanceof MacroCompositeAction) {
+            movedTrashPath = ((MacroCompositeAction) action).getLastTrashPath();
+        }
         if (copiedPath != null) {
             entry.wasCopied = true;
-            entry.newPath = copiedPath;
+            entry.copiedPath = copiedPath;
         }
-        if (!entry.newPath.equals(entry.originalPath) && !entry.wasCopied) {
+        if (movedTrashPath != null) {
+            entry.wasTrashed = true;
+            entry.trashPath = movedTrashPath;
+            entry.newPath = movedTrashPath;
+        }
+        if (!entry.wasTrashed && !entry.newPath.equals(entry.originalPath)) {
             if (entry.newPath.contains("/.trash/")) {
                 entry.wasTrashed = true;
                 entry.trashPath = entry.newPath;
@@ -544,6 +554,7 @@ public class AutoOrganizer {
         public FileStatus.Status newStatus;
         public boolean wasMoved;
         public boolean wasCopied;
+        public String copiedPath;
         public boolean wasTrashed;
         public String trashPath;
         public Action action;
@@ -593,9 +604,12 @@ public class AutoOrganizer {
                         restored++;
                     }
                 }
-                if (entry.wasCopied && entry.newPath != null) {
-                    File copy = new File(entry.newPath);
-                    if (copy.exists() && copy.delete()) restored++;
+                if (entry.wasCopied) {
+                    String copiedPath = entry.copiedPath == null ? entry.newPath : entry.copiedPath;
+                    if (copiedPath != null) {
+                        File copy = new File(copiedPath);
+                        if (copy.exists() && copy.delete()) restored++;
+                    }
                 }
                 if (entry.oldTags != null) {
                     String restorePath = entry.originalPath;
