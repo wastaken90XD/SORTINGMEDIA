@@ -25,6 +25,9 @@ import java.util.Set;
 
 public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> {
 
+    private RecyclerView attachedRecyclerView;
+    private boolean deferredNotifyPosted;
+
     private int colorAccent = 0xFFE94560; // default fallback
 
     public interface OnFileClickListener {
@@ -144,13 +147,49 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         if (local >= 0 && local < files.size()) notifyItemChanged(local, "status");
     }
 
+
+    private void notifyDataSetChangedNow() {
+        super.notifyDataSetChanged();
+    }
+
+    /** Defer full resets until RecyclerView is out of layout and scrolling. */
+    private void notifyDataSetChangedSafely() {
+        final RecyclerView recyclerView = attachedRecyclerView;
+        if (recyclerView == null || (!recyclerView.isComputingLayout()
+                && recyclerView.getScrollState() == RecyclerView.SCROLL_STATE_IDLE)) {
+            notifyDataSetChangedNow();
+            return;
+        }
+        if (deferredNotifyPosted) return;
+        deferredNotifyPosted = true;
+        recyclerView.post(new Runnable() {
+            @Override public void run() {
+                deferredNotifyPosted = false;
+                if (attachedRecyclerView != recyclerView) return;
+                if (recyclerView.isComputingLayout()
+                        || recyclerView.getScrollState() != RecyclerView.SCROLL_STATE_IDLE) {
+                    notifyDataSetChangedSafely();
+                } else {
+                    notifyDataSetChangedNow();
+                }
+            }
+        });
+    }
+
     @Override
     public void onAttachedToRecyclerView(@NonNull RecyclerView recyclerView) {
         super.onAttachedToRecyclerView(recyclerView);
+        attachedRecyclerView = recyclerView;
         TypedValue typedValue = new TypedValue();
         if (recyclerView.getContext().getTheme().resolveAttribute(R.attr.colorAccent, typedValue, true)) {
             colorAccent = typedValue.data;
         }
+    }
+
+    @Override
+    public void onDetachedFromRecyclerView(@NonNull RecyclerView recyclerView) {
+        if (attachedRecyclerView == recyclerView) attachedRecyclerView = null;
+        super.onDetachedFromRecyclerView(recyclerView);
     }
 
     public void setSelectionListener(OnSelectionChangedListener l) {
@@ -174,7 +213,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         collapsedGroups.clear();
         displayItems.clear();
         this.files = newFiles == null ? new ArrayList<MediaFile>() : new ArrayList<>(newFiles);
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
     }
 
     /** Explorer model with one independent appearance for each group member. */
@@ -186,7 +225,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         rebuildGroupedDisplay();
         selected.clear();
         for (String path : previousSelected) selected.add(appearanceKeyForPath(path));
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
     }
 
     private void rebuildGroupedDisplay() {
@@ -236,7 +275,7 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
         if (collapsedGroups.contains(label)) collapsedGroups.remove(label);
         else collapsedGroups.add(label);
         rebuildGroupedDisplay();
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
     }
 
     public void addFile(MediaFile file) {
@@ -390,14 +429,14 @@ public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.ViewHolder> 
     public void enterSelectMode() {
         selectMode = true;
         selected.clear();
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
         if (selectionListener != null) selectionListener.onSelectionChanged(0);
     }
 
     public void exitSelectMode() {
         selectMode = false;
         selected.clear();
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
         if (selectionListener != null) selectionListener.onSelectionChanged(0);
     }
 

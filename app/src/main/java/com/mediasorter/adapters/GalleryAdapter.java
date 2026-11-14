@@ -32,6 +32,9 @@ import java.util.Set;
 /** RecyclerView cell presentation for MainActivity's gallery mode. */
 public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHolder> {
 
+    private RecyclerView attachedRecyclerView;
+    private boolean deferredNotifyPosted;
+
     public interface Listener {
         void onGalleryFileClick(MediaFile file);
         void onGallerySelectionChanged(int count);
@@ -140,7 +143,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     public void setLowMemory(boolean low) {
         lowMemory = low;
         refreshBadgeSettings();
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
     }
 
     public void refreshBadgeSettings() {
@@ -148,7 +151,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         showTagBadge = !lowMemory && prefs.getBoolean("gallery_show_tag_count", true);
         showFlagBadge = !lowMemory && prefs.getBoolean("gallery_show_flag", true);
         showSequenceBadge = !lowMemory && prefs.getBoolean("gallery_show_seq", true);
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
     }
 
     public void setFastScrolling(boolean fast, int first, int last) {
@@ -164,7 +167,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         smartTotals = totals == null ? new HashMap<String, Integer>()
                 : new HashMap<String, Integer>(totals);
         showSmartPosition = show;
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
     }
 
     public void reloadVisibleThumbnails(RecyclerView recyclerView) {
@@ -260,14 +263,14 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
 
     public void setColumns(int value) {
         columns = Math.max(1, Math.min(6, value));
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
     }
 
     public int getColumns() { return columns; }
 
     public void setSpacingDp(int value) {
         spacingDp = Math.max(0, Math.min(16, value));
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
     }
 
     public void setFiles(List<MediaFile> value) {
@@ -280,7 +283,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         groupedGroups = new ArrayList<Group>();
         displayItems.clear();
         files = value == null ? new ArrayList<MediaFile>() : new ArrayList<>(value);
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
     }
 
     /** Gallery section model. Headers are full-width divider rows in MainActivity's grid. */
@@ -303,7 +306,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         }
         selected.clear();
         for (String path : previousSelected) selected.add(firstAppearanceKey(path));
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
     }
 
     /** Rebind only the visible appearances of one file after a tag/status edit. */
@@ -384,13 +387,13 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
 
     public void enterSelectMode() {
         selectMode = true;
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
     }
 
     public void exitSelectMode() {
         selectMode = false;
         selected.clear();
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
         notifySelectionChanged();
     }
 
@@ -430,7 +433,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
             }
         }
         selectMode = !selected.isEmpty();
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
         notifySelectionChanged();
     }
 
@@ -460,7 +463,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         if (path == null) return;
         selectMode = true;
         if (selected.add(firstAppearanceKey(path))) {
-            notifyDataSetChanged();
+            notifyDataSetChangedSafely();
             notifySelectionChanged();
         }
     }
@@ -470,7 +473,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         selectMode = true;
         if (selected.contains(selectionKey)) selected.remove(selectionKey);
         else selected.add(selectionKey);
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
         notifySelectionChanged();
     }
 
@@ -488,13 +491,13 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
         } else {
             for (MediaFile file : files) selected.add(file.getPath());
         }
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
         notifySelectionChanged();
     }
 
     public void deselectAll() {
         selected.clear();
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
         notifySelectionChanged();
     }
 
@@ -513,7 +516,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
                 else selected.add(file.getPath());
             }
         }
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
         notifySelectionChanged();
     }
 
@@ -524,7 +527,7 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
                 if (file != null) selected.add(firstAppearanceKey(file.getPath()));
             }
         }
-        notifyDataSetChanged();
+        notifyDataSetChangedSafely();
         notifySelectionChanged();
     }
 
@@ -533,6 +536,47 @@ public class GalleryAdapter extends RecyclerView.Adapter<GalleryAdapter.ViewHold
     }
 
     // ── RecyclerView ──────────────────────────────────────────────────────────
+
+
+    @Override
+    public void onAttachedToRecyclerView(@NonNull RecyclerView recyclerView) {
+        super.onAttachedToRecyclerView(recyclerView);
+        attachedRecyclerView = recyclerView;
+    }
+
+    @Override
+    public void onDetachedFromRecyclerView(@NonNull RecyclerView recyclerView) {
+        if (attachedRecyclerView == recyclerView) attachedRecyclerView = null;
+        super.onDetachedFromRecyclerView(recyclerView);
+    }
+
+    private void notifyDataSetChangedNow() {
+        super.notifyDataSetChanged();
+    }
+
+    /** Defer full resets until RecyclerView is out of layout and scrolling. */
+    private void notifyDataSetChangedSafely() {
+        final RecyclerView recyclerView = attachedRecyclerView;
+        if (recyclerView == null || (!recyclerView.isComputingLayout()
+                && recyclerView.getScrollState() == RecyclerView.SCROLL_STATE_IDLE)) {
+            notifyDataSetChangedNow();
+            return;
+        }
+        if (deferredNotifyPosted) return;
+        deferredNotifyPosted = true;
+        recyclerView.post(new Runnable() {
+            @Override public void run() {
+                deferredNotifyPosted = false;
+                if (attachedRecyclerView != recyclerView) return;
+                if (recyclerView.isComputingLayout()
+                        || recyclerView.getScrollState() != RecyclerView.SCROLL_STATE_IDLE) {
+                    notifyDataSetChangedSafely();
+                } else {
+                    notifyDataSetChangedNow();
+                }
+            }
+        });
+    }
 
     @Override
     public int getItemViewType(int position) {
