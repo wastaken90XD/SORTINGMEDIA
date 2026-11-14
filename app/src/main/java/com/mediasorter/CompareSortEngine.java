@@ -143,6 +143,7 @@ public final class CompareSortEngine {
     public boolean isStarted() { return initialized; }
     public boolean isFinished() { return initialized && current == null && pool.isEmpty(); }
     public int questionCount() { return questionCount; }
+    public int inconsistencies() { return inconsistencies; }
     public int totalFiles() { return sorted.size() + pool.size() + (current == null ? 0 : 1); }
     public List<String> getSortedPaths() { return new ArrayList<String>(sorted); }
     public List<String> getUnsurePaths() { return new ArrayList<String>(unsure); }

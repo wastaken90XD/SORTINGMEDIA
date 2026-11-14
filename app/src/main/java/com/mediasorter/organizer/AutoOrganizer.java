@@ -185,8 +185,14 @@ public class AutoOrganizer {
                 com.mediasorter.features.SmartState.suggestedTag(file.getPath()));
         resolved = resolved.replace("{smart_group_pos}", String.valueOf(
                 com.mediasorter.features.SmartState.groupPosition(file.getPath())));
-        resolved = resolved.replace("{smart_group_total}", String.valueOf(
-                com.mediasorter.features.SmartState.groupTotal(file.getPath())));
+        int compareRank = MainActivity.compareRankForPath(file.getPath());
+        int compareTotal = MainActivity.compareTotalFiles();
+        int gameRound = MainActivity.gameRoundNumber();
+        resolved = resolved.replace("{compare_rank}", compareRank < 0 ? "" : String.valueOf(compareRank));
+        resolved = resolved.replace("{compare_total}", compareTotal <= 0 ? "" : String.valueOf(compareTotal));
+        resolved = resolved.replace("{game_round}", gameRound <= 0 ? "" : String.valueOf(gameRound));
+        resolved = resolved.replace("{game_tagged}", gameRound <= 0 ? ""
+                : String.valueOf(MainActivity.gameTaggedCount()));
         Matcher tagMatcher = Pattern.compile("\\{tag:(\\d+)\\}").matcher(resolved);
         StringBuffer buffer = new StringBuffer();
         while (tagMatcher.find()) {

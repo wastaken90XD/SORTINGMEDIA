@@ -1288,6 +1288,35 @@ public class MainActivity extends Activity
             return sLatestFullList;
     }
 
+    public static int compareRankForPath(String path) {
+        MainActivity activity = activeInstance == null ? null : activeInstance.get();
+        if (activity == null || activity.compareSortEngine == null || path == null) return -1;
+        List<String> ordered = activity.compareSortEngine.getSortedPaths();
+        int index = ordered.indexOf(path);
+        return index < 0 ? -1 : index + 1;
+    }
+
+    public static int compareTotalFiles() {
+        MainActivity activity = activeInstance == null ? null : activeInstance.get();
+        return activity == null || activity.compareSortEngine == null
+                ? 0 : activity.compareSortEngine.totalFiles();
+    }
+
+    public static int gameRoundNumber() {
+        MainActivity activity = activeInstance == null ? null : activeInstance.get();
+        return activity == null || activity.gameRound == null ? 0 : activity.gameRound.number;
+    }
+
+    public static int gameTaggedCount() {
+        MainActivity activity = activeInstance == null ? null : activeInstance.get();
+        if (activity == null) return 0;
+        int count = 0;
+        for (MediaFile file : activity.fullList) {
+            if (file != null && !file.getTags().isEmpty()) count++;
+        }
+        return count;
+    }
+
     /** Latest tag snapshot for DashboardActivity (avoids giant Intent extras). */
     public static List<Tag> getLatestTagList() {
             return sLatestTagList;
@@ -1371,6 +1400,13 @@ public class MainActivity extends Activity
         compareSortEngine = new CompareSortEngine();
         batchGameEngine = new BatchGameEngine();
         searchHistory  = new SearchHistory(this);
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                context.userCheckpoint();
+                searchHistory.migrateLegacyHistory();
+                context.userCheckpoint();
+            }
+        });
         indexer.init(this);
         indexer.setListener(this);
 
@@ -2575,6 +2611,12 @@ public class MainActivity extends Activity
                         : compareSortEngine.questionCount();
                 final int compareTotal = compareSortEngine == null ? 0
                         : compareSortEngine.totalFiles();
+                final int compareUnsure = compareSortEngine == null ? 0
+                        : compareSortEngine.getUnsurePairs().size();
+                final int compareInconsistencies = compareSortEngine == null ? 0
+                        : compareSortEngine.inconsistencies();
+                final int gameScore = gameTotalScore;
+                final int gameStreakValue = gameStreak;
                 final String text = smartOn && smartSnapshot != null
                         ? "Smart: " + smartSnapshot.labeled + " tagged, "
                                 + smartSnapshot.suggested + " suggested, "
@@ -2583,8 +2625,11 @@ public class MainActivity extends Activity
                                 + finalPileSorted + " of " + finalPileTotal + " sorted" : "")
                         : mode == SortCoordinator.Mode.COMPARE
                         ? "Compare: " + compareQuestions + " of " + compareTotal + " answered"
+                                + "  unsure " + compareUnsure
+                                + "  inconsistent " + compareInconsistencies
                         : mode == SortCoordinator.Mode.GAME
                         ? "Game: " + gameTagged + " of " + countedPaths.size() + " tagged"
+                                + "  score " + gameScore + "  streak " + gameStreakValue
                         : "Total: " + totalSnapshot.size()
                                 + "  Filtered: " + countedPaths.size()
                                 + "  Tagged: " + tagged

@@ -23,10 +23,9 @@ public class SearchHistory {
 
     public SearchHistory(Context context) {
         this.prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        migrateLegacyHistory();
     }
 
-    private void migrateLegacyHistory() {
+    public void migrateLegacyHistory() {
         if (!prefs.contains(KEY_LEGACY_RECENT)) return;
         if (!prefs.contains(KEY_HISTORY)) {
             JSONArray array = new JSONArray();
