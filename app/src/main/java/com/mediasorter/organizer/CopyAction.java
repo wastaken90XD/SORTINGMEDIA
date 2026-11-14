@@ -52,6 +52,7 @@ public class CopyAction extends Action {
         try {
             copyFile(src, destFile);
             lastCopiedPath = destFile.getAbsolutePath();
+            PathChangeNotifier.added(context, lastCopiedPath);
             log.add("Copied: " + src.getName() + " to " + destFile.getParent());
             return true;
         } catch (IOException e) {

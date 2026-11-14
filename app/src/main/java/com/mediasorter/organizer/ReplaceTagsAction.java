@@ -40,8 +40,13 @@ public class ReplaceTagsAction extends Action {
         String protectPatterns = prefs == null ? ""
                 : prefs.getString("replace_protect_patterns", "");
         boolean purge = prefs != null && prefs.getBoolean("replace_purge_group_tags", false);
+        String mode = prefs == null ? "replace_with"
+                : prefs.getString("replace_mode", "replace_with");
+        int keepMax = prefs == null ? 2 : prefs.getInt("replace_keep_max", 2);
+        boolean protectPiles = prefs != null && prefs.getBoolean("replace_protect_piles", false);
         ReplaceTagsManager.apply(full, targets, replacementTags,
-                sequencePatterns, protectPatterns, rule, tagManager, purge);
+                sequencePatterns, protectPatterns, rule, tagManager, purge,
+                mode, keepMax, protectPiles);
         return true;
     }
 }

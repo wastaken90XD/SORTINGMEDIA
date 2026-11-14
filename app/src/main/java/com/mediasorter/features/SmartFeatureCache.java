@@ -103,6 +103,7 @@ public final class SmartFeatureCache {
                 out.writeInt(value.kind);
             }
             out.flush();
+            out.getFD().sync();
             out.close();
             File backup = new File(parent, file.getName() + ".bak");
             if (backup.exists()) backup.delete();

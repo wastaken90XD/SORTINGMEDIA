@@ -565,6 +565,19 @@ public class MediaIndexer {
         }
     }
 
+    /** Adds an already-created media file without rescanning its directory. */
+    public MediaFile addFilePath(String path) {
+        if (path == null) return null;
+        File file = new File(path);
+        if (!file.exists() || !file.isFile()) return null;
+        MediaFile media = buildLight(file);
+        addToIndex(media);
+        if (listener != null) {
+            try { listener.onFileFound(media); } catch (Exception ignored) {}
+        }
+        return media;
+    }
+
     public boolean deleteFile(String path) {
         File f = new File(path);
         boolean deleted = f.exists() && f.delete();

@@ -56,7 +56,7 @@ public final class SettingsExporter {
             "group_tag_mode", "group_tag_position", "group_tag_pattern", "tag_bar_width",
             "sort_dupes_mode",
             GestureSettings.KEY_MAX_GESTURE_STEPS,
-            "smart_enabled", "smart_paused", "smart_order_mode", "smart_k_neighbors",
+            "smart_enabled", "smart_paused", "smart_accept_replaces", "smart_order_mode", "smart_k_neighbors",
             "smart_suggest_threshold", "smart_min_labeled", "smart_random_fraction",
             "smart_ignore_tag_patterns", "smart_w_hash", "smart_w_folder", "smart_w_name",
             "smart_w_date", "smart_w_color", "smart_w_shape", "smart_date_tau_hours",
@@ -71,10 +71,11 @@ public final class SettingsExporter {
             "compare_recheck_every", "compare_sync_zoom", "compare_show_caption",
             "compare_caption_fields", "compare_volume_pick", "compare_video_muted",
             "compare_warn_questions", "compare_undo_depth", "compare_prefetch",
-            "compare_hires_on_zoom", "game_batch_size", "game_batch_adaptive",
+            "compare_hires_on_zoom", "game_batch_size", "game_batch_adaptive", "game_commit_mode",
             "game_decoys", "game_probe_every", "game_none_cooldown",
             "game_none_max_returns", "game_order_min_group", "game_score_mode",
             "game_timer_seconds", "game_prompt_text", "sort_profiles", "sort_profile_index",
+            "replace_mode", "replace_keep_max", "replace_confirm_min_files", "replace_protect_piles",
             "replace_sequence_rule", "replace_sequence_patterns", "replace_protect_patterns",
             "replace_confirm_sequence_overwrite", "replace_show_group_report",
             "replace_purge_group_tags"
@@ -94,6 +95,7 @@ public final class SettingsExporter {
             "compare_recheck_every", "compare_warn_questions", "compare_undo_depth",
             "game_batch_size", "game_decoys", "game_probe_every", "game_none_cooldown",
             "game_none_max_returns", "game_order_min_group", "game_timer_seconds",
+            "replace_keep_max", "replace_confirm_min_files",
             "sort_profile_index", "surprise_w_uncertain", "surprise_candidate_cap"));
 
     private static final Set<String> GESTURE_KEYS = new HashSet<String>(Arrays.asList(

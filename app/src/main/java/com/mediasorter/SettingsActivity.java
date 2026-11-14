@@ -99,7 +99,6 @@ public class SettingsActivity extends Activity {
             Toast.makeText(this, "Macro gestures converted to combos. Check Gesture Settings.",
                     Toast.LENGTH_LONG).show();
         }
-        initializeTagListDefaultsIfMissing();
         tagListManager  = new TagListManager(this);
         tagManager      = new TagManager(this);
         indexer         = new MediaIndexer();
@@ -354,18 +353,6 @@ public class SettingsActivity extends Activity {
      * constructor. Keep that first-launch default explicit and one-time, while
      * every subsequent SettingsActivity initialization remains read-only.
      */
-    private void initializeTagListDefaultsIfMissing() {
-        SharedPreferences tagPrefs = getSharedPreferences("tag_list_prefs", MODE_PRIVATE);
-        if (tagPrefs.contains("list_count")) return;
-        tagPrefs.edit()
-                .putInt("list_count", 1)
-                .putInt("active_list", 0)
-                .putString("tag_lists_name_0", "Default")
-                .putBoolean("tag_lists_default_0", true)
-                .putString("tag_lists_tags_0", "")
-                .apply();
-    }
-
     @Override
     protected void onResume() {
         super.onResume();
@@ -478,6 +465,10 @@ public class SettingsActivity extends Activity {
         root.addView(makeCheckBoxRow("Enable Smart Sort",
                 settingsPrefs.getBoolean("smart_enabled", false), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("smart_enabled", value); }
+                }));
+        root.addView(makeCheckBoxRow("Smart accept replaces existing tags",
+                settingsPrefs.getBoolean("smart_accept_replaces", false), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("smart_accept_replaces", value); }
                 }));
         root.addView(makeSpinnerRow("Smart order mode:",
                 new String[]{"queue", "arranged", "auto"},
@@ -661,6 +652,33 @@ public class SettingsActivity extends Activity {
             }
         });
         root.addView(resetSorting);
+        Button selfTest = makeButton("Run sorting self-test");
+        selfTest.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                selfTest.setEnabled(false);
+                SelfTest.runAsync(SettingsActivity.this, new SelfTest.Listener() {
+                    @Override public void onFinished(SelfTest.Result result) {
+                        selfTest.setEnabled(true);
+                        LinearLayout content = new LinearLayout(SettingsActivity.this);
+                        content.setOrientation(LinearLayout.VERTICAL);
+                        TextView summary = makeLabel("PASS: " + result.passed
+                                + "  FAIL: " + result.failed
+                                + "  NOT VERIFIED: " + result.notVerified);
+                        content.addView(summary);
+                        TextView details = makeLabel(joinSelfTestLines(result));
+                        content.addView(details);
+                        ScrollView scroll = new ScrollView(SettingsActivity.this);
+                        scroll.addView(content);
+                        new AlertDialog.Builder(SettingsActivity.this)
+                                .setTitle("Sorting self-test")
+                                .setView(scroll)
+                                .setPositiveButton("Close", null)
+                                .show();
+                    }
+                });
+            }
+        });
+        root.addView(selfTest);
         root.addView(makeTitle("Compare Sort"));
         root.addView(makeSpinnerRow("Compare layout:",
                 new String[]{"side_by_side", "stacked", "auto"},
@@ -674,7 +692,7 @@ public class SettingsActivity extends Activity {
                     @Override public void onChecked(boolean value) { saveBoolean("compare_randomize_sides", value); }
                 }));
         root.addView(makeSpinnerRow("Compare question:",
-                new String[]{"which goes first?", "which is better?", "which belongs first?"},
+                new String[]{"Which goes first?", "Which is better?", "Which belongs first?"},
                 compareQuestionPosition(), new OnSpinnerSelectedListener() {
                     @Override public void onSelected(String value, int position) {
                         saveString("compare_question", value);
@@ -689,7 +707,7 @@ public class SettingsActivity extends Activity {
                     @Override public void onChecked(boolean value) { saveBoolean("compare_show_caption", value); }
                 }));
         root.addView(makeTextInputRow("Compare caption fields:",
-                settingsPrefs.getString("compare_caption_fields", "name,size"),
+                settingsPrefs.getString("compare_caption_fields", "name,size,dims,date"),
                 new OnTextChangeListener() {
                     @Override public void onChange(String value) { saveString("compare_caption_fields", value); }
                 }));
@@ -713,12 +731,12 @@ public class SettingsActivity extends Activity {
                     @Override public void onChecked(boolean value) { saveBoolean("compare_hires_on_zoom", value); }
                 }));
         root.addView(makeNumericInputRow("Compare recheck every (0-100):",
-                settingsPrefs.getInt("compare_recheck_every", 0), 0, 100,
+                settingsPrefs.getInt("compare_recheck_every", 25), 0, 100,
                 new OnNumericChangeListener() {
                     @Override public void onChange(int value) { saveInt("compare_recheck_every", value); }
                 }));
         root.addView(makeNumericInputRow("Compare warning questions:",
-                settingsPrefs.getInt("compare_warn_questions", 100), 1, 10000,
+                settingsPrefs.getInt("compare_warn_questions", 300), 1, 10000,
                 new OnNumericChangeListener() {
                     @Override public void onChange(int value) { saveInt("compare_warn_questions", value); }
                 }));
@@ -729,8 +747,14 @@ public class SettingsActivity extends Activity {
                 }));
         root.addView(makeTitle("Batch Game"));
         root.addView(makeCheckBoxRow("Adaptive Game batch size",
-                settingsPrefs.getBoolean("game_batch_adaptive", false), new OnCheckedChangeListener() {
+                settingsPrefs.getBoolean("game_batch_adaptive", true), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("game_batch_adaptive", value); }
+                }));
+        root.addView(makeSpinnerRow("Game commit mode:",
+                new String[]{"add", "replace"},
+                "replace".equals(settingsPrefs.getString("game_commit_mode", "add")) ? 1 : 0,
+                new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) { saveString("game_commit_mode", value); }
                 }));
         root.addView(makeTextInputRow("Game prompt text:",
                 settingsPrefs.getString("game_prompt_text", "Group these files and choose a tag"),
@@ -738,7 +762,7 @@ public class SettingsActivity extends Activity {
                     @Override public void onChange(String value) { saveString("game_prompt_text", value); }
                 }));
         root.addView(makeNumericInputRow("Minimum files for Game order:",
-                settingsPrefs.getInt("game_order_min_group", 4), 1, 12,
+                settingsPrefs.getInt("game_order_min_group", 3), 1, 12,
                 new OnNumericChangeListener() {
                     @Override public void onChange(int value) { saveInt("game_order_min_group", value); }
                 }));
@@ -780,6 +804,26 @@ public class SettingsActivity extends Activity {
                     }
                 }));
         root.addView(makeTitle("Replace Tags"));
+        root.addView(makeSpinnerRow("Replace mode:",
+                new String[]{"replace_with", "keep_only"},
+                "keep_only".equals(settingsPrefs.getString("replace_mode", "replace_with")) ? 1 : 0,
+                new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) { saveString("replace_mode", value); }
+                }));
+        root.addView(makeNumericInputRow("Keep tags maximum (1-5):",
+                settingsPrefs.getInt("replace_keep_max", 2), 1, 5,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("replace_keep_max", value); }
+                }));
+        root.addView(makeNumericInputRow("Confirm over this many files (0-100):",
+                settingsPrefs.getInt("replace_confirm_min_files", 2), 0, 100,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("replace_confirm_min_files", value); }
+                }));
+        root.addView(makeCheckBoxRow("Protect Smart pile tags",
+                settingsPrefs.getBoolean("replace_protect_piles", false), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("replace_protect_piles", value); }
+                }));
         root.addView(makeSpinnerRow("Sequence rule:",
                 new String[]{"protect", "whole_group", "overwrite", "keep_first"},
                 replaceRulePosition(), new OnSpinnerSelectedListener() {
@@ -811,6 +855,15 @@ public class SettingsActivity extends Activity {
                 }));
     }
 
+    private String joinSelfTestLines(SelfTest.Result result) {
+        StringBuilder text = new StringBuilder();
+        if (result != null) for (String line : result.lines) text.append(line).append('\n');
+        if (result != null && result.reportFile != null) {
+            text.append("\nSaved: ").append(result.reportFile.getAbsolutePath());
+        }
+        return text.toString();
+    }
+
     private int replaceRulePosition() {
         String value = settingsPrefs.getString("replace_sequence_rule", "whole_group");
         if ("protect".equals(value)) return 0;
@@ -827,16 +880,16 @@ public class SettingsActivity extends Activity {
     }
 
     private int compareQuestionPosition() {
-        String value = settingsPrefs.getString("compare_question", "which goes first?");
-        if ("which is better?".equals(value)) return 1;
-        if ("which belongs first?".equals(value)) return 2;
+        String value = settingsPrefs.getString("compare_question", "Which goes first?");
+        if ("Which is better?".equals(value)) return 1;
+        if ("Which belongs first?".equals(value)) return 2;
         return 0;
     }
 
     private int compareVolumePosition() {
         Object raw = settingsPrefs.getAll().get("compare_volume_pick");
         String value = raw instanceof String ? (String) raw
-                : raw instanceof Boolean && ((Boolean) raw).booleanValue()
+                : raw == null || raw instanceof Boolean && ((Boolean) raw).booleanValue()
                 ? "up_left_down_right" : "off";
         if ("up_left_down_right".equals(value)) return 1;
         if ("up_right_down_left".equals(value)) return 2;
@@ -2220,7 +2273,7 @@ public class SettingsActivity extends Activity {
                                     if (res.isSuccess) {
                                         // MainActivity reconciles newly imported folders when this
                                         // screen finishes; this Activity does not restart itself.
-                                        String summary = "Import complete — " 
+                                        String summary = "Import complete — "
                                                 + res.preferencesCount + " preferences, "
                                                 + res.foldersCount + " folders, "
                                                 + res.rulesCount + " rules, "
@@ -3233,7 +3286,7 @@ public class SettingsActivity extends Activity {
             }
         });
         layout.addView(btnAddToList);
-        
+
         Button btnBulkAdd = makeButton("Add all tags from scanned files");
         btnBulkAdd.setOnClickListener(new View.OnClickListener() {
             @Override

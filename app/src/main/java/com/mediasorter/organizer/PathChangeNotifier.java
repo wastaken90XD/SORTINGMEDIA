@@ -30,4 +30,14 @@ public final class PathChangeNotifier {
             @Override public void run() { activity.onPathsChanged(null, removed); }
         });
     }
+
+    public static void added(Context context, final String path) {
+        if (!(context instanceof MainActivity) || path == null) return;
+        final MainActivity activity = (MainActivity) context;
+        final Set<String> added = new HashSet<String>();
+        added.add(path);
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() { activity.onPathsAdded(added); }
+        });
+    }
 }

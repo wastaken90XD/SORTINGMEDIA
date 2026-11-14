@@ -915,7 +915,7 @@ public class MainActivity extends Activity
         if (raw instanceof String) return (String) raw;
         // Older profile resets stored this key as a Boolean. Read it without
         // throwing ClassCastException and keep the old enabled meaning.
-        if (raw instanceof Boolean && ((Boolean) raw).booleanValue()) {
+        if (raw == null || raw instanceof Boolean && ((Boolean) raw).booleanValue()) {
             return "up_left_down_right";
         }
         return "off";
@@ -1357,6 +1357,13 @@ public class MainActivity extends Activity
                     }
                 });
         smartSortEngine.setCoordinator(sortCoordinator);
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                context.userCheckpoint();
+                gestureSettings.migrateIfNeeded();
+                context.userCheckpoint();
+            }
+        });
         featureStore = new FeatureStore(this);
         smartSortEngine.setFeatureStore(featureStore);
         sortSessionStore = new SortSessionStore(this);
@@ -1369,33 +1376,9 @@ public class MainActivity extends Activity
 
         // Auto-refresh tag list on any change
         tagManager.setTagChangeListener(new TagManager.TagChangeListener() {
-            @Override public void onTagsChanged() {
-                mainHandler.post(new Runnable() {
-                    @Override public void run() {
-                        if (tagAdapter != null) tagAdapter.setTags(getOrderedTagChoices(getTagMenuTargets()));
-                        boolean removedGhost = reconcileDeletedTagFilters();
-                        refreshTagBar();
-                        if (removedGhost) scheduleRefresh();
-                        if (smartSortEngine != null && getSharedPreferences(
-                                "settings_prefs", MODE_PRIVATE).getBoolean("smart_enabled", false)) {
-                            if (smartRerankRunnable != null) mainHandler.removeCallbacks(smartRerankRunnable);
-                            smartRerankRunnable = new Runnable() {
-                                @Override public void run() {
-                                    smartRerankRunnable = null;
-                                    if (smartSortEngine != null && getSharedPreferences(
-                                            "settings_prefs", MODE_PRIVATE)
-                                            .getBoolean("smart_enabled", false)) {
-                                        smartSortEngine.request(indexer.getFullIndex());
-                                    }
-                                }
-                            };
-                            int debounce = getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                                    .getInt("smart_rerank_debounce_ms", 400);
-                            mainHandler.postDelayed(smartRerankRunnable, Math.max(0, debounce));
-                        }
-                        updateStatsBarAsync();
-                    }
-                });
+            @Override public void onTagsChanged() { handleCoalescedTagEvent(null); }
+            @Override public void onTagsChanged(Set<String> changedPaths) {
+                handleCoalescedTagEvent(changedPaths);
             }
         });
         fileStatus.setStatusChangeListener(new FileStatus.StatusChangeListener() {
@@ -1416,6 +1399,38 @@ public class MainActivity extends Activity
                         updateStatsBarAsync();
                     }
                 });
+            }
+        });
+    }
+
+    private void handleCoalescedTagEvent(final Set<String> changedPaths) {
+        mainHandler.post(new Runnable() {
+            @Override public void run() {
+                if (tagAdapter != null) tagAdapter.setTags(getOrderedTagChoices(getTagMenuTargets()));
+                boolean removedGhost = reconcileDeletedTagFilters();
+                refreshTagBar();
+                if (changedPaths != null && !changedPaths.isEmpty()) {
+                    notifyGalleryFilesChanged(new ArrayList<String>(changedPaths));
+                }
+                if (removedGhost) scheduleRefresh();
+                if (smartSortEngine != null && getSharedPreferences(
+                        "settings_prefs", MODE_PRIVATE).getBoolean("smart_enabled", false)) {
+                    if (smartRerankRunnable != null) mainHandler.removeCallbacks(smartRerankRunnable);
+                    smartRerankRunnable = new Runnable() {
+                        @Override public void run() {
+                            smartRerankRunnable = null;
+                            if (smartSortEngine != null && getSharedPreferences(
+                                    "settings_prefs", MODE_PRIVATE)
+                                    .getBoolean("smart_enabled", false)) {
+                                smartSortEngine.request(indexer.getFullIndex());
+                            }
+                        }
+                    };
+                    int debounce = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                            .getInt("smart_rerank_debounce_ms", 400);
+                    mainHandler.postDelayed(smartRerankRunnable, Math.max(0, debounce));
+                }
+                updateStatsBarAsync();
             }
         });
     }
@@ -2184,6 +2199,7 @@ public class MainActivity extends Activity
         menu.getMenu().add("Delete tag");
         menu.getMenu().add("Select all files with this tag");
         menu.getMenu().add("Add tag to current file");
+        menu.getMenu().add("Keep only this tag");
         boolean suggested = smartResult != null && currentFileReference() != null
                 && tag.equals(smartResult.suggestions.get(currentFileReference().getPath()));
         if (suggested) menu.getMenu().add("Dismiss Smart suggestion");
@@ -2198,6 +2214,8 @@ public class MainActivity extends Activity
                 else if ("Add tag to current file".equals(title)) {
                     List<MediaFile> targets = getTagMenuTargets();
                     showNewTagDialog(targets.isEmpty() ? null : targets, null);
+                } else if ("Keep only this tag".equals(title)) {
+                    replaceWithSingleTag(tag, getTagMenuTargets());
                 } else if ("Dismiss Smart suggestion".equals(title)) {
                     MediaFile file = currentFileReference();
                     if (file != null) dismissedSmartSuggestions.add(file.getPath());
@@ -2248,6 +2266,22 @@ public class MainActivity extends Activity
                 }).setNegativeButton("Cancel", null).show();
     }
 
+    private void replaceWithSingleTag(final String tag, final List<MediaFile> targets) {
+        if (tag == null || targets == null || targets.isEmpty()) return;
+        final Map<String, List<String>> desired = new java.util.LinkedHashMap<String, List<String>>();
+        for (MediaFile file : targets) {
+            if (file != null) desired.put(file.getPath(),
+                    java.util.Collections.singletonList(TagText.plain(tag)));
+        }
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                context.checkpoint();
+                tagManager.replaceTagSets(targets, desired);
+                context.checkpoint();
+            }
+        });
+    }
+
     private void deleteTagFromFiles(final String tag) {
         new AlertDialog.Builder(this).setTitle("Delete tag?")
                 .setMessage(tag)
@@ -2290,6 +2324,7 @@ public class MainActivity extends Activity
         final List<MediaFile> targets = getTagMenuTargets();
         PopupMenu menu = new PopupMenu(this, anchor);
         menu.getMenu().add("Add tag");
+        menu.getMenu().add("Replace tags");
         menu.getMenu().add(tagManager != null && tagManager.isTagsEnabled()
                 ? "Disable tag menus" : "Enable tag menus");
         menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
@@ -2297,6 +2332,8 @@ public class MainActivity extends Activity
                 String title = item.getTitle().toString();
                 if ("Add tag".equals(title)) {
                     showNewTagDialog(targets.isEmpty() ? null : targets, null);
+                } else if ("Replace tags".equals(title)) {
+                    showReplaceTagsDialog();
                 } else if ("Enable tag menus".equals(title)) {
                     tagManager.setTagsEnabled(true);
                     applyUiToggles();
@@ -2327,6 +2364,34 @@ public class MainActivity extends Activity
                         })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    /** Reconcile files created by copy actions without forcing a directory scan. */
+    public void onPathsAdded(final Set<String> added) {
+        if (added == null || added.isEmpty() || indexer == null) return;
+        if (sortCoordinator == null) {
+            for (String path : added) indexer.addFilePath(path);
+            scheduleRefresh();
+            return;
+        }
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                for (String path : added) {
+                    context.checkpoint();
+                    indexer.addFilePath(path);
+                }
+                context.checkpoint();
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        if (smartSortEngine != null && getSharedPreferences(
+                                "settings_prefs", MODE_PRIVATE).getBoolean("smart_enabled", false)) {
+                            smartSortEngine.request(indexer.getFullIndex());
+                        }
+                        scheduleRefresh();
+                    }
+                });
+            }
+        });
     }
 
     /** Single path-reconciliation hook for sessions, ranks, highlight, and index objects. */
@@ -2922,15 +2987,13 @@ public class MainActivity extends Activity
                             Toast.LENGTH_SHORT).show();
                 }
                 break;
-            case SMART_TOGGLE:
-            case SMART_LOCK_ORDER:
-            case SMART_ACCEPT_SUGGESTIONS:
-            case SMART_ACCEPT_GROUP:
-            case SMART_NEXT_UNCERTAIN:
-            case SMART_RERANK_NOW:
-            case SMART_PAUSE:
-                toggleSmartSetting(action);
-                break;
+            case SMART_TOGGLE: toggleSmartSetting(GestureSettings.GestureAction.SMART_TOGGLE); break;
+            case SMART_LOCK_ORDER: lockSmartOrder(); break;
+            case SMART_ACCEPT_SUGGESTIONS: acceptSmartSuggestionForCurrent(); break;
+            case SMART_ACCEPT_GROUP: acceptSmartSuggestionForGroup(); break;
+            case SMART_NEXT_UNCERTAIN: jumpToNextSmartUncertain(); break;
+            case SMART_RERANK_NOW: rerankSmartNow(); break;
+            case SMART_PAUSE: pauseSmartFromAction(); break;
             case SMART_SPLIT_PILE: showSmartSplitPileDialog(); break;
             case SMART_RETIRE_PILE: retireSmartPile(); break;
             case SMART_MOVE_PILE: moveCurrentToSmartPile(); break;
@@ -3049,10 +3112,27 @@ public class MainActivity extends Activity
             Toast.makeText(this, "No Smart suggestion for this file", Toast.LENGTH_SHORT).show();
             return;
         }
-        tagManager.applyTag(currentFileReference(), tag);
-        smartResult.suggestions.remove(currentFileReference().getPath());
-        refreshTagBar();
-        scheduleRefresh();
+        final MediaFile target = currentFileReference();
+        final Map<String, List<String>> desired = new java.util.HashMap<String, List<String>>();
+        List<String> tags = new ArrayList<String>();
+        if (!getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getBoolean("smart_accept_replaces", false)) tags.addAll(target.getTags());
+        tags.add(tag);
+        desired.put(target.getPath(), tags);
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                context.checkpoint();
+                tagManager.replaceTagSets(java.util.Collections.singletonList(target), desired);
+                context.checkpoint();
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        if (smartResult != null) smartResult.suggestions.remove(target.getPath());
+                        refreshTagBar();
+                        scheduleRefresh();
+                    }
+                });
+            }
+        });
     }
 
     private void acceptSmartSuggestionForGroup() {
@@ -3072,20 +3152,38 @@ public class MainActivity extends Activity
         }
         String primary = currentFileReference().getTags().isEmpty() ? ""
                 : currentFileReference().getTags().get(0);
-        int count = 0;
+        final List<MediaFile> targets = new ArrayList<MediaFile>();
         for (MediaFile file : (groupTargets.isEmpty() ? snapshot : groupTargets)) {
             if (groupTargets.isEmpty()
                     && !primary.equals(file.getTags().isEmpty() ? "" : file.getTags().get(0))) continue;
-            if (!file.hasTag(tag)) {
-                tagManager.applyTag(file, tag);
-                maybeAutoRetirePile(file, tag);
-                if (smartResult != null) smartResult.suggestions.remove(file.getPath());
-                count++;
-            }
+            targets.add(file);
         }
-        Toast.makeText(this, "Accepted Smart suggestion for " + count + " files",
-                Toast.LENGTH_SHORT).show();
-        scheduleRefresh();
+        final Map<String, List<String>> desired = new java.util.HashMap<String, List<String>>();
+        boolean replace = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getBoolean("smart_accept_replaces", false);
+        for (MediaFile file : targets) {
+            List<String> tags = new ArrayList<String>();
+            if (!replace) tags.addAll(file.getTags());
+            tags.add(tag);
+            desired.put(file.getPath(), tags);
+        }
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                context.checkpoint();
+                TagManager.BulkTagResult bulk = tagManager.replaceTagSets(targets, desired);
+                context.checkpoint();
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        for (String path : bulk.changedPaths) {
+                            if (smartResult != null) smartResult.suggestions.remove(path);
+                        }
+                        Toast.makeText(MainActivity.this, "Accepted Smart suggestion for "
+                                + bulk.changedPaths.size() + " files", Toast.LENGTH_SHORT).show();
+                        scheduleRefresh();
+                    }
+                });
+            }
+        });
     }
 
     private void jumpToNextSmartUncertain() {
@@ -3331,6 +3429,89 @@ public class MainActivity extends Activity
         Toast.makeText(this, "No unfinished Smart pile found", Toast.LENGTH_SHORT).show();
     }
 
+    private void showReplaceTagPicker(final List<String> selected, final TextView summary) {
+        final int limit = Math.max(1, Math.min(5, getSharedPreferences(
+                "settings_prefs", MODE_PRIVATE).getInt("replace_keep_max", 2)));
+        final List<String> allNames = new ArrayList<String>();
+        for (Tag tag : getOrderedTagChoices(indexer.getFullIndex())) {
+            if (tag != null && !allNames.contains(tag.getName())) allNames.add(tag.getName());
+        }
+        final List<String> visibleNames = new ArrayList<String>(allNames);
+        final LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        final EditText search = new EditText(this);
+        search.setSingleLine(true);
+        search.setHint("Search global tags…");
+        search.setTextColor(0xFFFFFFFF);
+        content.addView(search);
+        final ListView list = new ListView(this);
+        list.setChoiceMode(ListView.CHOICE_MODE_MULTIPLE);
+        final ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_list_item_multiple_choice, visibleNames);
+        list.setAdapter(adapter);
+        content.addView(list, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (int) (360 * getResources().getDisplayMetrics().density + 0.5f)));
+        final AlertDialog[] holder = new AlertDialog[1];
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+            @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
+                String query = s.toString().trim().toLowerCase(java.util.Locale.US);
+                visibleNames.clear();
+                for (String name : allNames) if (query.isEmpty()
+                        || name.toLowerCase(java.util.Locale.US).contains(query)) visibleNames.add(name);
+                adapter.notifyDataSetChanged();
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        list.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
+            @Override public void onItemClick(android.widget.AdapterView<?> parent, View view,
+                                              int position, long id) {
+                if (position < 0 || position >= visibleNames.size()) return;
+                String name = visibleNames.get(position);
+                if (selected.contains(name)) selected.remove(name);
+                else if (selected.size() < limit) selected.add(name);
+                else {
+                    list.setItemChecked(position, false);
+                    Toast.makeText(MainActivity.this, "Choose at most " + limit + " tags",
+                            Toast.LENGTH_SHORT).show();
+                }
+                updateReplaceTagSummary(selected, summary);
+            }
+        });
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Replacement tags")
+                .setView(content)
+                .setNeutralButton("New tag", null)
+                .setPositiveButton("Done", null)
+                .setNegativeButton("Cancel", null).create();
+        holder[0] = dialog;
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override public void onShow(DialogInterface d) {
+                Button newTag = dialog.getButton(DialogInterface.BUTTON_NEUTRAL);
+                newTag.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View view) {
+                        showNewTagDialog(null, new Runnable() {
+                            @Override public void run() {
+                                showReplaceTagPicker(selected, summary);
+                            }
+                        });
+                        dialog.dismiss();
+                    }
+                });
+                for (int i = 0; i < visibleNames.size(); i++) {
+                    if (selected.contains(visibleNames.get(i))) list.setItemChecked(i, true);
+                }
+            }
+        });
+        dialog.show();
+    }
+
+    private void updateReplaceTagSummary(List<String> selected, TextView summary) {
+        if (summary == null) return;
+        if (selected == null || selected.isEmpty()) summary.setText("No replacement tags selected");
+        else summary.setText("Replacement tags: " + selected);
+    }
+
     private void showReplaceTagsDialog() {
         final List<String> paths = getActiveSelectedPaths();
         if (paths.isEmpty() && currentFileReference() != null) paths.add(currentFileReference().getPath());
@@ -3342,10 +3523,16 @@ public class MainActivity extends Activity
         }
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
-        final EditText tags = new EditText(this);
-        tags.setHint("Replacement tags, comma separated");
-        tags.setTextColor(0xFFFFFFFF);
-        form.addView(tags);
+        final List<String> replacement = new ArrayList<String>();
+        final TextView selectedTags = makeLabel("No replacement tags selected");
+        final Button chooseTags = makeSmallButton("Choose replacement tags");
+        chooseTags.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                showReplaceTagPicker(replacement, selectedTags);
+            }
+        });
+        form.addView(selectedTags);
+        form.addView(chooseTags);
         final Spinner rule = new Spinner(this);
         String[] rules = {"protect", "whole_group", "overwrite", "keep_first"};
         rule.setAdapter(new ArrayAdapter<String>(this,
@@ -3359,10 +3546,6 @@ public class MainActivity extends Activity
                 .setView(form)
                 .setPositiveButton("Preview", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
-                        final List<String> replacement = new ArrayList<String>();
-                        for (String value : tags.getText().toString().split(",")) {
-                            if (!value.trim().isEmpty()) replacement.add(value.trim());
-                        }
                         final ReplaceTagsManager.SequenceRule selectedRule;
                         try {
                             selectedRule = ReplaceTagsManager.SequenceRule.valueOf(
@@ -3379,7 +3562,13 @@ public class MainActivity extends Activity
                                                 .getString("replace_sequence_patterns", "link_*,*_seq_*"),
                                         getSharedPreferences("settings_prefs", MODE_PRIVATE)
                                                 .getString("replace_protect_patterns", ""),
-                                        selectedRule);
+                                        selectedRule,
+                                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                                .getString("replace_mode", "replace_with"),
+                                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                                .getInt("replace_keep_max", 2),
+                                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                                .getBoolean("replace_protect_piles", false));
                                 mainHandler.post(new Runnable() {
                                     @Override public void run() {
                                         confirmReplaceTags(snapshot, targets, replacement,
@@ -3419,6 +3608,7 @@ public class MainActivity extends Activity
                     @Override public void onClick(DialogInterface dialog, int which) {
                         sortCoordinator.post(new SortCoordinator.Task() {
                             @Override public void run(SortCoordinator.TaskContext context) {
+                                context.userCheckpoint();
                                 final ReplaceTagsManager.Report report = ReplaceTagsManager.apply(
                                         snapshot, targets, replacement,
                                         getSharedPreferences("settings_prefs", MODE_PRIVATE)
@@ -3427,7 +3617,13 @@ public class MainActivity extends Activity
                                                 .getString("replace_protect_patterns", ""),
                                         rule, tagManager,
                                         getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                                                .getBoolean("replace_purge_group_tags", false));
+                                                .getBoolean("replace_purge_group_tags", false),
+                                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                                .getString("replace_mode", "replace_with"),
+                                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                                .getInt("replace_keep_max", 2),
+                                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                                .getBoolean("replace_protect_piles", false));
                                 mainHandler.post(new Runnable() {
                                     @Override public void run() {
                                         replaceTagsUndo = report.previousTags;
@@ -3473,16 +3669,44 @@ public class MainActivity extends Activity
         new AlertDialog.Builder(this).setTitle("Move to Smart pile")
                 .setItems(choices, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
-                        String oldPile = findPileTag(file);
-                        tagManager.applyTag(file, choices[which]);
-                        if (!oldPile.isEmpty() && !oldPile.equals(choices[which])
-                                && file.hasTag(oldPile)) tagManager.removeTag(file, oldPile);
-                        getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
-                                .putString("smart_active_pile", choices[which])
-                                .putString("smart_pile_mode", "scope").apply();
-                        scheduleRefresh();
+                        final String oldPile = findPileTag(file);
+                        final List<String> desiredTags = new ArrayList<String>(file.getTags());
+                        if (!desiredTags.contains(choices[which])) desiredTags.add(choices[which]);
+                        if (!oldPile.isEmpty() && !oldPile.equals(choices[which])) desiredTags.remove(oldPile);
+                        final Map<String, List<String>> desired = new java.util.HashMap<String, List<String>>();
+                        desired.put(file.getPath(), desiredTags);
+                        final String selectedPile = choices[which];
+                        sortCoordinator.post(new SortCoordinator.Task() {
+                            @Override public void run(SortCoordinator.TaskContext context) {
+                                context.checkpoint();
+                                tagManager.replaceTagSets(java.util.Collections.singletonList(file), desired);
+                                context.checkpoint();
+                                mainHandler.post(new Runnable() {
+                                    @Override public void run() {
+                                        getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
+                                                .putString("smart_active_pile", selectedPile)
+                                                .putString("smart_pile_mode", "scope").apply();
+                                        scheduleRefresh();
+                                    }
+                                });
+                            }
+                        });
                     }
                 }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void rerankSmartNow() {
+        if (smartSortEngine != null && indexer != null) smartSortEngine.request(indexer.getFullIndex());
+        Toast.makeText(this, "Smart Sort rerank requested", Toast.LENGTH_SHORT).show();
+    }
+
+    private void pauseSmartFromAction() {
+        android.content.SharedPreferences prefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        boolean paused = !prefs.getBoolean("smart_paused", false);
+        prefs.edit().putBoolean("smart_paused", paused).apply();
+        if (smartSortEngine != null) smartSortEngine.setPaused(paused);
+        Toast.makeText(this, paused ? "Smart Sort paused" : "Smart Sort resumed",
+                Toast.LENGTH_SHORT).show();
     }
 
     private void toggleSmartSetting(GestureSettings.GestureAction action) {
@@ -3609,7 +3833,7 @@ public class MainActivity extends Activity
         sortModePanel.setBackgroundColor(0xEE161622);
         TextView title = new TextView(this);
         title.setTextColor(0xFFFFFFFF);
-        title.setText("Compare: " + comparePrefs.getString("compare_question", "which goes first?")
+        title.setText("Compare: " + comparePrefs.getString("compare_question", "Which goes first?")
                 + "  " + compareQuestion.questionNumber + " / " + compareQuestion.totalFiles
                 + (compareQuestion.recheck ? "  (recheck)" : ""));
         sortModePanel.addView(title);
@@ -4000,9 +4224,11 @@ public class MainActivity extends Activity
             @Override public void run(SortCoordinator.TaskContext context) {
                 final List<MediaFile> ordered = new ArrayList<MediaFile>();
                 for (String path : result.orderedPaths) {
+                    context.userCheckpoint();
                     MediaFile file = findInList(snapshot, path);
                     if (file != null) ordered.add(file);
                 }
+                context.userCheckpoint();
                 indexer.updateManualOrder(ordered);
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
@@ -4082,6 +4308,7 @@ public class MainActivity extends Activity
         }
         sortCoordinator.post(new SortCoordinator.Task() {
             @Override public void run(SortCoordinator.TaskContext context) {
+                context.checkpoint();
                 final BatchGameEngine.Round round = batchGameEngine.buildRound(snapshot,
                         getSharedPreferences("settings_prefs", MODE_PRIVATE)
                                 .getInt("game_batch_size", 6),
@@ -4094,6 +4321,7 @@ public class MainActivity extends Activity
                                 .getInt("game_probe_every", 5),
                         getSharedPreferences("settings_prefs", MODE_PRIVATE)
                                 .getBoolean("game_batch_adaptive", false));
+                context.checkpoint();
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
                         gameRound = round;
@@ -4666,15 +4894,8 @@ public class MainActivity extends Activity
                         tagManager.restoreTag(tag, usage == null ? 0 : usage,
                                 created == null ? 0L : created);
                     }
-                    for (Map.Entry<String, List<String>> entry : restore.entrySet()) {
-                        MediaFile file = filesToRestore.get(entry.getKey());
-                        if (file == null) continue;
-                        List<String> desired = entry.getValue();
-                        for (String tag : new ArrayList<String>(file.getTags())) {
-                            if (!desired.contains(tag)) tagManager.removeTag(file, tag);
-                        }
-                        for (String tag : desired) if (!file.hasTag(tag)) tagManager.applyTag(file, tag);
-                    }
+                    tagManager.replaceTagSets(
+                            new ArrayList<MediaFile>(filesToRestore.values()), restore);
                     mainHandler.post(new Runnable() {
                         @Override public void run() {
                             scheduleRefresh();
@@ -5106,7 +5327,7 @@ public class MainActivity extends Activity
             } else {
                 initialType = 2; // some have it (mixed)
             }
-            
+
             QuickTagItem item = new QuickTagItem(name, count, initialType);
             item.suggested = smartResult != null && currentFile != null
                     && name.equals(smartResult.suggestions.get(currentFile.getPath()));
@@ -5495,6 +5716,8 @@ public class MainActivity extends Activity
                         final int missing = skipped[0];
                         mainHandler.post(new Runnable() {
                             @Override public void run() {
+                                Map<String, String> changes = batchRenameManager.getLastPathChanges();
+                                if (!changes.isEmpty()) onPathsChanged(changes, null);
                                 Toast.makeText(MainActivity.this, "Renamed: " + result.succeeded
                                     + (result.failed > 0 ? "  Failed: " + result.failed : "")
                                     + (missing > 0 ? "  Skipped: " + missing : ""),
@@ -5534,8 +5757,10 @@ public class MainActivity extends Activity
             @Override public void onClick(DialogInterface d, int w) {
                 if (batchRenameManager.canUndo()) {
                     BatchRenameManager.RenameResult result = batchRenameManager.undo();
+                    Map<String, String> undoChanges = batchRenameManager.getLastUndoPathChanges();
+                    if (!undoChanges.isEmpty()) onPathsChanged(undoChanges, null);
                     Toast.makeText(MainActivity.this,
-                            "Undone: " + result.succeeded + " files", Toast.LENGTH_SHORT).show();
+                        "Undone: " + result.succeeded + " files", Toast.LENGTH_SHORT).show();
                     exitActiveSelectMode();
                     scheduleRefresh();
                 }
@@ -5543,7 +5768,7 @@ public class MainActivity extends Activity
         })
         .show();
 }
-                
+
 // Helper to create a label TextView
 private TextView makeLabel(String text) {
     TextView tv = new TextView(this);
@@ -6536,6 +6761,7 @@ private Spinner makeSpinner(String[] options) {
         if (!trashDir.exists() && !trashDir.mkdirs()) return 0;
 
         int moved = 0;
+        final Set<String> removedPaths = new java.util.HashSet<String>();
         for (MediaFile file : selectedFiles) {
             java.io.File src = new java.io.File(file.getPath());
             if (!src.exists()) continue;
@@ -6552,10 +6778,16 @@ private Spinner makeSpinner(String[] options) {
             if (src.renameTo(dst)) {
                 // File already sits in .trash — drop it from the index/UI
                 // without deleteFile(), which would touch the disk again.
+                removedPaths.add(file.getPath());
                 indexer.removeFromIndexOnly(file.getPath());
                 fileStatus.clearStatus(file.getPath());
                 moved++;
             }
+        }
+        if (!removedPaths.isEmpty()) {
+            mainHandler.post(new Runnable() {
+                @Override public void run() { onPathsChanged(null, removedPaths); }
+            });
         }
         return moved;
     }
@@ -6931,7 +7163,7 @@ private Spinner makeSpinner(String[] options) {
             } else {
                 initialType = 2; // some have it (mixed)
             }
-            
+
             QuickTagItem item = new QuickTagItem(name, count, initialType);
             item.suggested = smartResult != null && currentFile != null
                     && name.equals(smartResult.suggestions.get(currentFile.getPath()));
@@ -6972,13 +7204,24 @@ private Spinner makeSpinner(String[] options) {
                 .setView(quickTagContent)
                 .setPositiveButton("Apply", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
-                        for (QuickTagItem item : items) {
-                            if (item.currentType == item.initialType) continue; // untouched
-                            for (MediaFile f : targets) {
-                                if (item.currentType == 1) {
-                                    tagManager.applyTag(f, item.name);
-                                } else if (item.currentType == 0) {
-                                    tagManager.removeTag(f, item.name);
+                        boolean gameReplace = gameAfterTag != null
+                                && "replace".equals(getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getString("game_commit_mode", "add"));
+                        if (gameReplace) {
+                            Map<String, List<String>> desired = new java.util.HashMap<String, List<String>>();
+                            List<String> checked = new ArrayList<String>();
+                            for (QuickTagItem item : items) if (item.currentType == 1) checked.add(item.name);
+                            for (MediaFile f : targets) desired.put(f.getPath(), new ArrayList<String>(checked));
+                            tagManager.replaceTagSets(targets, desired);
+                        } else {
+                            for (QuickTagItem item : items) {
+                                if (item.currentType == item.initialType) continue; // untouched
+                                for (MediaFile f : targets) {
+                                    if (item.currentType == 1) {
+                                        tagManager.applyTag(f, item.name);
+                                    } else if (item.currentType == 0) {
+                                        tagManager.removeTag(f, item.name);
+                                    }
                                 }
                             }
                         }
@@ -7537,6 +7780,7 @@ private Spinner makeSpinner(String[] options) {
                         final List<MediaFile> executionFiles = resolveSelectedFiles(
                                 selectionPaths, indexer.getFullIndex(), skipped);
                         int successCount = 0;
+                        final Map<String, String> pathChanges = new java.util.HashMap<String, String>();
                         for (int i = 0; i < executionFiles.size(); i++) {
                             MediaFile file = executionFiles.get(i);
                             java.io.File src = new java.io.File(file.getPath());
@@ -7561,7 +7805,9 @@ private Spinner makeSpinner(String[] options) {
                             }
                             java.io.File dst = new java.io.File(parent, newName);
                             if (src.renameTo(dst)) {
+                                String oldPath = file.getPath();
                                 file.setPath(dst.getAbsolutePath());
+                                pathChanges.put(oldPath, file.getPath());
                                 successCount++;
                             }
                         }
@@ -7569,6 +7815,7 @@ private Spinner makeSpinner(String[] options) {
                         final int missing = skipped[0];
                         mainHandler.post(new Runnable() {
                             @Override public void run() {
+                                if (!pathChanges.isEmpty()) onPathsChanged(pathChanges, null);
                                 exitActiveSelectMode();
                                 btnScan.setText("SCAN");
                                 btnScan.setOnClickListener(new View.OnClickListener() {
@@ -9459,7 +9706,7 @@ private Spinner makeSpinner(String[] options) {
         final String[] actions = {
                 "Select all", "Deselect all", "Invert selection", "Select untagged",
                 "Select flagged", "Select by tag", "Select duplicates", "Tag selected",
-                "Rename selected", "Rename sequence", "Auto-Link Sequential", "Flag selected",
+                "Replace tags selected", "Rename selected", "Rename sequence", "Auto-Link Sequential", "Flag selected",
                 "Skip selected", "Move selected", "Copy selected", "Delete / trash",
                 "Strip metadata", "Run macro", "Cancel"
         };
@@ -9476,16 +9723,17 @@ private Spinner makeSpinner(String[] options) {
                             case 5: showGalleryTagPickerForSelection(); break;
                             case 6: startGalleryDuplicateSelection(); break;
                             case 7: showBatchTagDialog(); break;
-                            case 8: showBatchRenameDialog(); break;
-                            case 9: showRenameSequenceDialog(); break;
-                            case 10: showAutoLinkSequentialDialog(); break;
-                            case 11: setGalleryStatus(FileStatus.Status.FLAGGED); break;
-                            case 12: setGalleryStatus(FileStatus.Status.SKIPPED); break;
-                            case 13: showGalleryCopyMoveDialog(false); break;
-                            case 14: showGalleryCopyMoveDialog(true); break;
-                            case 15: showBatchDeleteDialog(); break;
-                            case 16: stripGalleryMetadata(); break;
-                            case 17: showGalleryMacroPicker(); break;
+                            case 8: showReplaceTagsDialog(); break;
+                            case 9: showBatchRenameDialog(); break;
+                            case 10: showRenameSequenceDialog(); break;
+                            case 11: showAutoLinkSequentialDialog(); break;
+                            case 12: setGalleryStatus(FileStatus.Status.FLAGGED); break;
+                            case 13: setGalleryStatus(FileStatus.Status.SKIPPED); break;
+                            case 14: showGalleryCopyMoveDialog(false); break;
+                            case 15: showGalleryCopyMoveDialog(true); break;
+                            case 16: showBatchDeleteDialog(); break;
+                            case 17: stripGalleryMetadata(); break;
+                            case 18: showGalleryMacroPicker(); break;
                             default: break;
                         }
                     }
@@ -9705,6 +9953,7 @@ private Spinner makeSpinner(String[] options) {
         java.io.File dir = new java.io.File(destination);
         if (!dir.exists() && !dir.mkdirs()) return 0;
         int count = 0;
+        Set<String> addedPaths = new java.util.HashSet<String>();
         for (MediaFile file : selected) {
             java.io.File source = new java.io.File(file.getPath());
             java.io.File target = new java.io.File(dir, source.getName());
@@ -9718,6 +9967,7 @@ private Spinner makeSpinner(String[] options) {
                     while ((read = in.read(buffer)) >= 0) out.write(buffer, 0, read);
                     in.close();
                     out.close();
+                    addedPaths.add(target.getAbsolutePath());
                     count++;
                 } else if (source.renameTo(target)) {
                     String oldPath = file.getPath();
@@ -9730,6 +9980,7 @@ private Spinner makeSpinner(String[] options) {
                 }
             } catch (Exception ignored) {}
         }
+        if (!addedPaths.isEmpty()) onPathsAdded(addedPaths);
         return count;
     }
 

@@ -144,17 +144,26 @@ public class MetadataWriter {
             return false;
         }
 
-        // Swap: original -> backup name, temp -> original. Keep it simple and
-        // safe on the same directory (renameTo is atomic within one mount).
-        if (!file.delete()) {
-            Log.e(TAG, "Could not delete original before swap: " + file.getAbsolutePath());
+        // Swap through a same-directory backup. The old file remains available
+        // until the complete temp file has been moved into its place.
+        File backup = new File(file.getParentFile(), file.getName() + ".tags.bak");
+        if (backup.exists() && !backup.delete()) {
+            tmp.delete();
+            return false;
+        }
+        if (!file.renameTo(backup)) {
+            Log.e(TAG, "Could not stage original before swap: " + file.getAbsolutePath());
             tmp.delete();
             return false;
         }
         if (!tmp.renameTo(file)) {
             Log.e(TAG, "Rename of temp file failed: " + tmp.getAbsolutePath());
+            backup.renameTo(file);
             tmp.delete();
             return false;
+        }
+        if (backup.exists() && !backup.delete()) {
+            Log.w(TAG, "Could not remove metadata backup: " + backup.getAbsolutePath());
         }
         return true;
     }

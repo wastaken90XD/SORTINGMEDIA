@@ -29,6 +29,8 @@ public final class ReplaceTagsManager {
         public final List<String> purgedTags = new ArrayList<String>();
         public final Map<String, Integer> purgedUsage = new HashMap<String, Integer>();
         public final Map<String, Long> purgedCreatedAt = new HashMap<String, Long>();
+        public final Set<String> changedPaths = new HashSet<String>();
+        public final Set<String> failedPaths = new HashSet<String>();
     }
 
     private ReplaceTagsManager() {}
@@ -38,13 +40,23 @@ public final class ReplaceTagsManager {
                                String protectPatterns, SequenceRule rule,
                                TagManager tagManager) {
         return apply(fullSnapshot, targetPaths, replacementTags, sequencePatterns,
-                protectPatterns, rule, tagManager, false);
+                protectPatterns, rule, tagManager, false, "replace_with", 2, false);
     }
 
     public static Report apply(List<MediaFile> fullSnapshot, Set<String> targetPaths,
                                List<String> replacementTags, String sequencePatterns,
                                String protectPatterns, SequenceRule rule,
                                TagManager tagManager, boolean purgeGroupTags) {
+        return apply(fullSnapshot, targetPaths, replacementTags, sequencePatterns,
+                protectPatterns, rule, tagManager, purgeGroupTags,
+                "replace_with", 2, false);
+    }
+
+    public static Report apply(List<MediaFile> fullSnapshot, Set<String> targetPaths,
+                               List<String> replacementTags, String sequencePatterns,
+                               String protectPatterns, SequenceRule rule,
+                               TagManager tagManager, boolean purgeGroupTags,
+                               String replaceMode, int keepMax, boolean protectPiles) {
         Report report = new Report();
         if (fullSnapshot == null || targetPaths == null || tagManager == null) return report;
         List<SearchManager.QueryParser> sequenceQueries = compilePatterns(sequencePatterns);
@@ -84,9 +96,12 @@ public final class ReplaceTagsManager {
                 report.keptGroups.add(entry.getKey());
             }
         }
+        Map<String, List<String>> finalTags = new LinkedHashMap<String, List<String>>();
+        List<MediaFile> targetFiles = new ArrayList<MediaFile>();
         for (MediaFile file : fullSnapshot) {
             if (file == null || !targetPaths.contains(file.getPath())) continue;
             report.files++;
+            targetFiles.add(file);
             List<String> previous = new ArrayList<String>(file.getTags());
             report.previousTags.put(file.getPath(), previous);
             Set<String> keep = new HashSet<String>();
@@ -102,25 +117,29 @@ public final class ReplaceTagsManager {
                 if (keys != null && rule == SequenceRule.WHOLE_GROUP
                         && matchesAny(tag, sequenceQueries)) {
                     for (String key : keys) if (!Boolean.TRUE.equals(complete.get(key))) keep.add(tag);
-                } else if (keys != null && rule == SequenceRule.PROTECT) {
-                    if (matchesAny(tag, sequenceQueries)) keep.add(tag);
+                } else if (keys != null && rule == SequenceRule.PROTECT
+                        && matchesAny(tag, sequenceQueries)) {
+                    keep.add(tag);
                 }
             }
-            for (String tag : previous) {
-                if (!keep.contains(tag)) {
-                    tagManager.removeTag(file, tag);
-                    report.removedInstances++;
+            List<String> desired = new ArrayList<String>();
+            boolean keepOnly = "keep_only".equalsIgnoreCase(replaceMode);
+            if (keepOnly) {
+                appendReplacementTags(desired, replacementTags, keepMax);
+                if (protectPiles) for (String tag : previous) {
+                    if (keep.contains(tag) && !desired.contains(tag)) desired.add(tag);
                 }
+            } else {
+                for (String tag : previous) if (keep.contains(tag)) desired.add(tag);
+                appendReplacementTags(desired, replacementTags, keepMax);
             }
-            if (replacementTags != null) {
-                for (String tag : replacementTags) {
-                    if (tag != null && !tag.trim().isEmpty() && !file.hasTag(tag)) {
-                        tagManager.applyTag(file, tag);
-                    }
-                }
-            }
-            for (String tag : keep) if (!file.hasTag(tag)) tagManager.applyTag(file, tag);
+            for (String tag : previous) if (!desired.contains(tag)) report.removedInstances++;
+            finalTags.put(file.getPath(), desired);
         }
+        boolean immediate = tagManager.metadataWriteImmediate();
+        TagManager.BulkTagResult bulk = tagManager.replaceTagSets(targetFiles, finalTags, immediate);
+        report.changedPaths.addAll(bulk.changedPaths);
+        report.failedPaths.addAll(bulk.failedPaths);
         if (purgeGroupTags) {
             for (Map.Entry<String, Set<String>> entry : groupTags.entrySet()) {
                 boolean remains = false;
@@ -154,9 +173,32 @@ public final class ReplaceTagsManager {
         return report;
     }
 
+    private static void appendReplacementTags(List<String> desired, List<String> replacementTags,
+                                              int keepMax) {
+        if (replacementTags == null) return;
+        int limit = Math.max(1, Math.min(5, keepMax));
+        int added = 0;
+        for (String raw : replacementTags) {
+            String plain = TagText.plain(raw);
+            if (!plain.isEmpty() && !desired.contains(plain)) {
+                desired.add(plain);
+                added++;
+            }
+            if (added >= limit) break;
+        }
+    }
+
     public static Report preview(List<MediaFile> fullSnapshot, Set<String> targetPaths,
                                  List<String> replacementTags, String sequencePatterns,
                                  String protectPatterns, SequenceRule rule) {
+        return preview(fullSnapshot, targetPaths, replacementTags, sequencePatterns,
+                protectPatterns, rule, "replace_with", 2, false);
+    }
+
+    public static Report preview(List<MediaFile> fullSnapshot, Set<String> targetPaths,
+                                 List<String> replacementTags, String sequencePatterns,
+                                 String protectPatterns, SequenceRule rule,
+                                 String replaceMode, int keepMax, boolean protectPiles) {
         Report report = new Report();
         if (fullSnapshot == null || targetPaths == null) return report;
         List<SearchManager.QueryParser> sequenceQueries = compilePatterns(sequencePatterns);
@@ -204,7 +246,17 @@ public final class ReplaceTagsManager {
                 } else if (keys != null && rule == SequenceRule.PROTECT
                         && matchesAny(tag, sequenceQueries)) keep.add(tag);
             }
-            for (String tag : previous) if (!keep.contains(tag)) report.removedInstances++;
+            List<String> desired = new ArrayList<String>();
+            if ("keep_only".equalsIgnoreCase(replaceMode)) {
+                appendReplacementTags(desired, replacementTags, keepMax);
+                if (protectPiles) for (String tag : previous) {
+                    if (keep.contains(tag) && !desired.contains(tag)) desired.add(tag);
+                }
+            } else {
+                for (String tag : previous) if (keep.contains(tag)) desired.add(tag);
+                appendReplacementTags(desired, replacementTags, keepMax);
+            }
+            for (String tag : previous) if (!desired.contains(tag)) report.removedInstances++;
         }
         return report;
     }

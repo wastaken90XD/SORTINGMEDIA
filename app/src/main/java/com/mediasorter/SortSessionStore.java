@@ -32,6 +32,7 @@ public final class SortSessionStore {
             byte[] bytes = value.toString().getBytes("UTF-8");
             stream.write(bytes);
             stream.flush();
+            stream.getFD().sync();
             stream.close();
             if (!temp.renameTo(target)) {
                 if (target.exists() && !target.delete()) { temp.delete(); return; }

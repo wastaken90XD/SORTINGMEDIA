@@ -47,6 +47,18 @@ public final class SortCoordinator {
                 sliceStarted = now;
             }
         }
+
+        /** User-initiated work ignores idle/input pauses but remains chunked. */
+        public void userCheckpoint() {
+            if (!isCurrent()) throw new CancelledTaskException();
+            int chunk = Math.max(5, Math.min(50,
+                    prefs.getInt("smart_chunk_ms", 20) / (lowMemory ? 2 : 1)));
+            long now = SystemClock.uptimeMillis();
+            if (now - sliceStarted >= chunk) {
+                Thread.yield();
+                sliceStarted = now;
+            }
+        }
     }
 
     private static final class CancelledTaskException extends RuntimeException {

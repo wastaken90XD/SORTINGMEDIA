@@ -43,6 +43,12 @@ public class TagManager {
     // Listener for tag list changes
     public interface TagChangeListener {
         void onTagsChanged();
+        /** Bulk operations can provide the changed paths without breaking old listeners. */
+        default void onTagsChanged(Set<String> changedPaths) { onTagsChanged(); }
+    }
+    public static final class BulkTagResult {
+        public final Set<String> changedPaths = new HashSet<String>();
+        public final Set<String> failedPaths = new HashSet<String>();
     }
     private TagChangeListener tagChangeListener;
 
@@ -52,6 +58,10 @@ public class TagManager {
 
     private void notifyTagsChanged() {
         if (tagChangeListener != null) tagChangeListener.onTagsChanged();
+    }
+
+    private void notifyTagsChanged(Set<String> changedPaths) {
+        if (tagChangeListener != null) tagChangeListener.onTagsChanged(changedPaths);
     }
 
     public TagManager(Context context) {
@@ -233,6 +243,82 @@ public class TagManager {
                 notifyTagsChanged();
             }
         });
+    }
+
+    /**
+     * Replaces complete tag sets in one index/XMP transaction per file and one
+     * coalesced catalog/listener event for the whole batch. A failed metadata
+     * write leaves that MediaFile untouched.
+     */
+    public boolean metadataWriteImmediate() {
+        return prefs.getBoolean("metadata_write_immediate", true);
+    }
+
+    public BulkTagResult replaceTagSets(List<MediaFile> files,
+                                        Map<String, List<String>> desiredByPath) {
+        boolean immediate = metadataWriteImmediate();
+        return replaceTagSets(files, desiredByPath, immediate);
+    }
+
+    public BulkTagResult replaceTagSets(List<MediaFile> files,
+                                        Map<String, List<String>> desiredByPath,
+                                        boolean metadataImmediate) {
+        BulkTagResult result = new BulkTagResult();
+        final Map<String, Integer> usageDelta = new HashMap<String, Integer>();
+        if (files == null || desiredByPath == null) return result;
+        for (MediaFile file : files) {
+            if (file == null || file.getPath() == null) continue;
+            List<String> desired = desiredByPath.get(file.getPath());
+            if (desired == null) continue;
+            List<String> normalized = new ArrayList<String>();
+            for (String raw : desired) {
+                String plain = TagText.plain(raw);
+                if (!plain.isEmpty() && !normalized.contains(plain)) normalized.add(plain);
+            }
+            List<String> previous = new ArrayList<String>(file.getTags());
+            if (previous.equals(normalized)) continue;
+            if (metadataImmediate && !MetadataWriter.writeTags(file.getPath(), normalized)) {
+                result.failedPaths.add(file.getPath());
+                continue;
+            }
+            file.setTags(normalized);
+            result.changedPaths.add(file.getPath());
+            for (String tag : previous) addDelta(usageDelta, tag, -1);
+            for (String tag : normalized) addDelta(usageDelta, tag, 1);
+        }
+        if (!result.changedPaths.isEmpty()) {
+            final Map<String, Integer> delta = new HashMap<String, Integer>(usageDelta);
+            final Set<String> changed = new HashSet<String>(result.changedPaths);
+            executor.submit(new Runnable() {
+                @Override public void run() {
+                    synchronized (tagMap) {
+                        for (Map.Entry<String, Integer> entry : delta.entrySet()) {
+                            String name = entry.getKey();
+                            int change = entry.getValue() == null ? 0 : entry.getValue();
+                            if (change == 0) continue;
+                            Tag tag = tagMap.get(name);
+                            if (tag == null) {
+                                if (change < 0) continue;
+                                tag = new Tag(name);
+                                tagMap.put(name, tag);
+                                db.tagDao().insert(tag);
+                            }
+                            tag.setUsageCount(Math.max(0, tag.getUsageCount() + change));
+                            db.tagDao().update(tag);
+                        }
+                    }
+                    notifyTagsChanged(changed);
+                }
+            });
+        }
+        return result;
+    }
+
+    private void addDelta(Map<String, Integer> delta, String tag, int amount) {
+        String plain = TagText.plain(tag);
+        if (plain.isEmpty()) return;
+        Integer old = delta.get(plain);
+        delta.put(plain, (old == null ? 0 : old) + amount);
     }
 
     // ── Undo last applied tag ─────────────────────────────────────────────────

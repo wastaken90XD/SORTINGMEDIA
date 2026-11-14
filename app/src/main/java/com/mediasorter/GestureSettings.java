@@ -146,9 +146,16 @@ public class GestureSettings {
         // dpad_enabled is a UI/control setting, so it has one canonical home
         // in settings_prefs rather than being duplicated in gesture_prefs.
         this.settingsPrefs = context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
+    }
+
+    /** Runs legacy/default migrations off the Activity lifecycle thread. */
+    public void migrateIfNeeded() {
+        if (settingsPrefs.getInt("prefs_migration_version", 0) >= 1) return;
         ensureVolumeDefaults();
         migrateLegacyControlKeys();
         migrateMacroGesturesToCombos();
+        SortProfileManager.migrateSpecDefaults(settingsPrefs);
+        settingsPrefs.edit().putInt("prefs_migration_version", 1).commit();
     }
 
     public int getMaxGestureSteps() {

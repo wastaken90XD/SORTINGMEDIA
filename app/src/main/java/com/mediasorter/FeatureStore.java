@@ -6,11 +6,13 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Shared, small primitive feature snapshot used by interactive sort modes. */
 public final class FeatureStore {
     public static final class Snapshot {
-        public final List<MediaFile> files;
+        public final String[] paths;
         public final long[] hashes;
         public final boolean[] hashPresent;
         public final float[] aspect;
@@ -22,8 +24,8 @@ public final class FeatureStore {
         public final String[] nameTokens;
 
         Snapshot(List<MediaFile> source) {
-            files = new ArrayList<MediaFile>(source);
-            int size = files.size();
+            int size = source == null ? 0 : source.size();
+            paths = new String[size];
             hashes = new long[size];
             hashPresent = new boolean[size];
             aspect = new float[size];
@@ -37,6 +39,9 @@ public final class FeatureStore {
     }
 
     private final SmartFeatureCache cache;
+    private final ExecutorService saveExecutor = Executors.newSingleThreadExecutor();
+    private boolean saveQueued;
+    private boolean saveDirty;
 
     public FeatureStore(android.content.Context context) {
         cache = new SmartFeatureCache(context.getFilesDir());
@@ -53,6 +58,7 @@ public final class FeatureStore {
         for (int i = 0; i < safe.size(); i++) {
             MediaFile file = safe.get(i);
             if (file == null) continue;
+            result.paths[i] = file.getPath();
             result.modified[i] = file.getDateAdded();
             SmartFeatureCache.Entry cached = cache.get(file.getPath(), file.getSize(),
                     file.getDateAdded(), -1);
@@ -84,7 +90,33 @@ public final class FeatureStore {
                 cache.remapPath(entry.getKey(), entry.getValue());
             }
         }
-        cache.save();
+        queueCacheSave();
+    }
+
+    private synchronized void queueCacheSave() {
+        saveDirty = true;
+        if (saveQueued) return;
+        saveQueued = true;
+        saveExecutor.submit(new Runnable() {
+            @Override public void run() {
+                while (true) {
+                    synchronized (FeatureStore.this) {
+                        if (!saveDirty) {
+                            saveQueued = false;
+                            return;
+                        }
+                        saveDirty = false;
+                    }
+                    cache.save();
+                }
+            }
+        });
+    }
+
+    /** Conservative primitive-array estimate; object/path storage is excluded. */
+    public static long estimatedPrimitiveBytes(int fileCount) {
+        long n = Math.max(0, fileCount);
+        return n * (8L + 1L + 4L + 4L + 8L + 4L * 4L);
     }
 
     public SmartFeatureCache getCache() { return cache; }

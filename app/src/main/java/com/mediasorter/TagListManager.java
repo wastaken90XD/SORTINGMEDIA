@@ -33,7 +33,8 @@ public class TagListManager {
             def.setDefault(true);
             lists.add(def);
             activeIndex = 0;
-            save();
+            // Defaults are held in memory until a user action persists them;
+            // constructors must not write SharedPreferences.
             return;
         }
 
