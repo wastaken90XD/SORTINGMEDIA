@@ -2717,6 +2717,7 @@ public class MainActivity extends Activity
                     if (smartArranged) {
                         List<MediaFile> filteredBase = filterManager.apply(base);
                         pageGroups = filteredSmartGroups(smartSnapshot.groups, filteredBase);
+                        sortManager.collapseGroupDuplicates(pageGroups);
                         flattened = flattenGroups(pageGroups);
                     } else if (groupingByTag) {
                         // Filter actual files before grouping so each group
@@ -2724,6 +2725,7 @@ public class MainActivity extends Activity
                         // still evaluated against every sanitized tag.
                         List<MediaFile> filteredBase = filterManager.apply(base);
                         List<Group> groups = groupManager.group(filteredBase);
+                        sortManager.collapseGroupDuplicates(groups);
                         TagGroupPage page = paginateTagGroups(groups,
                                 requestedTagPage, requestedPageSize);
                         pageGroups = page.groups;

@@ -3,6 +3,7 @@ package com.mediasorter;
 import android.content.Context;
 import android.content.SharedPreferences;
 import com.mediasorter.features.RandomGenerator;
+import com.mediasorter.models.Group;
 import com.mediasorter.models.MediaFile;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -436,6 +437,19 @@ public class SortManager {
         if (prefs != null && "collapse".equalsIgnoreCase(
                 prefs.getString("sort_dupes_mode", "ignore"))) {
             collapseExactDuplicates(files);
+        }
+    }
+
+    /** Apply duplicate adjacency to each virtual group without changing group membership. */
+    public void collapseGroupDuplicates(List<Group> groups) {
+        if (groups == null || prefs == null || !"collapse".equalsIgnoreCase(
+                prefs.getString("sort_dupes_mode", "ignore"))) return;
+        for (Group group : groups) {
+            if (group == null || group.getCount() < 2) continue;
+            List<MediaFile> reordered = new ArrayList<MediaFile>(group.getFiles());
+            collapseExactDuplicates(reordered);
+            group.clear();
+            for (MediaFile file : reordered) group.addFile(file);
         }
     }
 
