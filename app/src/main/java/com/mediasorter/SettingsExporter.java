@@ -546,7 +546,13 @@ public final class SettingsExporter {
     private static void applyOneValue(SharedPreferences prefs, String prefsName,
                                        String key, Object value, ApplyResult result) {
         SharedPreferences.Editor editor = prefs.edit();
-        if (value instanceof JSONArray) {
+        boolean legacyCompareVolume = "settings_prefs".equals(prefsName)
+                && "compare_volume_pick".equals(key) && value instanceof Boolean;
+        Object verificationValue = legacyCompareVolume
+                ? (((Boolean) value).booleanValue() ? "up_left_down_right" : "off") : value;
+        if (legacyCompareVolume) {
+            editor.putString(key, (String) verificationValue);
+        } else if (value instanceof JSONArray) {
             Set<String> set = new HashSet<String>();
             JSONArray array = (JSONArray) value;
             for (int i = 0; i < array.length(); i++) set.add(array.optString(i, ""));
@@ -564,7 +570,7 @@ public final class SettingsExporter {
         else if (value instanceof String) editor.putString(key, (String) value);
         else throw new IllegalArgumentException("Unsupported preference value");
         if (!editor.commit()) throw new IllegalStateException("commit returned false");
-        verifyPreference(prefs, key, value, result);
+        verifyPreference(prefs, key, verificationValue, result);
     }
 
     private static void verifyPreference(SharedPreferences prefs, String key,

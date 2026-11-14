@@ -834,7 +834,10 @@ public class SettingsActivity extends Activity {
     }
 
     private int compareVolumePosition() {
-        String value = settingsPrefs.getString("compare_volume_pick", "off");
+        Object raw = settingsPrefs.getAll().get("compare_volume_pick");
+        String value = raw instanceof String ? (String) raw
+                : raw instanceof Boolean && ((Boolean) raw).booleanValue()
+                ? "up_left_down_right" : "off";
         if ("up_left_down_right".equals(value)) return 1;
         if ("up_right_down_left".equals(value)) return 2;
         return 0;

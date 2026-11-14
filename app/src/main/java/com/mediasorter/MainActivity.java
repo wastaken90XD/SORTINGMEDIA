@@ -909,10 +909,21 @@ public class MainActivity extends Activity
         catch (Exception ignored) { return 1; }
     }
 
+    private String compareVolumePick() {
+        Object raw = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getAll().get("compare_volume_pick");
+        if (raw instanceof String) return (String) raw;
+        // Older profile resets stored this key as a Boolean. Read it without
+        // throwing ClassCastException and keep the old enabled meaning.
+        if (raw instanceof Boolean && ((Boolean) raw).booleanValue()) {
+            return "up_left_down_right";
+        }
+        return "off";
+    }
+
     private void executeVolumeMapping(int keyCode, boolean longPress) {
         if (!longPress && compareQuestion != null) {
-            String pick = getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                    .getString("compare_volume_pick", "off");
+            String pick = compareVolumePick();
             if ("up_left_down_right".equals(pick)) {
                 answerCompare(keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
                         ? CompareSortEngine.Answer.LEFT : CompareSortEngine.Answer.RIGHT);
