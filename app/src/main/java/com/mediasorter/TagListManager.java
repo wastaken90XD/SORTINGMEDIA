@@ -47,7 +47,8 @@ public class TagListManager {
 
             if (!tagsCsv.isEmpty()) {
                 for (String t : tagsCsv.split(",")) {
-                    if (!t.trim().isEmpty()) list.addTag(t.trim());
+                    String plain = TagText.plain(t);
+                    if (!plain.isEmpty()) list.addTag(plain);
                 }
             }
             lists.add(list);
@@ -117,13 +118,15 @@ public class TagListManager {
 
     public void addTagToList(int index, String tag) {
         if (index < 0 || index >= lists.size()) return;
-        lists.get(index).addTag(tag);
+        String plain = TagText.plain(tag);
+        if (plain.isEmpty()) return;
+        lists.get(index).addTag(plain);
         save();
     }
 
     public void removeTagFromList(int index, String tag) {
         if (index < 0 || index >= lists.size()) return;
-        lists.get(index).removeTag(tag);
+        lists.get(index).removeTag(TagText.plain(tag));
         save();
     }
 
@@ -140,9 +143,11 @@ public class TagListManager {
         if (lists.isEmpty()) return 0;
         TagList active = lists.get(activeIndex);
         int added = 0;
+        if (tags == null) return 0;
         for (String tag : tags) {
-            if (!tag.isEmpty() && !active.containsTag(tag)) {
-                active.addTag(tag);
+            String plain = TagText.plain(tag);
+            if (!plain.isEmpty() && !active.containsTag(plain)) {
+                active.addTag(plain);
                 added++;
             }
         }
@@ -155,9 +160,11 @@ public class TagListManager {
         if (index < 0 || index >= lists.size()) return 0;
         TagList list = lists.get(index);
         int added = 0;
+        if (tags == null) return 0;
         for (String tag : tags) {
-            if (!tag.isEmpty() && !list.containsTag(tag)) {
-                list.addTag(tag);
+            String plain = TagText.plain(tag);
+            if (!plain.isEmpty() && !list.containsTag(plain)) {
+                list.addTag(plain);
                 added++;
             }
         }

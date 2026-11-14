@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Media Sorter</string>
+    <string name="app_name">Magnus</string>
+    <string name="app_tagline">An app for sorting media of any kind.</string>
+    <string name="app_automation_message">Built with the potential to become fully automated.</string>
+    <string name="app_about_message">Magnus\nAn app for sorting media of any kind.\n\nBuilt with the potential to become fully automated.</string>
     <string name="search_hint">Search by name or tag…</string>
     <string name="no_preview">Format not supported for preview</string>
     <string name="tag_hint">New tag name…</string>

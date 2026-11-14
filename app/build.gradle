@@ -9,8 +9,8 @@ android {
         applicationId "com.mediasorter"
         minSdk        21
         targetSdk     33           // bump to 33 (good practice, matches compileSdk)
-        versionCode   1
-        versionName   "1.0"
+        versionCode   296
+        versionName   "1.1"
     }
 
     buildTypes {

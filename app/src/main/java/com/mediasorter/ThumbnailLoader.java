@@ -68,7 +68,10 @@ public class ThumbnailLoader {
     }
 
     public long getMaxBytes() {
-        return prefs.getLong(KEY_MAX_BYTES, DEFAULT_MAX_BYTES);
+        Object raw = prefs.getAll().get(KEY_MAX_BYTES);
+        if (raw instanceof Long) return ((Long) raw).longValue();
+        if (raw instanceof Integer) return ((Integer) raw).longValue();
+        return DEFAULT_MAX_BYTES;
     }
 
     public void setMaxBytes(long bytes) {
@@ -117,41 +120,114 @@ public class ThumbnailLoader {
 
         cancel(path);
 
-        Future<?> task = executor.submit(() -> {
-            Bitmap bmp     = null;
-            int    quality = getQuality();
+        Future<?> task = executor.submit(new Runnable() {
+            @Override public void run() {
+                Bitmap bmp     = null;
+                int    quality = getQuality();
 
-            // Disk cache
-            File thumbFile = diskCache.getThumbnailFile(path);
-            if (thumbFile.exists()) {
-                bmp = BitmapFactory.decodeFile(thumbFile.getAbsolutePath());
-            }
-
-            // Generate
-            if (bmp == null) {
-                bmp = generate(file, quality);
-                if (bmp != null) saveToDisk(bmp, thumbFile);
-            }
-
-            if (bmp != null) putInMemCache(path, bmp);
-
-            final Bitmap finalBmp = bmp;
-            mainHandler.post(() -> {
-                if (path.equals(target.getTag())) {
-                    if (finalBmp != null && !finalBmp.isRecycled()) {
-                        target.setImageBitmap(finalBmp);
-                        target.setBackgroundColor(0x00000000);
-                    } else {
-                        target.setImageResource(
-                            android.R.drawable.ic_menu_report_image);
-                    }
+                // Disk cache
+                File thumbFile = diskCache.getThumbnailFile(path);
+                if (thumbFile.exists()) {
+                    bmp = BitmapFactory.decodeFile(thumbFile.getAbsolutePath());
                 }
-            });
 
-            inFlight.remove(path);
+                // Generate
+                if (bmp == null) {
+                    bmp = generate(file, quality);
+                    if (bmp != null) saveToDisk(bmp, thumbFile);
+                }
+
+                if (bmp != null) putInMemCache(path, bmp);
+
+                final Bitmap finalBmp = bmp;
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        if (path.equals(target.getTag())) {
+                            if (finalBmp != null && !finalBmp.isRecycled()) {
+                                target.setImageBitmap(finalBmp);
+                                target.setBackgroundColor(0x00000000);
+                            } else {
+                                target.setImageResource(
+                                    android.R.drawable.ic_menu_report_image);
+                            }
+                        }
+                    }
+                });
+
+                inFlight.remove(path);
+            }
         });
 
         inFlight.put(path, task);
+    }
+
+    /**
+     * Decode an image or a midpoint video frame for a fixed preview cell.
+     * Unlike the legacy load() path this does not use the disk thumbnail size:
+     * the requested cell dimensions are part of the decode decision.  The
+     * request token on the ImageView gives Compare latest-wins behaviour when
+     * a question is answered while a decode is still running.
+     */
+    public void loadAtSize(final MediaFile file, final ImageView target,
+                           final int requestedWidth, final int requestedHeight) {
+        if (file == null || target == null || file.getPath() == null) return;
+        final String path = file.getPath();
+        final String token = "compare-view:" + path + ":" + System.nanoTime();
+        target.setTag(token);
+        target.setImageBitmap(null);
+        final int width = Math.max(1, requestedWidth);
+        final int height = Math.max(1, requestedHeight);
+        final String flightKey = "compare-view:" + path;
+        cancel(flightKey);
+        Future<?> task;
+        try {
+            task = executor.submit(new Runnable() {
+                @Override public void run() {
+                    Bitmap bitmap = generateAtSize(file, width, height);
+                    if (bitmap != null) putInMemCache(path, bitmap);
+                    final Bitmap result = bitmap;
+                    mainHandler.post(new Runnable() {
+                        @Override public void run() {
+                            if (!token.equals(target.getTag())) return;
+                            if (result != null && !result.isRecycled()) {
+                                target.setImageBitmap(result);
+                                target.setBackgroundColor(0x00000000);
+                            } else {
+                                target.setImageResource(android.R.drawable.ic_menu_report_image);
+                            }
+                        }
+                    });
+                    inFlight.remove(flightKey);
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            return;
+        }
+        inFlight.put(flightKey, task);
+    }
+
+    /** Preloads a fixed-size Compare cell without requiring an attached view. */
+    public void precacheAtSize(final MediaFile file, final int requestedWidth,
+                               final int requestedHeight) {
+        if (file == null || file.getPath() == null) return;
+        final String path = file.getPath();
+        final String flightKey = "compare-preload:" + path;
+        if (inFlight.containsKey(flightKey)) return;
+        final int width = Math.max(1, requestedWidth);
+        final int height = Math.max(1, requestedHeight);
+        Future<?> task;
+        try {
+            task = executor.submit(new Runnable() {
+                @Override public void run() {
+                    Bitmap bitmap = generateAtSize(file, width, height);
+                    if (bitmap != null) putInMemCache(path, bitmap);
+                    inFlight.remove(flightKey);
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            return;
+        }
+        inFlight.put(flightKey, task);
     }
 
     /**
@@ -169,26 +245,28 @@ public void precache(List<MediaFile> files) {
         // Already being loaded? skip
         if (inFlight.containsKey(path)) continue;
 
-        Future<?> task = executor.submit(() -> {
-            Bitmap bmp = null;
-            int quality = getQuality();
+        Future<?> task = executor.submit(new Runnable() {
+            @Override public void run() {
+                Bitmap bmp = null;
+                int quality = getQuality();
 
-            // Try disk cache first
-            File thumbFile = diskCache.getThumbnailFile(path);
-            if (thumbFile.exists()) {
-                bmp = BitmapFactory.decodeFile(thumbFile.getAbsolutePath());
+                // Try disk cache first
+                File thumbFile = diskCache.getThumbnailFile(path);
+                if (thumbFile.exists()) {
+                    bmp = BitmapFactory.decodeFile(thumbFile.getAbsolutePath());
+                }
+
+                // Generate if needed
+                if (bmp == null) {
+                    bmp = generate(file, quality);
+                    if (bmp != null) saveToDisk(bmp, thumbFile);
+                }
+
+                // Store in memory cache (does not recycle, safe)
+                if (bmp != null) putInMemCache(path, bmp);
+
+                inFlight.remove(path);
             }
-
-            // Generate if needed
-            if (bmp == null) {
-                bmp = generate(file, quality);
-                if (bmp != null) saveToDisk(bmp, thumbFile);
-            }
-
-            // Store in memory cache (does not recycle, safe)
-            if (bmp != null) putInMemCache(path, bmp);
-
-            inFlight.remove(path);
         });
 
         inFlight.put(path, task);
@@ -322,14 +400,37 @@ public void precache(List<MediaFile> files) {
         }
     }
 
+    private Bitmap generateAtSize(MediaFile file, int requestedWidth, int requestedHeight) {
+        try {
+            switch (file.getType()) {
+                case IMAGE:
+                    return generateImageAtSize(file.getPath(), requestedWidth, requestedHeight);
+                case VIDEO:
+                    return generateVideoAtSize(file.getPath(), requestedWidth, requestedHeight);
+                default:
+                    return null;
+            }
+        } catch (OutOfMemoryError e) {
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private Bitmap generateImage(String path, int size) {
+        return generateImageAtSize(path, size, size);
+    }
+
+    private Bitmap generateImageAtSize(String path, int requestedWidth, int requestedHeight) {
         try {
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeFile(path, opts);
-            opts.inSampleSize       = calcSampleSize(opts, size, size);
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) return null;
+            opts.inSampleSize = calcSampleSize(opts, requestedWidth, requestedHeight);
             opts.inJustDecodeBounds = false;
-            return BitmapFactory.decodeFile(path, opts);
+            Bitmap decoded = BitmapFactory.decodeFile(path, opts);
+            return applyExifOrientation(path, decoded);
         } catch (OutOfMemoryError e) {
             return null;
         }
@@ -343,28 +444,144 @@ public void precache(List<MediaFile> files) {
      * ideal but is API 27+; we scale manually to stay API-21 compatible.)
      */
     private Bitmap generateVideo(String path, int size) {
+        return generateVideoFrame(path, size, size, false);
+    }
+
+    private Bitmap generateVideoAtSize(String path, int requestedWidth, int requestedHeight) {
+        return generateVideoFrame(path, requestedWidth, requestedHeight, true);
+    }
+
+    /** Extracts a bounded midpoint frame for Compare instead of starting at t=0. */
+    private Bitmap generateVideoFrame(String path, int requestedWidth, int requestedHeight,
+                                      boolean midpoint) {
         MediaMetadataRetriever r = new MediaMetadataRetriever();
+        Bitmap frame = null;
         try {
             r.setDataSource(path);
-            Bitmap frame = r.getFrameAtTime(0);
+            long timeUs = 0L;
+            if (midpoint) {
+                String duration = r.extractMetadata(
+                        MediaMetadataRetriever.METADATA_KEY_DURATION);
+                long durationMs = 0L;
+                try { durationMs = Long.parseLong(duration == null ? "0" : duration); }
+                catch (NumberFormatException ignored) {}
+                timeUs = Math.max(0L, durationMs * 1000L / 2L);
+            }
+            frame = r.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
             if (frame == null) return null;
             int w = frame.getWidth();
             int h = frame.getHeight();
-            if (w <= 0 || h <= 0) { frame.recycle(); return null; }
-            if (w <= size && h <= size) return frame;
-            float ratio = Math.min((float) size / w, (float) size / h);
+            if (w <= 0 || h <= 0) return null;
+            if (w <= requestedWidth && h <= requestedHeight) return frame;
+            float ratio = Math.min((float) requestedWidth / w,
+                    (float) requestedHeight / h);
             int nw = Math.max(1, Math.round(w * ratio));
             int nh = Math.max(1, Math.round(h * ratio));
             Bitmap scaled = Bitmap.createScaledBitmap(frame, nw, nh, true);
-            frame.recycle();
+            frame = null;
             return scaled;
         } catch (OutOfMemoryError e) {
             return null;
         } catch (Exception e) {
             return null;
         } finally {
+            // Bitmap ownership is intentionally left to the ImageView/cache;
+            // never recycle a frame that may already be displayed.
             try { r.release(); } catch (Exception ignored) {}
         }
+    }
+
+    /**
+     * Reads the baseline JPEG orientation without requiring the API-24
+     * android.media.ExifInterface class, keeping the minSdk at 21.  Malformed
+     * or non-JPEG files simply use the normal orientation.
+     */
+    private Bitmap applyExifOrientation(String path, Bitmap bitmap) {
+        if (bitmap == null) return null;
+        int orientation = readJpegOrientation(path);
+        if (orientation <= 1 || orientation > 8) return bitmap;
+        android.graphics.Matrix matrix = new android.graphics.Matrix();
+        switch (orientation) {
+            case 2: matrix.setScale(-1f, 1f); break;
+            case 3: matrix.setRotate(180f); break;
+            case 4: matrix.setScale(1f, -1f); break;
+            case 5: matrix.setRotate(90f); matrix.postScale(-1f, 1f); break;
+            case 6: matrix.setRotate(90f); break;
+            case 7: matrix.setRotate(-90f); matrix.postScale(-1f, 1f); break;
+            case 8: matrix.setRotate(-90f); break;
+            default: return bitmap;
+        }
+        try {
+            return Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(),
+                    matrix, true);
+        } catch (OutOfMemoryError error) {
+            return bitmap;
+        } catch (Exception error) {
+            return bitmap;
+        }
+    }
+
+    private int readJpegOrientation(String path) {
+        java.io.RandomAccessFile input = null;
+        try {
+            java.io.File source = new java.io.File(path);
+            long length = Math.min(source.length(), 1024L * 1024L);
+            if (length < 4) return 1;
+            byte[] bytes = new byte[(int) length];
+            input = new java.io.RandomAccessFile(source, "r");
+            input.readFully(bytes);
+            if ((bytes[0] & 0xFF) != 0xFF || (bytes[1] & 0xFF) != 0xD8) return 1;
+            int offset = 2;
+            while (offset + 4 < bytes.length) {
+                if ((bytes[offset] & 0xFF) != 0xFF) { offset++; continue; }
+                int marker = bytes[offset + 1] & 0xFF;
+                if (marker == 0xDA || marker == 0xD9) break;
+                int segmentLength = readUnsignedShort(bytes, offset + 2, false);
+                if (segmentLength < 2 || offset + 2 + segmentLength > bytes.length) break;
+                if (marker == 0xE1 && segmentLength >= 8
+                        && bytes[offset + 4] == 'E' && bytes[offset + 5] == 'x'
+                        && bytes[offset + 6] == 'i' && bytes[offset + 7] == 'f'
+                        && bytes[offset + 8] == 0 && bytes[offset + 9] == 0) {
+                    int tiff = offset + 10;
+                    boolean little = bytes[tiff] == 'I' && bytes[tiff + 1] == 'I';
+                    if (!little && !(bytes[tiff] == 'M' && bytes[tiff + 1] == 'M')) return 1;
+                    int ifdOffset = readInt(bytes, tiff + 4, little);
+                    int ifd = tiff + ifdOffset;
+                    int count = readUnsignedShort(bytes, ifd, little);
+                    for (int i = 0; i < count; i++) {
+                        int entry = ifd + 2 + i * 12;
+                        if (entry + 12 > bytes.length) return 1;
+                        if (readUnsignedShort(bytes, entry, little) == 0x0112) {
+                            return readUnsignedShort(bytes, entry + 8, little);
+                        }
+                    }
+                    return 1;
+                }
+                offset += 2 + segmentLength;
+            }
+        } catch (Exception ignored) {
+            return 1;
+        } finally {
+            if (input != null) try { input.close(); } catch (Exception ignored) {}
+        }
+        return 1;
+    }
+
+    private int readUnsignedShort(byte[] data, int offset, boolean little) {
+        if (offset < 0 || offset + 1 >= data.length) return 0;
+        int first = data[offset] & 0xFF;
+        int second = data[offset + 1] & 0xFF;
+        return little ? first | (second << 8) : (first << 8) | second;
+    }
+
+    private int readInt(byte[] data, int offset, boolean little) {
+        if (offset < 0 || offset + 3 >= data.length) return 0;
+        int a = data[offset] & 0xFF;
+        int b = data[offset + 1] & 0xFF;
+        int c = data[offset + 2] & 0xFF;
+        int d = data[offset + 3] & 0xFF;
+        return little ? a | (b << 8) | (c << 16) | (d << 24)
+                : (a << 24) | (b << 16) | (c << 8) | d;
     }
 
     private void saveToDisk(Bitmap bmp, File file) {

@@ -8,6 +8,7 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 import com.mediasorter.R;
+import com.mediasorter.TagText;
 import com.mediasorter.models.MediaFile;
 import com.mediasorter.models.Tag;
 import java.util.ArrayList;
@@ -19,12 +20,21 @@ public class TagAdapter extends RecyclerView.Adapter<TagAdapter.ViewHolder> {
         void onTagToggle(String tagName, boolean applied);
     }
 
+    public interface OnTagLongPressListener {
+        void onTagLongPress(String tagName, View anchor);
+    }
+
     private List<Tag>         tags     = new ArrayList<>();
     private MediaFile         current  = null;
     private OnTagToggleListener listener;
+    private OnTagLongPressListener longPressListener;
 
     public TagAdapter(OnTagToggleListener listener) {
         this.listener = listener;
+    }
+
+    public void setOnTagLongPressListener(OnTagLongPressListener listener) {
+        this.longPressListener = listener;
     }
 
     public void setTags(List<Tag> tags) {
@@ -43,8 +53,9 @@ public class TagAdapter extends RecyclerView.Adapter<TagAdapter.ViewHolder> {
     }
 
     public void removeTag(String name) {
+        String plain = TagText.plain(name);
         for (int i = 0; i < tags.size(); i++) {
-            if (tags.get(i).getName().equals(name)) {
+            if (tags.get(i).getName().equals(plain)) {
                 tags.remove(i);
                 notifyItemRemoved(i);
                 return;
@@ -68,20 +79,35 @@ public class TagAdapter extends RecyclerView.Adapter<TagAdapter.ViewHolder> {
     @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         Tag tag = tags.get(position);
+        String tagName = TagText.plain(tag.getName());
 
-        holder.tagName.setText(tag.getName());
+        holder.tagName.setText(tagName);
         holder.tagCount.setText(String.valueOf(tag.getUsageCount()));
 
-        boolean applied = current != null && current.hasTag(tag.getName());
+        boolean applied = current != null && current.hasTag(tagName);
         holder.tagCheck.setOnCheckedChangeListener(null);
         holder.tagCheck.setChecked(applied);
 
-        holder.tagCheck.setOnCheckedChangeListener((btn, checked) -> {
-            if (listener != null) listener.onTagToggle(tag.getName(), checked);
+        holder.tagCheck.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+            @Override public void onCheckedChanged(android.widget.CompoundButton btn,
+                                                   boolean checked) {
+                if (listener != null) listener.onTagToggle(tagName, checked);
+            }
         });
 
-        holder.itemView.setOnClickListener(v -> {
-            holder.tagCheck.toggle();
+        holder.itemView.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                holder.tagCheck.toggle();
+            }
+        });
+        holder.itemView.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                if (longPressListener != null) {
+                    longPressListener.onTagLongPress(tagName, v);
+                    return true;
+                }
+                return false;
+            }
         });
     }
 

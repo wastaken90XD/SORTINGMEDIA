@@ -15,6 +15,15 @@ public abstract class Action {
     public abstract boolean execute(MediaFile file, Context context,
             TagManager tagManager, BatchRenameManager renamer, FileStatus fileStatus);
 
+    /** Optional inverse used by composite actions; simple actions use the
+     * organizer snapshot fallback when they do not provide one. */
+    public boolean undo(MediaFile file, Context context, TagManager tagManager,
+                        BatchRenameManager renamer, FileStatus fileStatus) {
+        // The organizer's state snapshot is the fallback inverse for actions
+        // that do not provide a bespoke implementation.
+        return true;
+    }
+
     public List<String> getLog() { return log; }
     public void clearLog() { log.clear(); }
 
@@ -34,6 +43,10 @@ public abstract class Action {
 
     public static Action tagAction(List<String> tagsToAdd, List<String> tagsToRemove) {
         return new TagAction(tagsToAdd, tagsToRemove);
+    }
+
+    public static Action replaceTagsAction(List<String> replacementTags, String sequenceRule) {
+        return new ReplaceTagsAction(replacementTags, sequenceRule);
     }
 
     public static Action statusAction(FileStatus.Status status, boolean clear) {
