@@ -73,6 +73,9 @@ public final class GestureConstants {
     public static final String ACTION_GAME_EXIT = "GAME_EXIT";
     public static final String ACTION_GAME_RESUME = "GAME_RESUME";
     public static final String ACTION_REPLACE_TAGS = "REPLACE_TAGS";
+    public static final String ACTION_REPLACE_TAGS_WITH = "REPLACE_TAGS_WITH";
+    public static final String ACTION_REPLACE_KEEP_LAST_USED = "REPLACE_KEEP_LAST_USED";
+    public static final String ACTION_REPLACE_KEEP_FIRST = "REPLACE_KEEP_FIRST";
     public static final String ACTION_CYCLE_TAG_PRESETS = "CYCLE_TAG_PRESETS";
     public static final String ACTION_NEXT_PAGE = "NEXT_PAGE";
     public static final String ACTION_PREVIOUS_PAGE = "PREVIOUS_PAGE";
@@ -248,6 +251,9 @@ public final class GestureConstants {
         add(ACTION_GAME_EXIT, "Exit Batch Game", Category.VIEWING);
         add(ACTION_GAME_RESUME, "Resume Batch Game", Category.VIEWING);
         add(ACTION_REPLACE_TAGS, "Replace tags", Category.TAGGING);
+        add(ACTION_REPLACE_TAGS_WITH, "Replace tags with selected", Category.TAGGING);
+        add(ACTION_REPLACE_KEEP_LAST_USED, "Keep last used tag", Category.TAGGING);
+        add(ACTION_REPLACE_KEEP_FIRST, "Keep first tag", Category.TAGGING);
         add(ACTION_CYCLE_TAG_PRESETS, "Cycle tag presets", Category.TAGGING);
         add(ACTION_TOGGLE_TAG_PANEL, "Toggle tag bar", Category.TAGGING);
         add(ACTION_CYCLE_TAG_BAR_SORT, "Cycle tag bar sort", Category.TAGGING);

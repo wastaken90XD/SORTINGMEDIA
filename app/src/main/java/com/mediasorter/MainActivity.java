@@ -2282,6 +2282,55 @@ public class MainActivity extends Activity
         });
     }
 
+    private void replaceKeepFirst() {
+        runReplaceRule(ReplaceTagsManager.SequenceRule.KEEP_FIRST, new ArrayList<String>());
+    }
+
+    private void replaceKeepLastUsed() {
+        List<Tag> recent = tagManager == null ? new ArrayList<Tag>() : tagManager.getRecentTags(1);
+        if (recent.isEmpty()) {
+            Toast.makeText(this, "No recently used tag", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        replaceWithSingleTag(recent.get(0).getName(), getTagMenuTargets());
+    }
+
+    private void runReplaceRule(final ReplaceTagsManager.SequenceRule rule,
+                                final List<String> replacement) {
+        final List<MediaFile> snapshot = indexer.getFullIndex();
+        final Set<String> targets = new java.util.HashSet<String>(getActiveSelectedPaths());
+        if (targets.isEmpty() && currentFileReference() != null) targets.add(currentFileReference().getPath());
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                context.userCheckpoint();
+                final ReplaceTagsManager.Report report = ReplaceTagsManager.apply(
+                        snapshot, targets, replacement,
+                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getString("replace_sequence_patterns", "link_*,*_seq_*"),
+                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getString("replace_protect_patterns", ""), rule, tagManager,
+                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getBoolean("replace_purge_group_tags", false),
+                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getString("replace_mode", "replace_with"),
+                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getInt("replace_keep_max", 2),
+                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getBoolean("replace_protect_piles", false));
+                context.userCheckpoint();
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        replaceTagsUndo = report.previousTags;
+                        replaceTagsPurgedTags = new ArrayList<String>(report.purgedTags);
+                        replaceTagsPurgedUsage = new java.util.HashMap<String, Integer>(report.purgedUsage);
+                        replaceTagsPurgedCreatedAt = new java.util.HashMap<String, Long>(report.purgedCreatedAt);
+                        scheduleRefresh();
+                    }
+                });
+            }
+        });
+    }
+
     private void deleteTagFromFiles(final String tag) {
         new AlertDialog.Builder(this).setTitle("Delete tag?")
                 .setMessage(tag)
@@ -3016,6 +3065,9 @@ public class MainActivity extends Activity
             case GAME_EXIT: exitBatchGame(false); break;
             case GAME_RESUME: startBatchGame(); break;
             case REPLACE_TAGS: showReplaceTagsDialog(); break;
+            case REPLACE_TAGS_WITH: showReplaceTagsDialog(); break;
+            case REPLACE_KEEP_LAST_USED: replaceKeepLastUsed(); break;
+            case REPLACE_KEEP_FIRST: replaceKeepFirst(); break;
             case OPEN_GALLERY: setGalleryMode(true, true); break;
             case TOGGLE_GALLERY: setGalleryMode(!galleryModeActive, true); break;
             case OPEN_DASHBOARD: openDashboard(); break;
