@@ -5934,7 +5934,19 @@ private Spinner makeSpinner(String[] options) {
                                 }
                                 final List<ColorAnalyzer.Result> results =
                                         ColorAnalyzer.analyze(executionFiles, finalTopN,
-                                                finalThreshold, finalMode, tagManager, batchRenameManager);
+                                                finalThreshold, finalMode, tagManager, batchRenameManager,
+                                                new ColorAnalyzer.PathChangeListener() {
+                                                    @Override public void onPathChanged(final String oldPath,
+                                                                                        final String newPath) {
+                                                        mainHandler.post(new Runnable() {
+                                                            @Override public void run() {
+                                                                Map<String, String> changed = new java.util.HashMap<String, String>();
+                                                                changed.put(oldPath, newPath);
+                                                                onPathsChanged(changed, null);
+                                                            }
+                                                        });
+                                                    }
+                                                });
                                 mainHandler.post(new Runnable() {
                                     @Override public void run() {
                                         folderWatcher.resumeAll();

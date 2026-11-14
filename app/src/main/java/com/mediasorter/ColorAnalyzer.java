@@ -47,6 +47,7 @@ public class ColorAnalyzer {
         public boolean dominantOnly = false;
         public boolean detectHarmony = true;
         public ProgressListener progressListener;
+        public PathChangeListener pathChangeListener;
 
         // ── Golden ticket (signature colour) options ─────────────────────
         /** Optional plain-text prefix for the one-colour-per-file tag. */
@@ -63,6 +64,10 @@ public class ColorAnalyzer {
 
     public interface ProgressListener {
         void onProgress(int current, int total, String fileName);
+    }
+
+    public interface PathChangeListener {
+        void onPathChanged(String oldPath, String newPath);
     }
 
     private static final int SAMPLE = 64;
@@ -144,6 +149,19 @@ public class ColorAnalyzer {
         opts.topN = topN;
         opts.threshold = threshold;
         opts.mode = mode;
+        return analyze(files, opts, tagManager, renamer);
+    }
+
+    public static List<Result> analyze(List<MediaFile> files, int topN,
+                                       float threshold, Mode mode,
+                                       TagManager tagManager,
+                                       BatchRenameManager renamer,
+                                       PathChangeListener pathChanges) {
+        Options opts = new Options();
+        opts.topN = topN;
+        opts.threshold = threshold;
+        opts.mode = mode;
+        opts.pathChangeListener = pathChanges;
         return analyze(files, opts, tagManager, renamer);
     }
 
@@ -258,7 +276,7 @@ public class ColorAnalyzer {
                         tagManager.applyTag(f, signaturePrefix + r.signatureColor);
                     }
                     if (opts.mode == Mode.GOLDEN_TICKET) {
-                        renameWithPrefix(f, r,
+                        renameWithPrefix(f, r, opts.pathChangeListener,
                                 signaturePrefix.isEmpty()
                                         ? r.signatureColor.replace(" ", "-")
                                         : signaturePrefix.trim()
@@ -282,7 +300,7 @@ public class ColorAnalyzer {
             if (opts.mode == Mode.RENAME || opts.mode == Mode.TAG_AND_RENAME || opts.mode == Mode.ALL) {
                 String prefix = join("-", r.colors);
                 if (r.groupId >= 0) prefix = "GRP" + r.groupId + "-" + prefix;
-                renameWithPrefix(f, r, prefix);
+                renameWithPrefix(f, r, opts.pathChangeListener, prefix);
             }
         }
 
@@ -294,7 +312,8 @@ public class ColorAnalyzer {
      * overwrite existing files, and updates r.path on success. Tag writes
      * happen BEFORE renames (XMP is inside the file and travels with it).
      */
-    private static void renameWithPrefix(MediaFile f, Result r, String prefix) {
+    private static void renameWithPrefix(MediaFile f, Result r,
+                                         PathChangeListener pathChanges, String prefix) {
         String oldName = f.getName();
         String ext = "";
         int lastDot = oldName.lastIndexOf('.');
@@ -317,6 +336,7 @@ public class ColorAnalyzer {
         if (oldFile.renameTo(newFile)) {
             r.path = newFile.getAbsolutePath();
             f.setPath(newFile.getAbsolutePath());
+            if (pathChanges != null) pathChanges.onPathChanged(oldPath, f.getPath());
             String family = f.getColorFamily();
             if (!family.isEmpty()) {
                 LAST_COLOR_FAMILIES.remove(oldPath);
