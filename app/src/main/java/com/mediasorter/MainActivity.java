@@ -159,6 +159,15 @@ public class MainActivity extends Activity
     private float compareLastTouchY;
     private ScaleGestureDetector compareScaleDetector;
     private boolean compareHighResolutionLoaded;
+    private boolean compareSizeApplied;
+    private boolean compareRerenderCurrent;
+    private boolean batchSizeApplied;
+    private int batchPreviousExplorerPercent;
+    private int batchPreviousExplorerVisibility;
+    private int batchPreviousTagVisibility;
+    private int comparePreviousExplorerPercent;
+    private int comparePreviousExplorerVisibility;
+    private int comparePreviousTagVisibility;
     private Runnable gameAfterTag;
     private BatchGameEngine.Round gameRound;
     private TextView gameTitleView;
@@ -192,6 +201,7 @@ public class MainActivity extends Activity
     private Map<String, List<String>> smartPileUndo;
     private Map<String, Integer> compareOrderUndo;
     private String compareOrderPreviousSequence;
+    private boolean compareOrderApplied;
     private Map<String, List<String>> replaceTagsUndo;
     private List<String> replaceTagsPurgedTags;
     private Map<String, Integer> replaceTagsPurgedUsage;
@@ -3101,6 +3111,7 @@ public class MainActivity extends Activity
             case COMPARE_UNDO: undoCompare(); break;
             case COMPARE_EXIT: exitCompareSort(false); break;
             case COMPARE_RESUME: startCompareSort(); break;
+            case COMPARE_TOGGLE_SIZE: toggleCompareSizeMode(); break;
             case GAME_START: startBatchGame(); break;
             case GAME_SUBMIT: submitBatchGameRound(); break;
             case GAME_NONE: noneBatchGameRound(); break;
@@ -3891,6 +3902,7 @@ public class MainActivity extends Activity
         if (smartSortEngine != null) smartSortEngine.setPaused(true);
         removeSortModePanel();
         compareWarningShown = false;
+        compareOrderApplied = false;
         List<MediaFile> compareSnapshot = requestedSnapshot;
         java.util.Set<String> comparePaths = new java.util.HashSet<String>();
         for (MediaFile file : compareSnapshot) if (file != null) comparePaths.add(file.getPath());
@@ -3913,8 +3925,54 @@ public class MainActivity extends Activity
         showCompareQuestion();
     }
 
+    private void toggleCompareSizeMode() {
+        String current = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("compare_size_mode", "expanded");
+        String next = "panel".equals(current) ? "expanded"
+                : "expanded".equals(current) ? "fullscreen" : "panel";
+        getSharedPreferences("settings_prefs", MODE_PRIVATE).edit()
+                .putString("compare_size_mode", next).apply();
+        restoreCompareSizeMode();
+        applyCompareSizeMode();
+        removeSortModePanel();
+        compareRerenderCurrent = true;
+        showCompareQuestion();
+    }
+
+    private void applyCompareSizeMode() {
+        if (compareSizeApplied) return;
+        String mode = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("compare_size_mode", "expanded");
+        if ("panel".equals(mode)) return;
+        View explorer = findViewById(R.id.explorerPanel);
+        View tagBar = findViewById(R.id.tagBarContainer);
+        if (explorer == null || tagBar == null) return;
+        comparePreviousExplorerVisibility = explorer.getVisibility();
+        comparePreviousTagVisibility = tagBar.getVisibility();
+        comparePreviousExplorerPercent = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getInt("explorer_width_percent", 40);
+        explorer.setVisibility(View.GONE);
+        if ("fullscreen".equals(mode)) tagBar.setVisibility(View.GONE);
+        applyRootPanelWidths(0, true);
+        compareSizeApplied = true;
+    }
+
+    private void restoreCompareSizeMode() {
+        if (!compareSizeApplied) return;
+        View explorer = findViewById(R.id.explorerPanel);
+        View tagBar = findViewById(R.id.tagBarContainer);
+        if (explorer != null) explorer.setVisibility(comparePreviousExplorerVisibility);
+        if (tagBar != null) tagBar.setVisibility(comparePreviousTagVisibility);
+        applyRootPanelWidths(comparePreviousExplorerPercent,
+                findViewById(R.id.previewPanel) != null
+                        && findViewById(R.id.previewPanel).getVisibility() == View.VISIBLE);
+        compareSizeApplied = false;
+    }
+
     private void showCompareQuestion() {
-        compareQuestion = compareSortEngine.nextQuestion();
+        applyCompareSizeMode();
+        if (!compareRerenderCurrent) compareQuestion = compareSortEngine.nextQuestion();
+        else compareRerenderCurrent = false;
         if (compareQuestion == null) {
             showCompareResult();
             return;
@@ -3929,10 +3987,25 @@ public class MainActivity extends Activity
         TextView title = new TextView(this);
         title.setTextColor(0xFFFFFFFF);
         title.setText("Compare: " + comparePrefs.getString("compare_question", "Which goes first?")
-                + "  " + compareQuestion.questionNumber + "  " + compareQuestion.totalFiles
-                + " files, about " + compareSortEngine.estimateQuestions() + " questions"
+                + "  Pair " + compareQuestion.questionNumber + " of about "
+                + compareSortEngine.estimateQuestions() + " — Sorted: "
+                + compareSortEngine.getSortedPaths().size() + " of " + compareQuestion.totalFiles
                 + (compareQuestion.recheck ? "  (recheck)" : ""));
         sortModePanel.addView(title);
+        if (comparePrefs.getBoolean("compare_show_order_strip", true)) {
+            TextView orderStrip = new TextView(this);
+            orderStrip.setTextColor(0xFFAAAAAA);
+            List<String> soFar = compareSortEngine.getSortedPaths();
+            StringBuilder strip = new StringBuilder("Order so far: ");
+            int shown = Math.min(5, soFar.size());
+            for (int i = 0; i < shown; i++) {
+                if (i > 0) strip.append(", ");
+                strip.append(fileName(soFar.get(i)));
+            }
+            if (soFar.size() > shown) strip.append(", …");
+            orderStrip.setText(strip.toString());
+            sortModePanel.addView(orderStrip);
+        }
         final String leftPath = compareQuestion.candidateOnLeft
                 ? compareQuestion.candidatePath : compareQuestion.comparedPath;
         final String rightPath = compareQuestion.candidateOnLeft
@@ -3993,8 +4066,10 @@ public class MainActivity extends Activity
         row.setOrientation(LinearLayout.HORIZONTAL);
         Button left = makeSmallButton("Pick A: " + fileName(leftPath));
         Button right = makeSmallButton("Pick B: " + fileName(rightPath));
-        row.addView(left, new LinearLayout.LayoutParams(0, 56, 1f));
-        row.addView(right, new LinearLayout.LayoutParams(0, 56, 1f));
+        int compareButtonHeight = Math.max(40, Math.min(96, getSharedPreferences(
+                "settings_prefs", MODE_PRIVATE).getInt("compare_button_height_dp", 56)));
+        row.addView(left, new LinearLayout.LayoutParams(0, galleryDp(compareButtonHeight), 1f));
+        row.addView(right, new LinearLayout.LayoutParams(0, galleryDp(compareButtonHeight), 1f));
         sortModePanel.addView(row);
         LinearLayout controls = new LinearLayout(this);
         Button same = makeSmallButton("Same");
@@ -4231,6 +4306,12 @@ public class MainActivity extends Activity
 
     private void showCompareResult() {
         final CompareSortEngine.Result result = compareSortEngine.finish();
+        if (!compareOrderApplied && getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getBoolean("compare_auto_apply", true)) {
+            compareOrderApplied = true;
+            saveCompareOrder(result, false);
+            return;
+        }
         final boolean hasReview = !result.unsurePairs.isEmpty();
         String[] actions = hasReview
                 ? new String[]{"Save order", "Save and rename sequence", "Review unsure",
@@ -4314,7 +4395,6 @@ public class MainActivity extends Activity
         compareOrderPreviousSequence = getSharedPreferences("settings_prefs", MODE_PRIVATE)
                 .getString("sort_sequence", "");
         for (int i = 0; i < result.orderedPaths.size(); i++) ranks.put(result.orderedPaths.get(i), i);
-        for (MediaFile file : snapshot) previous.put(file.getPath(), file.getManualOrder());
         sortManager.setCompareRanks(ranks);
         sortCoordinator.post(new SortCoordinator.Task() {
             @Override public void run(SortCoordinator.TaskContext context) {
@@ -4322,33 +4402,76 @@ public class MainActivity extends Activity
                 for (String path : result.orderedPaths) {
                     context.userCheckpoint();
                     MediaFile file = findInList(snapshot, path);
-                    if (file != null) ordered.add(file);
+                    if (file != null) {
+                        ordered.add(file);
+                        previous.put(file.getPath(), file.getManualOrder());
+                    }
+                }
+                final List<Integer> slots = new ArrayList<Integer>();
+                for (MediaFile file : ordered) {
+                    int slot = file.getManualOrder();
+                    if (slot < 0) slot = snapshot.indexOf(file);
+                    slots.add(Math.max(0, slot));
+                }
+                java.util.Collections.sort(slots);
+                final Map<String, Integer> assignments = new java.util.LinkedHashMap<String, Integer>();
+                for (int i = 0; i < ordered.size(); i++) {
+                    context.userCheckpoint();
+                    assignments.put(ordered.get(i).getPath(), slots.get(i));
                 }
                 context.userCheckpoint();
-                indexer.updateManualOrder(ordered);
+                indexer.updateManualOrderValues(assignments);
+                List<SortManager.SortCriterion> sequence = new ArrayList<SortManager.SortCriterion>();
+                sequence.add(new SortManager.SortCriterion(SortManager.MANUAL_ORDER, "ASC"));
+                for (SortManager.SortCriterion criterion : sortManager.getSortSequence()) {
+                    if (!SortManager.MANUAL_ORDER.equals(criterion.id)) sequence.add(criterion.copy());
+                }
+                sortManager.saveSortSequence(sequence);
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
                         compareOrderUndo = previous;
-                        sortManager.setSingleCriterion(SortManager.MANUAL_ORDER, "ASC");
-                        Toast.makeText(MainActivity.this, "Compare order saved",
+                        Toast.makeText(MainActivity.this, "Ordered " + ordered.size() + " files",
                                 Toast.LENGTH_SHORT).show();
                         exitCompareSort(true);
                         if (rename) renameGalleryManualRange(ordered);
                         scheduleRefresh();
+                        mainHandler.postDelayed(new Runnable() {
+                            @Override public void run() { verifyCompareOrder(result.orderedPaths); }
+                        }, 700L);
                     }
                 });
             }
         });
     }
 
+    private void verifyCompareOrder(final List<String> expected) {
+        if (expected == null || expected.isEmpty()) return;
+        int previous = -1;
+        boolean mismatch = false;
+        StringBuilder details = new StringBuilder("Compare order mismatch\n");
+        for (String path : expected) {
+            int index = findIndexByPath(fullList, path);
+            if (index < 0 || index < previous) mismatch = true;
+            previous = index;
+            details.append(path).append(" -> ").append(index).append('\n');
+        }
+        if (mismatch) {
+            Toast.makeText(this, "Order saved, but your current sort hides it. Switch to Manual order?",
+                    Toast.LENGTH_LONG).show();
+            CrashLogger.writeDiagnostic(this, "compare_order_mismatch", details.toString());
+        }
+    }
+
     private void exitCompareSort(boolean keepOrder) {
         boolean resumeGame = compareFromGame;
         compareFromGame = false;
+        compareOrderApplied = false;
         compareQuestion = null;
         compareLeftImage = null;
         compareRightImage = null;
         compareScaleDetector = null;
         if (sortSessionStore != null) sortSessionStore.delete(SortSessionStore.COMPARE_FILE);
+        restoreCompareSizeMode();
         removeSortModePanel();
         if (resumeGame && gameRound != null) {
             if (sortCoordinator != null) {
@@ -4446,7 +4569,35 @@ public class MainActivity extends Activity
         }
     }
 
+    private void applyBatchSizeMode() {
+        if (batchSizeApplied || "panel".equals(getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("batch_size_mode", "expanded"))) return;
+        View explorer = findViewById(R.id.explorerPanel);
+        View tagBar = findViewById(R.id.tagBarContainer);
+        if (explorer == null || tagBar == null) return;
+        batchPreviousExplorerVisibility = explorer.getVisibility();
+        batchPreviousTagVisibility = tagBar.getVisibility();
+        batchPreviousExplorerPercent = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getInt("explorer_width_percent", 40);
+        explorer.setVisibility(View.GONE);
+        applyRootPanelWidths(0, true);
+        batchSizeApplied = true;
+    }
+
+    private void restoreBatchSizeMode() {
+        if (!batchSizeApplied) return;
+        View explorer = findViewById(R.id.explorerPanel);
+        View tagBar = findViewById(R.id.tagBarContainer);
+        if (explorer != null) explorer.setVisibility(batchPreviousExplorerVisibility);
+        if (tagBar != null) tagBar.setVisibility(batchPreviousTagVisibility);
+        applyRootPanelWidths(batchPreviousExplorerPercent,
+                findViewById(R.id.previewPanel) != null
+                        && findViewById(R.id.previewPanel).getVisibility() == View.VISIBLE);
+        batchSizeApplied = false;
+    }
+
     private void showGameRound(final BatchGameEngine.Round round) {
+        applyBatchSizeMode();
         if (round == null) {
             showGameSummary();
             return;
@@ -4794,6 +4945,7 @@ public class MainActivity extends Activity
         gameStartedAt = 0L;
         gameRoundStartedAt = 0L;
         if (sortSessionStore != null) sortSessionStore.delete(SortSessionStore.GAME_FILE);
+        restoreBatchSizeMode();
         removeSortModePanel();
         if (sortCoordinator != null) {
             sortCoordinator.setInteractivePause(false);

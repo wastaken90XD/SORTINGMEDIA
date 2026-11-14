@@ -686,6 +686,24 @@ public class SettingsActivity extends Activity {
         });
         root.addView(selfTest);
         root.addView(makeTitle("Compare Sort"));
+        root.addView(makeCheckBoxRow("Auto-apply Compare order",
+                settingsPrefs.getBoolean("compare_auto_apply", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("compare_auto_apply", value); }
+                }));
+        root.addView(makeCheckBoxRow("Show Compare order strip",
+                settingsPrefs.getBoolean("compare_show_order_strip", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("compare_show_order_strip", value); }
+                }));
+        root.addView(makeSpinnerRow("Compare size mode:",
+                new String[]{"panel", "expanded", "fullscreen"},
+                compareSizePosition(), new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) { saveString("compare_size_mode", value); }
+                }));
+        root.addView(makeNumericInputRow("Compare button height (40-96dp):",
+                settingsPrefs.getInt("compare_button_height_dp", 56), 40, 96,
+                new OnNumericChangeListener() {
+                    @Override public void onChange(int value) { saveInt("compare_button_height_dp", value); }
+                }));
         root.addView(makeSpinnerRow("Compare layout:",
                 new String[]{"side_by_side", "stacked", "auto"},
                 compareLayoutPosition(), new OnSpinnerSelectedListener() {
@@ -752,6 +770,34 @@ public class SettingsActivity extends Activity {
                     @Override public void onChange(int value) { saveInt("compare_undo_depth", value); }
                 }));
         root.addView(makeTitle("Batch Game"));
+        root.addView(makeSpinnerRow("Batch size mode:",
+                new String[]{"panel", "expanded"},
+                "panel".equals(settingsPrefs.getString("batch_size_mode", "expanded")) ? 0 : 1,
+                new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) { saveString("batch_size_mode", value); }
+                }));
+        root.addView(makeCheckBoxRow("Auto advance batch tagger",
+                settingsPrefs.getBoolean("batch_auto_advance", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("batch_auto_advance", value); }
+                }));
+        root.addView(makeCheckBoxRow("Skip sends cells to back",
+                settingsPrefs.getBoolean("batch_skip_to_back", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("batch_skip_to_back", value); }
+                }));
+        root.addView(makeCheckBoxRow("Include already tagged files",
+                settingsPrefs.getBoolean("batch_include_tagged", false), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("batch_include_tagged", value); }
+                }));
+        root.addView(makeCheckBoxRow("Show inline batch tags",
+                settingsPrefs.getBoolean("batch_show_inline_tags", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("batch_show_inline_tags", value); }
+                }));
+        root.addView(makeSpinnerRow("Batch commit mode:",
+                new String[]{"add", "replace"},
+                "replace".equals(settingsPrefs.getString("batch_commit_mode", "add")) ? 1 : 0,
+                new OnSpinnerSelectedListener() {
+                    @Override public void onSelected(String value, int position) { saveString("batch_commit_mode", value); }
+                }));
         root.addView(makeCheckBoxRow("Adaptive Game batch size",
                 settingsPrefs.getBoolean("game_batch_adaptive", true), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("game_batch_adaptive", value); }
@@ -960,6 +1006,13 @@ public class SettingsActivity extends Activity {
         if ("protect".equals(value)) return 0;
         if ("overwrite".equals(value)) return 2;
         if ("keep_first".equals(value)) return 3;
+        return 1;
+    }
+
+    private int compareSizePosition() {
+        String value = settingsPrefs.getString("compare_size_mode", "expanded");
+        if ("panel".equals(value)) return 0;
+        if ("fullscreen".equals(value)) return 2;
         return 1;
     }
 

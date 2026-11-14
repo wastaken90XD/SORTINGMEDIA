@@ -777,6 +777,24 @@ public class MediaIndexer {
         if (editor != null) editor.apply();
     }
 
+    /** Updates only the supplied manual-order values and leaves other files unchanged. */
+    public void updateManualOrderValues(Map<String, Integer> positions) {
+        if (positions == null || positions.isEmpty()) return;
+        android.content.SharedPreferences prefs = appContext == null ? null
+                : appContext.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE);
+        android.content.SharedPreferences.Editor editor = prefs == null ? null : prefs.edit();
+        synchronized (index) {
+            for (MediaFile file : index) {
+                Integer position = positions.get(file.getPath());
+                if (position != null && file.getManualOrder() != position) {
+                    file.setManualOrder(position);
+                    if (editor != null) editor.putInt("manual_order:" + file.getPath(), position);
+                }
+            }
+        }
+        if (editor != null) editor.apply();
+    }
+
     // ── Query helpers ─────────────────────────────────────────────────────────
 
     public List<MediaFile> getIndex() {

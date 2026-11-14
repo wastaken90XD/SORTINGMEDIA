@@ -181,6 +181,21 @@ public class CrashLogger implements Thread.UncaughtExceptionHandler {
         }
     }
 
+    public static void writeDiagnostic(Context context, String name, String text) {
+        if (context == null) return;
+        File directory = getCrashLogDirectory(context);
+        if (directory == null) return;
+        if (!directory.exists() && !directory.mkdirs()) return;
+        String safe = name == null ? "diagnostic" : name.replaceAll("[^A-Za-z0-9._-]", "_");
+        File file = new File(directory, safe + "_" + System.currentTimeMillis() + ".txt");
+        try {
+            FileOutputStream output = new FileOutputStream(file);
+            output.write((text == null ? "" : text).getBytes("UTF-8"));
+            output.getFD().sync();
+            output.close();
+        } catch (Exception ignored) {}
+    }
+
     public static void clearLog(Context context) {
         for (File file : listCrashLogs()) deleteCrashLog(file);
         File legacy = new File(context.getFilesDir(), LOG_FILE);

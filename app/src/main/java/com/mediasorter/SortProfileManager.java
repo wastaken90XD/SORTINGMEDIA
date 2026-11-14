@@ -16,7 +16,11 @@ public final class SortProfileManager {
     private static final Set<String> PROFILE_KEYS = new HashSet<String>(Arrays.asList(
             "smart_chunk_ms", "smart_pass_budget_ms", "smart_k_neighbors", "smart_random_fraction",
             "smart_max_pool", "smart_use_video_frames", "smart_accept_replaces", "rerank_idle_ms",
-            "compare_layout", "compare_question", "compare_randomize_sides",
+            "compare_layout", "compare_question", "compare_randomize_sides", "compare_auto_apply",
+            "compare_size_mode", "compare_show_order_strip", "compare_button_height_dp",
+            "batch_size_mode", "batch_auto_advance", "batch_skip_to_back", "batch_include_tagged",
+            "batch_show_inline_tags", "batch_commit_mode", "game_commit_mode",
+            "compare_show_order_strip", "compare_size_mode", "compare_button_height_dp",
             "compare_recheck_every", "compare_sync_zoom", "compare_show_caption",
             "compare_caption_fields", "compare_volume_pick", "compare_video_muted",
             "compare_warn_questions", "compare_undo_depth", "compare_prefetch",
@@ -31,7 +35,7 @@ public final class SortProfileManager {
     private static final Set<String> INTEGER_PROFILE_KEYS = new HashSet<String>(Arrays.asList(
             "smart_chunk_ms", "smart_pass_budget_ms", "smart_k_neighbors", "smart_random_fraction",
             "smart_max_pool", "rerank_idle_ms", "compare_recheck_every", "compare_warn_questions",
-            "compare_undo_depth", "game_batch_size", "game_decoys", "game_probe_every",
+            "compare_undo_depth", "compare_button_height_dp", "game_batch_size", "game_decoys", "game_probe_every",
             "game_none_cooldown", "game_none_max_returns", "game_order_min_group",
             "game_timer_seconds", "replace_keep_max", "replace_confirm_min_files"));
     private final SharedPreferences prefs;
@@ -154,6 +158,19 @@ public final class SortProfileManager {
                 .putInt(INDEX, -1)
                 .putBoolean("smart_accept_replaces", false)
                 .putString("compare_layout", "auto")
+                .putString("compare_size_mode", "expanded")
+                .putInt("compare_button_height_dp", 56)
+                .putBoolean("compare_show_order_strip", true)
+                .putBoolean("compare_auto_apply", true)
+                .putString("batch_size_mode", "expanded")
+                .putBoolean("batch_auto_advance", true)
+                .putBoolean("batch_skip_to_back", true)
+                .putBoolean("batch_include_tagged", false)
+                .putBoolean("batch_show_inline_tags", true)
+                .putString("batch_commit_mode", "add")
+                .putBoolean("compare_show_order_strip", true)
+                .putString("compare_size_mode", "expanded")
+                .putInt("compare_button_height_dp", 56)
                 .putBoolean("compare_randomize_sides", true)
                 .putInt("compare_recheck_every", 25)
                 .putInt("compare_warn_questions", 300)
