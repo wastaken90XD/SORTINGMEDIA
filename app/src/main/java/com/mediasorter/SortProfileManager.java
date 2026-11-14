@@ -27,6 +27,12 @@ public final class SortProfileManager {
             "replace_sequence_rule", "replace_sequence_patterns", "replace_protect_patterns",
             "replace_confirm_sequence_overwrite", "replace_show_group_report",
             "replace_purge_group_tags"));
+    private static final Set<String> INTEGER_PROFILE_KEYS = new HashSet<String>(Arrays.asList(
+            "smart_chunk_ms", "smart_pass_budget_ms", "smart_k_neighbors", "smart_random_fraction",
+            "smart_max_pool", "rerank_idle_ms", "compare_recheck_every", "compare_warn_questions",
+            "compare_undo_depth", "game_batch_size", "game_decoys", "game_probe_every",
+            "game_none_cooldown", "game_none_max_returns", "game_order_min_group",
+            "game_timer_seconds"));
     private final SharedPreferences prefs;
 
     public SortProfileManager(Context context) {
@@ -71,7 +77,9 @@ public final class SortProfileManager {
             if (value instanceof Boolean) editor.putBoolean(key, (Boolean) value);
             else if (value instanceof Number) {
                 double number = ((Number) value).doubleValue();
-                if (number == Math.rint(number) && number >= Integer.MIN_VALUE
+                if (INTEGER_PROFILE_KEYS.contains(key)) {
+                    editor.putInt(key, (int) number);
+                } else if (number == Math.rint(number) && number >= Integer.MIN_VALUE
                         && number <= Integer.MAX_VALUE) {
                     editor.putInt(key, (int) number);
                 } else {
