@@ -120,5 +120,4 @@ public final class FeatureStore {
     }
 
     public SmartFeatureCache getCache() { return cache; }
-    public void clearMemory() { cache.clearMemory(); }
 }

@@ -140,13 +140,25 @@ public final class CompareSortEngine {
         while (undo.size() > maxUndoDepth) undo.remove(0);
     }
 
-    public boolean isStarted() { return initialized; }
     public boolean isFinished() { return initialized && current == null && pool.isEmpty(); }
     public int questionCount() { return questionCount; }
     public int inconsistencies() { return inconsistencies; }
     public int totalFiles() { return sorted.size() + pool.size() + (current == null ? 0 : 1); }
+
+    /** Estimated remaining binary-search questions for the current scope. */
+    public int estimateQuestions() {
+        int sortedCount = sorted.size();
+        int pending = pool.size() + (current == null ? 0 : 1);
+        long estimate = 0L;
+        for (int i = 0; i < pending; i++) {
+            int size = Math.max(2, sortedCount + i + 1);
+            int bits = 32 - Integer.numberOfLeadingZeros(size - 1);
+            estimate += bits;
+        }
+        return estimate > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) estimate;
+    }
+
     public List<String> getSortedPaths() { return new ArrayList<String>(sorted); }
-    public List<String> getUnsurePaths() { return new ArrayList<String>(unsure); }
     public List<UncertainPair> getUnsurePairs() {
         return new ArrayList<UncertainPair>(unsurePairs);
     }
@@ -387,12 +399,6 @@ public final class CompareSortEngine {
     public Result finish() {
         if (current != null) finishCurrent(low);
         return new Result(new ArrayList<String>(sorted), new ArrayList<String>(unsure),
-                new ArrayList<UncertainPair>(unsurePairs), inconsistencies);
-    }
-
-    public JSONObjectState state() {
-        return new JSONObjectState(new ArrayList<String>(pool), new ArrayList<String>(sorted),
-                current, low, high, questionCount, new ArrayList<String>(unsure),
                 new ArrayList<UncertainPair>(unsurePairs), inconsistencies);
     }
 

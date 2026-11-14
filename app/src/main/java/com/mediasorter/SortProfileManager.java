@@ -67,13 +67,6 @@ public final class SortProfileManager {
         editor.putInt("prefs_migration_version", 1).commit();
     }
 
-    public String nextBuiltIn() {
-        int index = (prefs.getInt(INDEX, -1) + 1) % BUILT_INS.length;
-        applyBuiltIn(index);
-        prefs.edit().putInt(INDEX, index).apply();
-        return BUILT_INS[index];
-    }
-
     /** Cycles through built-ins and validated custom JSON profiles. */
     public String nextProfile() {
         JSONArray custom = getCustomProfiles();
@@ -196,6 +189,27 @@ public final class SortProfileManager {
                 .putBoolean("replace_show_group_report", true)
                 .putBoolean("replace_purge_group_tags", false)
                 .commit();
+    }
+
+    /** Captures current allow-listed sorting settings as a custom profile. */
+    public JSONObject captureCurrentProfile(String name) {
+        JSONObject profile = new JSONObject();
+        try {
+            profile.put("name", name == null || name.trim().isEmpty() ? "Custom" : name.trim());
+            JSONObject settings = new JSONObject();
+            for (String key : PROFILE_KEYS) {
+                Object value = prefs.getAll().get(key);
+                if (value instanceof java.util.Set) {
+                    org.json.JSONArray array = new org.json.JSONArray();
+                    for (Object item : (java.util.Set<?>) value) array.put(String.valueOf(item));
+                    settings.put(key, array);
+                } else if (value != null) {
+                    settings.put(key, value);
+                }
+            }
+            profile.put("settings", settings);
+        } catch (Exception ignored) {}
+        return profile;
     }
 
     /** Returns the validated custom profile document, or an empty array. */

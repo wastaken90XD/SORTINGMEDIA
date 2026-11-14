@@ -162,7 +162,6 @@ public class MainActivity extends Activity
     private Runnable gameAfterTag;
     private BatchGameEngine.Round gameRound;
     private TextView gameTitleView;
-    private TextView gameTimerView;
     private Runnable gameTimerRunnable;
     private long gameStartedAt;
     private long gameRoundStartedAt;
@@ -183,7 +182,6 @@ public class MainActivity extends Activity
     private int gameUndoTotalScore;
     private int gameUndoPerfectRounds;
     private List<MediaFile> gameUndoLastTaggedGroup;
-    private List<MediaFile> gameSelectedFiles;
     private Runnable gameSubmitRunnable;
     private Runnable gameNoneRunnable;
     private boolean gameUndoAvailable;
@@ -3931,7 +3929,8 @@ public class MainActivity extends Activity
         TextView title = new TextView(this);
         title.setTextColor(0xFFFFFFFF);
         title.setText("Compare: " + comparePrefs.getString("compare_question", "Which goes first?")
-                + "  " + compareQuestion.questionNumber + " / " + compareQuestion.totalFiles
+                + "  " + compareQuestion.questionNumber + "  " + compareQuestion.totalFiles
+                + " files, about " + compareSortEngine.estimateQuestions() + " questions"
                 + (compareQuestion.recheck ? "  (recheck)" : ""));
         sortModePanel.addView(title);
         final String leftPath = compareQuestion.candidateOnLeft
@@ -3984,8 +3983,8 @@ public class MainActivity extends Activity
                 }
             }
         });
-        if (!compareWarningShown && compareQuestion.questionNumber >= comparePrefs.getInt(
-                "compare_warn_questions", 100)) {
+        if (!compareWarningShown && compareSortEngine.estimateQuestions() >= comparePrefs.getInt(
+                "compare_warn_questions", 300)) {
             compareWarningShown = true;
             Toast.makeText(this, "Many comparison questions; consider splitting the group.",
                     Toast.LENGTH_LONG).show();
@@ -4468,7 +4467,6 @@ public class MainActivity extends Activity
         startGameTimer();
 
         final List<MediaFile> selected = new ArrayList<MediaFile>();
-        gameSelectedFiles = selected;
         gameSubmitRunnable = new Runnable() {
             @Override public void run() {
                 if (gameRoundExpired) {
@@ -4777,7 +4775,6 @@ public class MainActivity extends Activity
         if (gameTimerRunnable != null) mainHandler.removeCallbacks(gameTimerRunnable);
         gameTimerRunnable = null;
         gameTitleView = null;
-        gameTimerView = null;
         gameRound = null;
         compareFromGame = false;
         gameLastTaggedGroup = null;
@@ -4785,7 +4782,6 @@ public class MainActivity extends Activity
         gameTotalScore = 0;
         gamePerfectRounds = 0;
         gameCompletedRounds = 0;
-        gameSelectedFiles = null;
         gameSubmitRunnable = null;
         gameNoneRunnable = null;
         gameUndoRound = null;

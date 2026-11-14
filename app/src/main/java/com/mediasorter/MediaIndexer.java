@@ -779,18 +779,6 @@ public class MediaIndexer {
 
     // ── Query helpers ─────────────────────────────────────────────────────────
 
-    public List<String> getAllTagsFromIndex() {
-        List<String> result = new ArrayList<>();
-        synchronized (index) {
-            for (MediaFile mf : index) {
-                for (String tag : mf.getTags()) {
-                    if (!result.contains(tag)) result.add(tag);
-                }
-            }
-        }
-        return result;
-    }
-
     public List<MediaFile> getIndex() {
         synchronized (index) { return new ArrayList<>(index); }
     }

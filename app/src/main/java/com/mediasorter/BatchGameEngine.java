@@ -214,7 +214,6 @@ public final class BatchGameEngine {
         return folder + size;
     }
 
-    public synchronized int getRound() { return round; }
     public synchronized void setNonePolicy(int cooldown, int maxReturns) {
         noneCooldownRounds = Math.max(0, cooldown);
         noneMaxReturns = Math.max(1, maxReturns);
@@ -228,9 +227,6 @@ public final class BatchGameEngine {
     public synchronized int getNoneReturns(String path) {
         Integer value = noneReturns.get(path);
         return value == null ? 0 : value;
-    }
-    public synchronized boolean canReturn(String path, int cooldown, int maxReturns) {
-        return noneCooldown <= 0 && getNoneReturns(path) < Math.max(1, maxReturns);
     }
     public synchronized void nextRound() { if (noneCooldown > 0) noneCooldown--; }
 

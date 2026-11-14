@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import com.mediasorter.features.RandomGenerator;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import android.os.Bundle;
 import android.os.Handler;
@@ -635,6 +636,11 @@ public class SettingsActivity extends Activity {
                         }
                     }
                 }));
+        Button editProfiles = makeButton("Edit custom sort profiles");
+        editProfiles.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { showCustomProfileEditor(profileManager); }
+        });
+        root.addView(editProfiles);
         Button resetSorting = makeButton("Reset sorting defaults");
         resetSorting.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) {
@@ -853,6 +859,91 @@ public class SettingsActivity extends Activity {
                 settingsPrefs.getBoolean("replace_purge_group_tags", false), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("replace_purge_group_tags", value); }
                 }));
+    }
+
+    private void showCustomProfileEditor(final SortProfileManager manager) {
+        final JSONArray[] profiles = new JSONArray[]{manager.getCustomProfiles()};
+        final int[] selected = {-1};
+        final ArrayAdapter<String> names = new ArrayAdapter<String>(this,
+                android.R.layout.simple_list_item_1);
+        for (int i = 0; i < profiles[0].length(); i++) {
+            names.add(profiles[0].optJSONObject(i) == null ? "Custom " + (i + 1)
+                    : profiles[0].optJSONObject(i).optString("name", "Custom " + (i + 1)));
+        }
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        final EditText name = new EditText(this);
+        name.setHint("Profile name");
+        name.setTextColor(0xFFFFFFFF);
+        content.addView(name);
+        final ListView list = new ListView(this);
+        list.setAdapter(names);
+        content.addView(list, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 300));
+        LinearLayout buttons = new LinearLayout(this);
+        Button save = makeButton("Save current as");
+        Button rename = makeButton("Rename");
+        Button remove = makeButton("Delete");
+        Button reset = makeButton("Reset custom");
+        buttons.addView(save);
+        buttons.addView(rename);
+        buttons.addView(remove);
+        buttons.addView(reset);
+        content.addView(buttons);
+        list.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                selected[0] = position;
+                name.setText(names.getItem(position));
+            }
+        });
+        save.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                if (profiles[0].length() >= 10) {
+                    Toast.makeText(SettingsActivity.this, "Maximum 10 custom profiles", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                JSONObject profile = manager.captureCurrentProfile(name.getText().toString());
+                profiles[0].put(profile);
+                manager.saveCustomProfiles(profiles[0].toString());
+                names.add(profile.optString("name", "Custom"));
+                name.setText("");
+            }
+        });
+        rename.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                if (selected[0] < 0 || selected[0] >= profiles[0].length()) return;
+                JSONObject profile = profiles[0].optJSONObject(selected[0]);
+                if (profile == null) return;
+                try { profile.put("name", name.getText().toString().trim()); } catch (Exception ignored) {}
+                manager.saveCustomProfiles(profiles[0].toString());
+                names.remove(names.getItem(selected[0]));
+                names.insert(profile.optString("name", "Custom"), selected[0]);
+            }
+        });
+        remove.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                if (selected[0] < 0 || selected[0] >= profiles[0].length()) return;
+                JSONArray next = new JSONArray();
+                for (int i = 0; i < profiles[0].length(); i++) if (i != selected[0]) next.put(profiles[0].opt(i));
+                profiles[0] = next;
+                manager.saveCustomProfiles(next.toString());
+                names.clear();
+                for (int i = 0; i < next.length(); i++) names.add(next.optJSONObject(i).optString("name", "Custom " + (i + 1)));
+                selected[0] = -1;
+                name.setText("");
+            }
+        });
+        reset.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) {
+                profiles[0] = new JSONArray();
+                manager.saveCustomProfiles("[]");
+                names.clear();
+                selected[0] = -1;
+                name.setText("");
+            }
+        });
+        new AlertDialog.Builder(this).setTitle("Custom sort profiles")
+                .setView(content).setPositiveButton("Close", null).show();
     }
 
     private String joinSelfTestLines(SelfTest.Result result) {
