@@ -90,7 +90,8 @@ public final class SmartFeatureCache {
         if (parent != null && !parent.exists() && !parent.mkdirs()) return;
         File temp = new File(parent, file.getName() + ".tmp");
         try {
-            DataOutputStream out = new DataOutputStream(new FileOutputStream(temp));
+            FileOutputStream fileStream = new FileOutputStream(temp);
+            DataOutputStream out = new DataOutputStream(fileStream);
             out.writeInt(VERSION);
             out.writeInt(entries.size());
             for (Map.Entry<String, Entry> item : entries.entrySet()) {
@@ -103,7 +104,7 @@ public final class SmartFeatureCache {
                 out.writeInt(value.kind);
             }
             out.flush();
-            out.getFD().sync();
+            fileStream.getFD().sync();
             out.close();
             File backup = new File(parent, file.getName() + ".bak");
             if (backup.exists()) backup.delete();
