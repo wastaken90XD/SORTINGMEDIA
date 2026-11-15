@@ -199,6 +199,11 @@ public final class CompareSortEngine {
         return new Question(current, compared, leftIsCandidate, questionCount, totalFiles(), false);
     }
 
+    /** Named entry point used by MainActivity and the self-test button path. */
+    public boolean answerCompare(Answer answer) {
+        return answer(answer);
+    }
+
     public boolean answer(Answer answer) {
         if (answer == null) return false;
         if (rechecking && pendingRecheck != null) {

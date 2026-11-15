@@ -45,6 +45,8 @@ import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import com.mediasorter.adapters.BatchInlineTagAdapter;
+import com.mediasorter.adapters.BatchRoundAdapter;
 import com.mediasorter.adapters.GalleryAdapter;
 import com.mediasorter.adapters.MediaAdapter;
 import com.mediasorter.adapters.SidePanelTagAdapter;
@@ -168,32 +170,21 @@ public class MainActivity extends Activity
     private int comparePreviousExplorerPercent;
     private int comparePreviousExplorerVisibility;
     private int comparePreviousTagVisibility;
-    private Runnable gameAfterTag;
     private BatchGameEngine.Round gameRound;
-    private TextView gameTitleView;
-    private Runnable gameTimerRunnable;
-    private long gameStartedAt;
-    private long gameRoundStartedAt;
-    private int gameStreak;
-    private int gameCompletedRounds;
-    private int gameTotalScore;
-    private int gamePerfectRounds;
-    private boolean gameRoundExpired;
-    private BatchGameEngine.RoundScore gameLastScore;
-    private List<MediaFile> gameLastTaggedGroup;
+    private BatchRoundAdapter batchRoundAdapter;
+    private BatchInlineTagAdapter batchInlineTagAdapter;
+    private RecyclerView batchRoundGrid;
+    private TextView batchTitleView;
+    private TextView batchDoneView;
+    private AlertDialog batchSummaryDialog;
+    private Set<String> batchLastTaggedPaths = new java.util.LinkedHashSet<String>();
+    private Map<String, List<String>> batchUndoTags;
+    private Map<String, FileStatus.Status> batchUndoStatuses;
+    private org.json.JSONObject batchUndoEngineState;
+    private boolean batchUndoAvailable;
+    private boolean batchScopeChooserOpen;
     private boolean compareFromGame;
-    private Map<String, List<String>> gameUndoTags;
-    private Map<String, FileStatus.Status> gameUndoStatuses;
-    private BatchGameEngine.Round gameUndoRound;
-    private org.json.JSONObject gameUndoEngineState;
-    private BatchGameEngine.RoundScore gameUndoScore;
-    private int gameUndoStreak;
-    private int gameUndoTotalScore;
-    private int gameUndoPerfectRounds;
-    private List<MediaFile> gameUndoLastTaggedGroup;
-    private Runnable gameSubmitRunnable;
-    private Runnable gameNoneRunnable;
-    private boolean gameUndoAvailable;
+    private boolean answerInProgress;
     private volatile com.mediasorter.features.SmartSortEngine.Result smartResult;
     private volatile List<Group> smartGroups = new ArrayList<Group>();
     private final java.util.Set<String> dismissedSmartSuggestions =
@@ -366,6 +357,13 @@ public class MainActivity extends Activity
     @Override
     protected void onResume() {
         super.onResume();
+        if (gameRound != null) {
+            applyBatchSizeMode();
+            if (sortModePanel == null) showBatchRound(gameRound);
+        } else if (compareQuestion != null || compareSizeApplied) {
+            applyCompareSizeMode();
+            if (compareQuestion != null && sortModePanel == null) showCompareQuestion();
+        }
         if (sortCoordinator != null) sortCoordinator.setPaused(false);
         if (smartSortEngine != null) {
             boolean smartEnabled = getSharedPreferences("settings_prefs", MODE_PRIVATE)
@@ -378,14 +376,20 @@ public class MainActivity extends Activity
                     && sortCoordinator.getMode() == SortCoordinator.Mode.SMART) {
                 sortCoordinator.setMode(SortCoordinator.Mode.OFF);
             }
-            smartSortEngine.onResume();
-            if (smartEnabled) {
-                smartSortEngine.request(indexer.getFullIndex());
+            boolean batchActive = gameRound != null || (sortCoordinator != null
+                    && sortCoordinator.getMode() == SortCoordinator.Mode.GAME);
+            if (batchActive) {
+                smartSortEngine.setPaused(true);
             } else {
-                smartResult = null;
-                smartGroups = new ArrayList<Group>();
-                com.mediasorter.features.SmartState.clear();
-                setSmartAdapterBadges(null, null, false);
+                smartSortEngine.onResume();
+                if (smartEnabled) {
+                    smartSortEngine.request(indexer.getFullIndex());
+                } else {
+                    smartResult = null;
+                    smartGroups = new ArrayList<Group>();
+                    com.mediasorter.features.SmartState.clear();
+                    setSmartAdapterBadges(null, null, false);
+                }
             }
         }
         applyUiToggles();
@@ -435,6 +439,10 @@ public class MainActivity extends Activity
         }
         if (tagBarContainer != null) {
             tagBarContainer.setVisibility(sp.getBoolean("show_tag_bar", true) ? View.VISIBLE : View.GONE);
+            if (gameRound != null && batchSizeApplied
+                    && !"fullscreen".equals(sp.getString("batch_size_mode", "expanded"))) {
+                tagBarContainer.setVisibility(View.VISIBLE);
+            }
         }
         LinearLayout legacyTagPanel = findViewById(R.id.tagPanel);
         if (legacyTagPanel != null && !sp.getBoolean("show_tag_bar", true)) {
@@ -586,6 +594,13 @@ public class MainActivity extends Activity
 
     @Override
     protected void onPause() {
+        if (gameRound != null) saveGameSession();
+        if (batchSizeApplied) {
+            // The next frame may be a settings/permission screen. Restore the
+            // explorer and tag-bar widths before leaving this Activity.
+            restoreBatchSizeMode();
+        }
+        if (compareSizeApplied) restoreCompareSizeMode();
         if (smartSortEngine != null) smartSortEngine.onPause();
         if (sortCoordinator != null) sortCoordinator.setPaused(true);
         super.onPause();
@@ -593,6 +608,9 @@ public class MainActivity extends Activity
 
     @Override
     protected void onDestroy() {
+        if (gameRound != null) saveGameSession();
+        if (batchSizeApplied) restoreBatchSizeMode();
+        if (compareSizeApplied) restoreCompareSizeMode();
         synchronized (IMPORT_RECREATE_LOCK) {
             if (activeInstance != null && activeInstance.get() == this) activeInstance = null;
         }
@@ -1457,7 +1475,9 @@ public class MainActivity extends Activity
                     notifyGalleryFilesChanged(new ArrayList<String>(changedPaths));
                 }
                 if (removedGhost) scheduleRefresh();
-                if (smartSortEngine != null && getSharedPreferences(
+                boolean batchOpen = gameRound != null || (sortCoordinator != null
+                        && sortCoordinator.getMode() == SortCoordinator.Mode.GAME);
+                if (!batchOpen && smartSortEngine != null && getSharedPreferences(
                         "settings_prefs", MODE_PRIVATE).getBoolean("smart_enabled", false)) {
                     if (smartRerankRunnable != null) mainHandler.removeCallbacks(smartRerankRunnable);
                     smartRerankRunnable = new Runnable() {
@@ -2522,13 +2542,16 @@ public class MainActivity extends Activity
         if (smartOrderUndo != null) remapSmartPathMap(smartOrderUndo, changes, deleted);
         if (compareOrderUndo != null) remapSmartPathMap(compareOrderUndo, changes, deleted);
         if (replaceTagsUndo != null) remapSmartPathMap(replaceTagsUndo, changes, deleted);
-        if (gameUndoTags != null) remapSmartPathMap(gameUndoTags, changes, deleted);
-        if (gameUndoStatuses != null) remapSmartPathMap(gameUndoStatuses, changes, deleted);
-        if (gameLastTaggedGroup != null) {
-            for (int i = gameLastTaggedGroup.size() - 1; i >= 0; i--) {
-                MediaFile file = gameLastTaggedGroup.get(i);
-                if (file == null || deleted.contains(file.getPath())) gameLastTaggedGroup.remove(i);
+        if (batchUndoTags != null) remapSmartPathMap(batchUndoTags, changes, deleted);
+        if (batchUndoStatuses != null) remapSmartPathMap(batchUndoStatuses, changes, deleted);
+        if (batchLastTaggedPaths != null) {
+            java.util.Set<String> remappedBatchPaths = new java.util.LinkedHashSet<String>();
+            for (String path : batchLastTaggedPaths) {
+                if (path == null || deleted.contains(path)) continue;
+                String next = changes.get(path);
+                remappedBatchPaths.add(next == null ? path : next);
             }
+            batchLastTaggedPaths = remappedBatchPaths;
         }
         if (smartResult != null) {
             remapSmartPathMap(smartResult.ranks, changes, deleted);
@@ -2614,7 +2637,6 @@ public class MainActivity extends Activity
                 }
                 final int finalPileTotal = pileTotal;
                 final int finalPileSorted = pileSorted;
-                final int gameTagged = tagged;
                 final int compareQuestions = compareSortEngine == null ? 0
                         : compareSortEngine.questionCount();
                 final int compareTotal = compareSortEngine == null ? 0
@@ -2623,8 +2645,9 @@ public class MainActivity extends Activity
                         : compareSortEngine.getUnsurePairs().size();
                 final int compareInconsistencies = compareSortEngine == null ? 0
                         : compareSortEngine.inconsistencies();
-                final int gameScore = gameTotalScore;
-                final int gameStreakValue = gameStreak;
+                final BatchGameEngine.Summary batchSummary = batchGameEngine == null
+                        ? new BatchGameEngine.Summary(0, 0, 0, false)
+                        : batchGameEngine.getSummary();
                 final String text = smartOn && smartSnapshot != null
                         ? "Smart: " + smartSnapshot.labeled + " tagged, "
                                 + smartSnapshot.suggested + " suggested, "
@@ -2636,8 +2659,8 @@ public class MainActivity extends Activity
                                 + "  unsure " + compareUnsure
                                 + "  inconsistent " + compareInconsistencies
                         : mode == SortCoordinator.Mode.GAME
-                        ? "Game: " + gameTagged + " of " + countedPaths.size() + " tagged"
-                                + "  score " + gameScore + "  streak " + gameStreakValue
+                        ? "Batch tagger: " + batchSummary.tagged + " tagged, "
+                                + batchSummary.skipped + " skipped, " + batchSummary.remaining + " remaining"
                         : "Total: " + totalSnapshot.size()
                                 + "  Filtered: " + countedPaths.size()
                                 + "  Tagged: " + tagged
@@ -2741,6 +2764,17 @@ public class MainActivity extends Activity
         TagGroupPage(List<Group> values, int pageValue) {
             groups = values;
             page = pageValue;
+        }
+    }
+
+    private void sortGroupMembersByActiveSequence(List<Group> groups) {
+        if (groups == null) return;
+        for (Group group : groups) {
+            if (group == null || group.getFiles() == null || group.getFiles().size() < 2) continue;
+            List<MediaFile> members = new ArrayList<MediaFile>(group.getFiles());
+            sortManager.sort(members);
+            group.clear();
+            for (MediaFile file : members) group.addFile(file);
         }
     }
 
@@ -2893,6 +2927,7 @@ public class MainActivity extends Activity
                         List<MediaFile> filteredBase = filterManager.apply(base);
                         List<Group> groups = groupManager.group(filteredBase);
                         sortManager.collapseGroupDuplicates(groups);
+                        sortGroupMembersByActiveSequence(groups);
                         TagGroupPage page = paginateTagGroups(groups,
                                 requestedTagPage, requestedPageSize);
                         pageGroups = page.groups;
@@ -3113,9 +3148,10 @@ public class MainActivity extends Activity
             case COMPARE_RESUME: startCompareSort(); break;
             case COMPARE_TOGGLE_SIZE: toggleCompareSizeMode(); break;
             case GAME_START: startBatchGame(); break;
-            case GAME_SUBMIT: submitBatchGameRound(); break;
-            case GAME_NONE: noneBatchGameRound(); break;
+            case GAME_SUBMIT: applyLastBatchTag(); break;
+            case GAME_NONE: skipBatchSelection(); break;
             case GAME_UNDO_ROUND: undoBatchGameRound(); break;
+            case GAME_PAUSE: pauseBatchGame(); break;
             case GAME_EXIT: exitBatchGame(false); break;
             case GAME_RESUME: startBatchGame(); break;
             case REPLACE_TAGS: showReplaceTagsDialog(); break;
@@ -3860,7 +3896,7 @@ public class MainActivity extends Activity
     }
 
     private void showSortHub() {
-        final String[] modes = {"Smart Sort", "Compare Sort", "Batch Game", "Close"};
+        final String[] modes = {"Smart Sort", "Compare Sort", "Batch tagger", "Close"};
         new AlertDialog.Builder(this).setTitle("Sorting hub")
                 .setItems(modes, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
@@ -3903,6 +3939,7 @@ public class MainActivity extends Activity
         removeSortModePanel();
         compareWarningShown = false;
         compareOrderApplied = false;
+        answerInProgress = false;
         List<MediaFile> compareSnapshot = requestedSnapshot;
         java.util.Set<String> comparePaths = new java.util.HashSet<String>();
         for (MediaFile file : compareSnapshot) if (file != null) comparePaths.add(file.getPath());
@@ -3969,16 +4006,43 @@ public class MainActivity extends Activity
         compareSizeApplied = false;
     }
 
+    private boolean compareAutoUsesStacked(int previewWidth, MediaFile left, MediaFile right) {
+        int width = previewWidth > 0 ? previewWidth : galleryDp(600);
+        int height = galleryDp(170);
+        float leftAspect = compareAspect(left);
+        float rightAspect = compareAspect(right);
+        double side = displayedCompareArea(Math.max(1, width / 2), height, leftAspect)
+                + displayedCompareArea(Math.max(1, width / 2), height, rightAspect);
+        double stacked = displayedCompareArea(width, Math.max(1, height / 2), leftAspect)
+                + displayedCompareArea(width, Math.max(1, height / 2), rightAspect);
+        return stacked > side;
+    }
+
+    private float compareAspect(MediaFile file) {
+        if (file == null || file.getWidth() <= 0 || file.getHeight() <= 0) return 1f;
+        return file.getWidth() / (float) file.getHeight();
+    }
+
+    private double displayedCompareArea(int width, int height, float aspect) {
+        double imageWidth = Math.min(width, height * (double) aspect);
+        double imageHeight = Math.min(height, width / (double) aspect);
+        return imageWidth * imageHeight;
+    }
+
     private void showCompareQuestion() {
         applyCompareSizeMode();
         if (!compareRerenderCurrent) compareQuestion = compareSortEngine.nextQuestion();
         else compareRerenderCurrent = false;
         if (compareQuestion == null) {
+            answerInProgress = false;
             showCompareResult();
             return;
         }
         FrameLayout preview = findViewById(R.id.previewPanel);
-        if (preview == null) return;
+        if (preview == null) {
+            answerInProgress = false;
+            return;
+        }
         final SharedPreferences comparePrefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
         sortModePanel = new LinearLayout(this);
         sortModePanel.setOrientation(LinearLayout.VERTICAL);
@@ -4010,10 +4074,12 @@ public class MainActivity extends Activity
                 ? compareQuestion.candidatePath : compareQuestion.comparedPath;
         final String rightPath = compareQuestion.candidateOnLeft
                 ? compareQuestion.comparedPath : compareQuestion.candidatePath;
+        final MediaFile leftFile = findFileByPath(leftPath);
+        final MediaFile rightFile = findFileByPath(rightPath);
         String compareLayout = comparePrefs.getString("compare_layout", "auto");
         boolean stacked = "stacked".equals(compareLayout)
-                || ("auto".equals(compareLayout) && preview.getWidth() > 0
-                && preview.getWidth() < galleryDp(600));
+                || ("auto".equals(compareLayout)
+                && compareAutoUsesStacked(preview.getWidth(), leftFile, rightFile));
         LinearLayout imageRow = new LinearLayout(this);
         imageRow.setOrientation(stacked ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
         ImageView leftImage = new ImageView(this);
@@ -4022,8 +4088,6 @@ public class MainActivity extends Activity
         rightImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
         leftImage.setBackgroundColor(0xFF252538);
         rightImage.setBackgroundColor(0xFF252538);
-        final MediaFile leftFile = findFileByPath(leftPath);
-        final MediaFile rightFile = findFileByPath(rightPath);
         LinearLayout leftCell = compareCell(leftImage, leftFile, comparePrefs);
         LinearLayout rightCell = compareCell(rightImage, rightFile, comparePrefs);
         if (stacked) {
@@ -4102,6 +4166,9 @@ public class MainActivity extends Activity
         preview.addView(sortModePanel, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM));
+        // The guard lasts for the answer transition only. A newly rendered
+        // pair is the point at which another answer is allowed.
+        answerInProgress = false;
     }
 
     private void loadCompareImageAtSize(ImageView image, MediaFile file,
@@ -4287,8 +4354,13 @@ public class MainActivity extends Activity
         }
     }
 
-    private void answerCompare(CompareSortEngine.Answer answer) {
-        if (compareQuestion == null || !compareSortEngine.answer(answer)) return;
+    public void answerCompare(CompareSortEngine.Answer answer) {
+        if (answerInProgress || compareQuestion == null) return;
+        answerInProgress = true;
+        if (!compareSortEngine.answerCompare(answer)) {
+            answerInProgress = false;
+            return;
+        }
         saveCompareSession();
         removeSortModePanel();
         showCompareQuestion();
@@ -4435,6 +4507,14 @@ public class MainActivity extends Activity
                         exitCompareSort(true);
                         if (rename) renameGalleryManualRange(ordered);
                         scheduleRefresh();
+                        if (!result.orderedPaths.isEmpty()) {
+                            final String firstOrderedPath = result.orderedPaths.get(0);
+                            mainHandler.postDelayed(new Runnable() {
+                                @Override public void run() {
+                                    scrollToPathWithoutChangingCurrent(firstOrderedPath);
+                                }
+                            }, 350L);
+                        }
                         mainHandler.postDelayed(new Runnable() {
                             @Override public void run() { verifyCompareOrder(result.orderedPaths); }
                         }, 700L);
@@ -4466,6 +4546,7 @@ public class MainActivity extends Activity
         boolean resumeGame = compareFromGame;
         compareFromGame = false;
         compareOrderApplied = false;
+        answerInProgress = false;
         compareQuestion = null;
         compareLeftImage = null;
         compareRightImage = null;
@@ -4473,13 +4554,14 @@ public class MainActivity extends Activity
         if (sortSessionStore != null) sortSessionStore.delete(SortSessionStore.COMPARE_FILE);
         restoreCompareSizeMode();
         removeSortModePanel();
-        if (resumeGame && gameRound != null) {
+        if (resumeGame) {
             if (sortCoordinator != null) {
                 sortCoordinator.setInteractivePause(true);
                 sortCoordinator.setMode(SortCoordinator.Mode.GAME);
             }
             if (smartSortEngine != null) smartSortEngine.setPaused(true);
-            showGameRound(gameRound);
+            if (gameRound != null) showBatchRound(gameRound);
+            else showBatchSummary();
             return;
         }
         if (sortCoordinator != null) {
@@ -4490,62 +4572,203 @@ public class MainActivity extends Activity
                 .getBoolean("smart_enabled", false)) smartSortEngine.setPaused(false);
     }
 
+    public boolean needsTag(MediaFile file) {
+        SharedPreferences prefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        return BatchGameEngine.needsTag(file,
+                prefs.getString("smart_active_pile", ""),
+                prefs.getString("smart_pile_tag_patterns", ""),
+                prefs.getString("smart_ignore_tag_patterns", "link_*,*_seq_*"));
+    }
+
     private void startBatchGame() {
-        if (fullList == null || fullList.size() < 2) {
-            Toast.makeText(this, "Need at least 2 files.", Toast.LENGTH_SHORT).show();
+        if (batchGameEngine == null || indexer == null) return;
+        org.json.JSONObject saved = sortSessionStore == null ? null
+                : sortSessionStore.load(SortSessionStore.GAME_FILE);
+        if (saved != null && (saved.optJSONArray("queue") != null
+                || saved.optJSONArray("current") != null)) {
+            enterBatchMode();
+            final org.json.JSONObject savedSession = saved;
+            final boolean savedHasWork = saved.optJSONArray("queue") != null
+                    && saved.optJSONArray("queue").length() > 0
+                    || saved.optJSONArray("current") != null
+                    && saved.optJSONArray("current").length() > 0
+                    || saved.optJSONArray("tagged") != null
+                    && saved.optJSONArray("tagged").length() > 0
+                    || saved.optJSONArray("skipped") != null
+                    && saved.optJSONArray("skipped").length() > 0;
+            final List<MediaFile> snapshot = indexer.getFullIndex();
+            sortCoordinator.post(new SortCoordinator.Task() {
+                @Override public void run(SortCoordinator.TaskContext context) {
+                    context.userCheckpoint();
+                    batchGameEngine.restoreFromJson(savedSession, snapshot);
+                    BatchGameEngine.Round restored = batchGameEngine.getCurrentRound();
+                    if (restored == null) restored = batchGameEngine.buildNextRound();
+                    final BatchGameEngine.Round next = restored;
+                    preloadBatchQueue(context);
+                    mainHandler.post(new Runnable() {
+                        @Override public void run() {
+                            gameRound = next;
+                            if (next == null) {
+                                if (savedHasWork) showBatchSummary();
+                                else {
+                                    leaveBatchMode(false);
+                                    showBatchScopeChooser(
+                                            "The saved Batch tagger session has no files left in the index. Choose another scope.");
+                                }
+                            } else showBatchRound(next);
+                        }
+                    });
+                }
+            });
             return;
         }
-        exitCompareSort(false);
-        if (gameStartedAt == 0L) {
-            gameStartedAt = System.currentTimeMillis();
-            gameStreak = 0;
-            gameCompletedRounds = 0;
-            gameTotalScore = 0;
-            gamePerfectRounds = 0;
+        showBatchScopeChooser("");
+    }
+
+    private void enterBatchMode() {
+        if (sortCoordinator != null) {
+            sortCoordinator.setMode(SortCoordinator.Mode.GAME);
+            sortCoordinator.setInteractivePause(true);
         }
-        if (sortCoordinator != null) sortCoordinator.setMode(SortCoordinator.Mode.GAME);
-        if (sortCoordinator != null) sortCoordinator.setInteractivePause(true);
+        if (smartRerankRunnable != null) mainHandler.removeCallbacks(smartRerankRunnable);
+        smartRerankRunnable = null;
         if (smartSortEngine != null) smartSortEngine.setPaused(true);
-        final List<MediaFile> snapshot = getFullListSnapshot();
-        android.content.SharedPreferences gamePrefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
-        batchGameEngine.setNonePolicy(gamePrefs.getInt("game_none_cooldown", 3),
-                gamePrefs.getInt("game_none_max_returns", 2));
-        org.json.JSONObject savedGame = sortSessionStore == null ? null
-                : sortSessionStore.load(SortSessionStore.GAME_FILE);
-        if (savedGame != null) {
-            BatchGameEngine.Round restored = batchGameEngine.restore(savedGame, snapshot);
-            if (restored != null) {
-                gameStartedAt = savedGame.optLong("game_started_at", gameStartedAt);
-                gameStreak = savedGame.optInt("game_streak", gameStreak);
-                gameCompletedRounds = savedGame.optInt("game_completed_rounds", gameCompletedRounds);
-                gameTotalScore = savedGame.optInt("game_total_score", gameTotalScore);
-                gamePerfectRounds = savedGame.optInt("game_perfect_rounds", gamePerfectRounds);
-                gameRound = restored;
-                showGameRound(restored);
-                return;
-            }
-        }
+        removeSortModePanel();
+    }
+
+    private void showBatchScopeChooser(final String reason) {
+        if (batchScopeChooserOpen) return;
+        batchScopeChooserOpen = true;
+        final List<MediaFile> complete = indexer == null
+                ? new ArrayList<MediaFile>() : indexer.getFullIndex();
+        final List<MediaFile> filtered = getFullListSnapshot();
+        final Set<String> selection = new java.util.LinkedHashSet<String>(getActiveSelectedPaths());
+        final SharedPreferences prefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        final String activePile = prefs.getString("smart_active_pile", "");
+        final String pilePatterns = prefs.getString("smart_pile_tag_patterns", "");
+        final String ignorePatterns = prefs.getString("smart_ignore_tag_patterns", "link_*,*_seq_*");
+        final boolean includeTagged = prefs.getBoolean("batch_include_tagged", false);
         sortCoordinator.post(new SortCoordinator.Task() {
             @Override public void run(SortCoordinator.TaskContext context) {
-                context.checkpoint();
-                final BatchGameEngine.Round round = batchGameEngine.buildRound(snapshot,
-                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                                .getInt("game_batch_size", 6),
-                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                                .getInt("game_decoys", 1),
-                        smartResult == null ? null : smartResult.confidence,
-                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                                .getString("smart_active_pile", ""),
-                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                                .getInt("game_probe_every", 5),
-                        getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                                .getBoolean("game_batch_adaptive", false));
-                context.checkpoint();
+                context.userCheckpoint();
+                final Map<BatchGameEngine.Scope, List<MediaFile>> pools =
+                        new java.util.EnumMap<BatchGameEngine.Scope, List<MediaFile>>(
+                                BatchGameEngine.Scope.class);
+                for (BatchGameEngine.Scope scope : BatchGameEngine.Scope.values()) {
+                    context.userCheckpoint();
+                    pools.put(scope, BatchGameEngine.selectScope(complete, scope, selection,
+                            filtered, activePile, pilePatterns, ignorePatterns, includeTagged));
+                }
                 mainHandler.post(new Runnable() {
                     @Override public void run() {
-                        gameRound = round;
+                        batchScopeChooserOpen = false;
+                        showBatchScopeChooserDialog(reason, pools, activePile, pilePatterns,
+                                ignorePatterns, includeTagged);
+                    }
+                });
+            }
+        });
+    }
+
+    private void showBatchScopeChooserDialog(String reason,
+                                             final Map<BatchGameEngine.Scope, List<MediaFile>> pools,
+                                             final String activePile, final String pilePatterns,
+                                             final String ignorePatterns, final boolean includeTagged) {
+        final BatchGameEngine.Scope[] scopes = BatchGameEngine.Scope.values();
+        final String[] labels = new String[scopes.length];
+        for (int i = 0; i < scopes.length; i++) {
+            int count = pools.get(scopes[i]) == null ? 0 : pools.get(scopes[i]).size();
+            labels[i] = scopes[i].label + " — " + count + " files need tags";
+        }
+        final int[] selected = new int[]{Math.max(0, scopeIndex(getSharedPreferences(
+                "settings_prefs", MODE_PRIVATE).getString("batch_last_scope", "UNTAGGED")))};
+        String message = (reason == null ? "" : reason + "\n\n")
+                + "Choose a scope. The selected scope has "
+                + (pools.get(scopes[selected[0]]) == null ? 0 : pools.get(scopes[selected[0]]).size())
+                + " files need tags.";
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Batch tagger scope")
+                .setMessage(message)
+                .setSingleChoiceItems(labels, selected[0], new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        if (which >= 0 && which < scopes.length) selected[0] = which;
+                    }
+                })
+                .setPositiveButton("Start", null)
+                .setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        leaveBatchMode(false);
+                    }
+                }).create();
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override public void onShow(final DialogInterface ignored) {
+                Button start = dialog.getButton(DialogInterface.BUTTON_POSITIVE);
+                if (start == null) return;
+                start.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View view) {
+                        BatchGameEngine.Scope scope = scopes[selected[0]];
+                        List<MediaFile> pool = pools.get(scope);
+                        if (pool == null || pool.isEmpty()) {
+                            dialog.dismiss();
+                            String why = BatchGameEngine.noFilesReason(scope, activePile,
+                                    pilePatterns, ignorePatterns, includeTagged);
+                            showBatchScopeChooser(why);
+                            return;
+                        }
+                        dialog.dismiss();
+                        beginBatchScope(scope);
+                    }
+                });
+            }
+        });
+        dialog.show();
+    }
+
+    private int scopeIndex(String stored) {
+        BatchGameEngine.Scope wanted = BatchGameEngine.Scope.fromStored(stored);
+        BatchGameEngine.Scope[] values = BatchGameEngine.Scope.values();
+        for (int i = 0; i < values.length; i++) if (values[i] == wanted) return i;
+        return 0;
+    }
+
+    private void beginBatchScope(final BatchGameEngine.Scope scope) {
+        final SharedPreferences prefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        prefs.edit().putString("batch_last_scope", scope.name()).apply();
+        enterBatchMode();
+        final List<MediaFile> complete = indexer.getFullIndex();
+        final List<MediaFile> filtered = getFullListSnapshot();
+        final Set<String> selection = new java.util.LinkedHashSet<String>(getActiveSelectedPaths());
+        final String activePile = prefs.getString("smart_active_pile", "");
+        final String pilePatterns = prefs.getString("smart_pile_tag_patterns", "");
+        final String ignorePatterns = prefs.getString("smart_ignore_tag_patterns", "link_*,*_seq_*");
+        final boolean includeTagged = prefs.getBoolean("batch_include_tagged", false);
+        final int batchSize = Math.max(1, prefs.getInt("game_batch_size", 6));
+        final boolean skipToBack = prefs.getBoolean("batch_skip_to_back", true);
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                context.userCheckpoint();
+                List<MediaFile> pool = BatchGameEngine.selectScope(complete, scope, selection,
+                        filtered, activePile, pilePatterns, ignorePatterns, includeTagged);
+                if (pool.isEmpty()) {
+                    mainHandler.post(new Runnable() {
+                        @Override public void run() {
+                            leaveBatchMode(false);
+                            showBatchScopeChooser(BatchGameEngine.noFilesReason(scope, activePile,
+                                    pilePatterns, ignorePatterns, includeTagged));
+                        }
+                    });
+                    return;
+                }
+                batchGameEngine.start(pool, scope, batchSize, skipToBack);
+                final BatchGameEngine.Round next = batchGameEngine.buildNextRound();
+                preloadBatchQueue(context);
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        gameRound = next;
+                        batchLastTaggedPaths.clear();
+                        batchUndoAvailable = false;
                         saveGameSession();
-                        showGameRound(round);
+                        showBatchRound(next);
                     }
                 });
             }
@@ -4553,25 +4776,37 @@ public class MainActivity extends Activity
     }
 
     private void saveGameSession() {
-        if (sortSessionStore == null) return;
-        if (gameRound != null) {
-            org.json.JSONObject state = batchGameEngine.toJson(gameRound);
-            try {
-                state.put("game_started_at", gameStartedAt);
-                state.put("game_streak", gameStreak);
-                state.put("game_completed_rounds", gameCompletedRounds);
-                state.put("game_total_score", gameTotalScore);
-                state.put("game_perfect_rounds", gamePerfectRounds);
-            } catch (Exception ignored) {}
-            sortSessionStore.save(SortSessionStore.GAME_FILE, state);
+        if (sortSessionStore == null || batchGameEngine == null) return;
+        if (gameRound != null || !batchGameEngine.getQueueSnapshot().isEmpty()) {
+            sortSessionStore.save(SortSessionStore.GAME_FILE, batchGameEngine.toJson());
         } else {
             sortSessionStore.delete(SortSessionStore.GAME_FILE);
         }
     }
 
+    private void preloadBatchQueue(SortCoordinator.TaskContext context) {
+        if (thumbnailLoader == null || isBatchLowMemory()) return;
+        List<MediaFile> upcoming = batchGameEngine.getQueueSnapshot();
+        int limit = Math.min(batchGameEngine.getBatchSize(), upcoming.size());
+        int width = Math.max(galleryDp(80), galleryDp(120));
+        int height = Math.max(galleryDp(80), galleryDp(112));
+        for (int i = 0; i < limit; i++) {
+            context.userCheckpoint();
+            MediaFile file = upcoming.get(i);
+            if (file != null) thumbnailLoader.precacheAtSize(file, width, height);
+        }
+    }
+
+    private boolean isBatchLowMemory() {
+        ActivityManager manager = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+        return manager != null && (manager.getMemoryClass() < 512 || manager.isLowRamDevice());
+    }
+
     private void applyBatchSizeMode() {
-        if (batchSizeApplied || "panel".equals(getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                .getString("batch_size_mode", "expanded"))) return;
+        if (batchSizeApplied) return;
+        String mode = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("batch_size_mode", "expanded");
+        if ("panel".equals(mode)) return;
         View explorer = findViewById(R.id.explorerPanel);
         View tagBar = findViewById(R.id.tagBarContainer);
         if (explorer == null || tagBar == null) return;
@@ -4580,6 +4815,8 @@ public class MainActivity extends Activity
         batchPreviousExplorerPercent = getSharedPreferences("settings_prefs", MODE_PRIVATE)
                 .getInt("explorer_width_percent", 40);
         explorer.setVisibility(View.GONE);
+        if ("fullscreen".equals(mode)) tagBar.setVisibility(View.GONE);
+        else tagBar.setVisibility(View.VISIBLE);
         applyRootPanelWidths(0, true);
         batchSizeApplied = true;
     }
@@ -4596,357 +4833,500 @@ public class MainActivity extends Activity
         batchSizeApplied = false;
     }
 
-    private void showGameRound(final BatchGameEngine.Round round) {
-        applyBatchSizeMode();
+    private void showBatchRound(final BatchGameEngine.Round round) {
         if (round == null) {
-            showGameSummary();
+            showBatchSummary();
             return;
         }
+        applyBatchSizeMode();
+        removeSortModePanel();
         FrameLayout preview = findViewById(R.id.previewPanel);
         if (preview == null) return;
         sortModePanel = new LinearLayout(this);
         sortModePanel.setOrientation(LinearLayout.VERTICAL);
-        sortModePanel.setPadding(10, 10, 10, 10);
+        sortModePanel.setPadding(8, 8, 8, 8);
         sortModePanel.setBackgroundColor(0xEE161622);
-        gameRoundExpired = false;
-        TextView title = new TextView(this);
-        title.setTextColor(0xFFFFFFFF);
-        gameTitleView = title;
-        updateGameTitle(round);
-        sortModePanel.addView(title);
-        gameRoundStartedAt = android.os.SystemClock.uptimeMillis();
-        startGameTimer();
+        batchTitleView = new TextView(this);
+        batchTitleView.setTextColor(0xFFFFFFFF);
+        batchTitleView.setTextSize(15f);
+        sortModePanel.addView(batchTitleView);
+        batchDoneView = new TextView(this);
+        batchDoneView.setTextColor(0xFFBBBBBB);
+        sortModePanel.addView(batchDoneView);
 
-        final List<MediaFile> selected = new ArrayList<MediaFile>();
-        gameSubmitRunnable = new Runnable() {
-            @Override public void run() {
-                if (gameRoundExpired) {
-                    Toast.makeText(MainActivity.this, "Round timer expired", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                if (selected.isEmpty()) {
-                    Toast.makeText(MainActivity.this, "Select files in the current Game round",
-                            Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                Set<String> selectedPaths = new java.util.HashSet<String>();
-                for (MediaFile file : selected) if (file != null) selectedPaths.add(file.getPath());
-                captureGameUndo(round, selected);
-                gameLastScore = batchGameEngine.score(round, selectedPaths, false);
-                applyGameScore(gameLastScore);
-                final List<MediaFile> chosen = new ArrayList<MediaFile>(selected);
-                gameAfterTag = new Runnable() {
-                    @Override public void run() {
-                        gameLastTaggedGroup = new ArrayList<MediaFile>(chosen);
-                        gameCompletedRounds++;
-                        batchGameEngine.nextRound();
-                        gameRound = null;
-                        saveGameSession();
-                        startBatchGame();
-                    }
-                };
-                Toast.makeText(MainActivity.this, "Round score: "
-                        + gameLastScore.points + (gameLastScore.perfect ? " (perfect)" : ""),
-                        Toast.LENGTH_SHORT).show();
-                showQuickTagPopup(chosen);
-            }
-        };
-        gameNoneRunnable = new Runnable() {
-            @Override public void run() {
-                if (gameRoundExpired) {
-                    Toast.makeText(MainActivity.this, "Round timer expired", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                captureGameUndo(round, round.files);
-                gameLastScore = batchGameEngine.score(round,
-                        new java.util.HashSet<String>(), true);
-                applyGameScore(gameLastScore);
-                gameLastTaggedGroup = null;
-                int maxReturns = getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                        .getInt("game_none_max_returns", 2);
-                for (MediaFile file : round.files) {
-                    fileStatus.setSkipped(file.getPath());
-                    batchGameEngine.noteNone(file.getPath());
-                    if (batchGameEngine.getNoneReturns(file.getPath()) >= maxReturns) {
-                        tagManager.applyTag(file, "Unsorted");
-                    }
-                }
-                gameCompletedRounds++;
-                batchGameEngine.nextRound();
-                gameRound = null;
-                saveGameSession();
-                startBatchGame();
-            }
-        };
-        LinearLayout grid = new LinearLayout(this);
-        grid.setOrientation(LinearLayout.VERTICAL);
-        int columns = round.files.size() <= 6 ? 3 : 4;
-        LinearLayout row = null;
-        for (final MediaFile file : round.files) {
-            if (row == null || row.getChildCount() >= columns) {
-                row = new LinearLayout(this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                grid.addView(row, new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT, galleryDp(112)));
-            }
-            final LinearLayout cell = new LinearLayout(this);
-            cell.setOrientation(LinearLayout.VERTICAL);
-            cell.setGravity(Gravity.CENTER);
-            cell.setPadding(galleryDp(2), galleryDp(2), galleryDp(2), galleryDp(2));
-            cell.setBackgroundColor(0xFF2A2A3E);
-            final ImageView image = new ImageView(this);
-            image.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-            TextView caption = new TextView(this);
-            caption.setTextColor(0xFFFFFFFF);
-            caption.setTextSize(9f);
-            caption.setGravity(Gravity.CENTER);
-            caption.setSingleLine(true);
-            caption.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
-            caption.setText(fileName(file.getPath()));
-            cell.addView(image, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
-            cell.addView(caption, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, galleryDp(22)));
-            cell.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View view) {
-                    if (selected.contains(file)) selected.remove(file);
-                    else selected.add(file);
-                    cell.setBackgroundColor(selected.contains(file) ? 0xFF2A2A6E : 0xFF2A2A3E);
-                }
-            });
-            row.addView(cell, new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.MATCH_PARENT, 1f));
-            if (thumbnailLoader != null) thumbnailLoader.load(file, image);
-        }
-        sortModePanel.addView(grid);
-        TextView prompt = new TextView(this);
-        prompt.setTextColor(0xFFBBBBBB);
-        prompt.setText(getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                .getString("game_prompt_text", "Group these files and choose a tag"));
-        sortModePanel.addView(prompt);
-        LinearLayout controls = new LinearLayout(this);
-        Button tag = makeSmallButton("Submit group");
-        Button none = makeSmallButton("None of these");
-        Button undo = makeSmallButton("Undo round");
-        Button exit = makeSmallButton("Exit");
-        controls.addView(tag);
-        controls.addView(none);
-        controls.addView(undo);
-        if (gameLastTaggedGroup != null) {
-            final int minimumGroup = getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                    .getInt("game_order_min_group", 4);
-            if (gameLastTaggedGroup.size() >= Math.max(1, minimumGroup)) {
-                Button compareGroup = makeSmallButton("Compare last group");
-                controls.addView(compareGroup);
-                compareGroup.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View view) {
-                        compareFromGame = true;
-                        startCompareSort(new ArrayList<MediaFile>(gameLastTaggedGroup));
-                    }
+        LinearLayout selectionControls = new LinearLayout(this);
+        Button selectAll = makeSmallButton("Select all");
+        Button invert = makeSmallButton("Invert");
+        Button clear = makeSmallButton("Clear");
+        selectionControls.addView(selectAll);
+        selectionControls.addView(invert);
+        selectionControls.addView(clear);
+        sortModePanel.addView(selectionControls);
+
+        batchRoundGrid = new RecyclerView(this);
+        batchRoundGrid.setLayoutManager(new GridLayoutManager(this, round.files.size() <= 4 ? 2
+                : round.files.size() <= 9 ? 3 : 4));
+        batchRoundAdapter = new BatchRoundAdapter(thumbnailLoader,
+                new BatchRoundAdapter.Listener() {
+                    @Override public void onCellClicked(String path) { updateBatchTitle(); }
                 });
-            }
-        }
-        controls.addView(exit);
-        sortModePanel.addView(controls);
-        tag.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View view) {
-                if (gameSubmitRunnable != null) gameSubmitRunnable.run();
-            }
+        int cellWidth = Math.max(galleryDp(80), 120);
+        int cellHeight = galleryDp(112);
+        batchRoundAdapter.setRound(round, cellWidth, cellHeight);
+        batchRoundGrid.setAdapter(batchRoundAdapter);
+        sortModePanel.addView(batchRoundGrid, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, galleryDp(350)));
+
+        final SharedPreferences prefs = getSharedPreferences("settings_prefs", MODE_PRIVATE);
+        if (prefs.getBoolean("batch_show_inline_tags", true)) addBatchInlineTagBar(sortModePanel, round);
+
+        LinearLayout actions = new LinearLayout(this);
+        Button skip = makeSmallButton("Skip selected");
+        Button next = makeSmallButton("Next batch");
+        Button undo = makeSmallButton("Undo");
+        Button pause = makeSmallButton("Pause");
+        Button exit = makeSmallButton("Finish");
+        actions.addView(skip);
+        actions.addView(next);
+        actions.addView(undo);
+        actions.addView(pause);
+        actions.addView(exit);
+        sortModePanel.addView(actions);
+        selectAll.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { if (batchRoundAdapter != null) batchRoundAdapter.selectAll(); }
         });
-        none.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View view) {
-                if (gameNoneRunnable != null) gameNoneRunnable.run();
-            }
+        invert.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { if (batchRoundAdapter != null) batchRoundAdapter.invertSelection(); }
+        });
+        clear.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { if (batchRoundAdapter != null) batchRoundAdapter.clearSelection(); }
+        });
+        skip.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { skipBatchSelection(); }
+        });
+        next.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { nextBatch(); }
         });
         undo.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) { undoBatchGameRound(); }
         });
+        pause.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { pauseBatchGame(); }
+        });
         exit.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View view) { exitBatchGame(false); }
         });
+        updateBatchTitle();
         preview.addView(sortModePanel, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM));
     }
 
-    private void applyGameScore(BatchGameEngine.RoundScore score) {
-        if (score == null) return;
-        if ("none".equals(getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                .getString("game_score_mode", "progress"))) {
-            gameStreak = 0;
+    private void updateBatchTitle() {
+        if (batchTitleView == null || gameRound == null || batchGameEngine == null) return;
+        batchTitleView.setText("Batch tagger · Round " + gameRound.number);
+        BatchGameEngine.Summary summary = batchGameEngine.getSummary();
+        if (batchDoneView != null) batchDoneView.setText("Done " + gameRound.doneCount() + "/"
+                + gameRound.files.size() + " · Tagged " + summary.tagged + " · Skipped "
+                + summary.skipped + " · Remaining " + summary.remaining);
+    }
+
+    private void addBatchInlineTagBar(LinearLayout parent, BatchGameEngine.Round round) {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.VERTICAL);
+        TextView label = new TextView(this);
+        label.setText("Recent tags · Smart suggestions");
+        label.setTextColor(0xFFBBBBBB);
+        bar.addView(label);
+        LinearLayout searchRow = new LinearLayout(this);
+        final EditText search = new EditText(this);
+        search.setHint("Search tags");
+        search.setSingleLine(true);
+        search.setTextColor(0xFFFFFFFF);
+        searchRow.addView(search, new LinearLayout.LayoutParams(0, galleryDp(36), 1f));
+        Button newTag = makeSmallButton("New tag");
+        Button randomTag = makeSmallButton("Random tag");
+        searchRow.addView(newTag);
+        searchRow.addView(randomTag);
+        bar.addView(searchRow);
+        RecyclerView tags = new RecyclerView(this);
+        tags.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
+        batchInlineTagAdapter = new BatchInlineTagAdapter(new BatchInlineTagAdapter.Listener() {
+            @Override public void onTagClicked(String tag) { commitBatchTag(tag); }
+        });
+        List<Tag> choices = new ArrayList<Tag>();
+        Set<String> seen = new java.util.HashSet<String>();
+        for (Tag tag : tagManager.getRecentTags(10)) {
+            if (tag != null && seen.add(tag.getName())) choices.add(tag);
+        }
+        for (Tag tag : tagManager.getAllTags()) {
+            if (tag != null && seen.add(tag.getName())) choices.add(tag);
+        }
+        Set<String> suggestions = new java.util.HashSet<String>();
+        if (smartResult != null) suggestions.addAll(smartResult.suggestions.values());
+        for (String suggestion : suggestions) {
+            if (suggestion != null && !suggestion.isEmpty() && seen.add(suggestion)) {
+                choices.add(new Tag(suggestion));
+            }
+        }
+        batchInlineTagAdapter.setData(choices, suggestions);
+        tags.setAdapter(batchInlineTagAdapter);
+        bar.addView(tags, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, galleryDp(42)));
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                if (batchInlineTagAdapter != null) batchInlineTagAdapter.filter(s.toString());
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        newTag.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { showBatchNewTagChooser(); }
+        });
+        randomTag.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { commitBatchTag(randomBatchTag()); }
+        });
+        parent.addView(bar);
+    }
+
+    private String randomBatchTag() {
+        Set<String> existing = new java.util.HashSet<String>();
+        for (Tag tag : tagManager.getAllTags()) if (tag != null) existing.add(tag.getName());
+        return RandomGenerator.uniqueSuffixTag(RandomGenerator.randomSyllableTag(), existing);
+    }
+
+    private void showBatchNewTagChooser() {
+        final EditText input = new EditText(this);
+        input.setHint("Tag name");
+        input.setSingleLine(true);
+        input.setTextColor(0xFFFFFFFF);
+        new AlertDialog.Builder(this).setTitle("New tag")
+                .setView(input)
+                .setPositiveButton("Choose", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        String name = TagText.plain(input.getText().toString());
+                        if (name.isEmpty()) return;
+                        // The worker bulk commit creates the catalog row and
+                        // performs the single coalesced event.
+                        commitBatchTag(name);
+                    }
+                })
+                .setNeutralButton("Random tag", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface dialog, int which) {
+                        commitBatchTag(randomBatchTag());
+                    }
+                })
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    public void applyBatchTag(String tag) { commitBatchTag(tag); }
+
+    public void applyLastBatchTag() {
+        List<Tag> recent = tagManager == null ? new ArrayList<Tag>() : tagManager.getRecentTags(1);
+        if (recent.isEmpty()) {
+            Toast.makeText(this, "Choose a tag first", Toast.LENGTH_SHORT).show();
+        } else {
+            commitBatchTag(recent.get(0).getName());
+        }
+    }
+
+    private void commitBatchTag(final String rawTag) {
+        String tag = TagText.plain(rawTag);
+        if (tag.isEmpty() || batchRoundAdapter == null || gameRound == null) return;
+        final Set<String> selected = batchRoundAdapter.getSelectedPaths();
+        if (selected.isEmpty()) {
+            Toast.makeText(this, "Select images first", Toast.LENGTH_SHORT).show();
             return;
         }
-        gameTotalScore += score.points;
-        if (score.perfect) {
-            gamePerfectRounds++;
-            gameStreak++;
-        } else {
-            gameStreak = 0;
-        }
-    }
-
-    private void captureGameUndo(BatchGameEngine.Round round, List<MediaFile> targets) {
-        gameUndoTags = new java.util.HashMap<String, List<String>>();
-        gameUndoStatuses = new java.util.HashMap<String, FileStatus.Status>();
-        if (targets != null) for (MediaFile file : targets) {
-            if (file == null || file.getPath() == null) continue;
-            gameUndoTags.put(file.getPath(), new ArrayList<String>(file.getTags()));
-            gameUndoStatuses.put(file.getPath(), fileStatus.getStatus(file.getPath()));
-        }
-        gameUndoRound = round;
-        gameUndoEngineState = batchGameEngine.toJson(null);
-        gameUndoScore = gameLastScore;
-        gameUndoStreak = gameStreak;
-        gameUndoTotalScore = gameTotalScore;
-        gameUndoPerfectRounds = gamePerfectRounds;
-        gameUndoLastTaggedGroup = gameLastTaggedGroup == null ? null
-                : new ArrayList<MediaFile>(gameLastTaggedGroup);
-        gameUndoAvailable = !gameUndoTags.isEmpty();
-    }
-
-    private void updateGameTitle(BatchGameEngine.Round round) {
-        if (gameTitleView == null || round == null) return;
-        String mode = getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                .getString("game_score_mode", "progress");
-        String suffix = "";
-        if ("streak".equals(mode)) suffix = "  streak " + gameStreak;
-        else if ("progress".equals(mode)) {
-            int total = fullList.size();
-            int tagged = 0;
-            for (MediaFile file : fullList) if (!file.getTags().isEmpty()) tagged++;
-            suffix = "  tagged " + tagged + "/" + total;
-        }
-        if (!"none".equals(mode)) suffix += "  score " + gameTotalScore;
-        int timerSeconds = getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                .getInt("game_timer_seconds", 0);
-        if (timerSeconds > 0 && gameRoundStartedAt > 0L) {
-            long elapsed = (android.os.SystemClock.uptimeMillis() - gameRoundStartedAt) / 1000L;
-            long remaining = Math.max(0L, timerSeconds - elapsed);
-            suffix += "  time " + (remaining / 60) + ":"
-                    + String.format(java.util.Locale.US, "%02d", remaining % 60);
-        }
-        gameTitleView.setText("Game round " + round.number + " — select a group" + suffix);
-    }
-
-    private void startGameTimer() {
-        if (gameTimerRunnable != null) mainHandler.removeCallbacks(gameTimerRunnable);
-        int seconds = getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                .getInt("game_timer_seconds", 0);
-        if (seconds <= 0) return;
-        gameTimerRunnable = new Runnable() {
-            @Override public void run() {
-                if (gameRound == null || gameTitleView == null) return;
-                long elapsed = (android.os.SystemClock.uptimeMillis() - gameRoundStartedAt) / 1000L;
-                if (elapsed >= seconds) {
-                    gameRoundExpired = true;
-                    updateGameTitle(gameRound);
-                    Toast.makeText(MainActivity.this, "Game round time expired",
-                            Toast.LENGTH_SHORT).show();
-                    gameTimerRunnable = null;
-                    return;
+        if (batchCommitInProgress) return;
+        batchCommitInProgress = true;
+        final String selectedTag = tag;
+        final boolean replace = "replace".equalsIgnoreCase(getSharedPreferences(
+                "settings_prefs", MODE_PRIVATE).getString("game_commit_mode", "add"));
+        final org.json.JSONObject before = batchGameEngine.toJson();
+        final String sequencePatterns = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("smart_pile_tag_patterns", "");
+        final String protectPatterns = getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getString("smart_ignore_tag_patterns", "link_*,*_seq_*");
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                context.userCheckpoint();
+                List<MediaFile> snapshot = indexer.getFullIndex();
+                List<MediaFile> targets = new ArrayList<MediaFile>();
+                final Map<String, List<String>> previous = new java.util.LinkedHashMap<String, List<String>>();
+                final Map<String, FileStatus.Status> previousStatus = new java.util.LinkedHashMap<String, FileStatus.Status>();
+                for (MediaFile file : snapshot) {
+                    if (file == null || !selected.contains(file.getPath())) continue;
+                    targets.add(file);
+                    previous.put(file.getPath(), new ArrayList<String>(file.getTags()));
+                    previousStatus.put(file.getPath(), fileStatus.getStatus(file.getPath()));
                 }
-                updateGameTitle(gameRound);
-                mainHandler.postDelayed(this, 1000L);
-            }
-        };
-        mainHandler.post(gameTimerRunnable);
-    }
-
-    private void showGameSummary() {
-        int tagged = 0;
-        for (MediaFile file : fullList) if (file != null && !file.getTags().isEmpty()) tagged++;
-        new AlertDialog.Builder(this).setTitle("Batch Game complete")
-                .setMessage("Tagged " + tagged + " of " + fullList.size() + " files.\n"
-                        + "Score: " + gameTotalScore + "  Perfect rounds: " + gamePerfectRounds
-                        + "  Streak: " + gameStreak)
-                .setPositiveButton("Close", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface dialog, int which) {
-                        exitBatchGame(false);
+                Set<String> failed = new java.util.HashSet<String>();
+                if (replace) {
+                    ReplaceTagsManager.Report report = ReplaceTagsManager.apply(snapshot, selected,
+                            java.util.Collections.singletonList(selectedTag), sequencePatterns,
+                            protectPatterns, ReplaceTagsManager.SequenceRule.WHOLE_GROUP,
+                            tagManager, false, "replace_with", 2, false);
+                    failed.addAll(report.failedPaths);
+                } else {
+                    Map<String, List<String>> desired = new java.util.LinkedHashMap<String, List<String>>();
+                    for (MediaFile file : targets) {
+                        List<String> values = new ArrayList<String>(file.getTags());
+                        if (!values.contains(selectedTag)) values.add(selectedTag);
+                        desired.put(file.getPath(), values);
                     }
-                }).show();
+                    TagManager.BulkTagResult result = tagManager.replaceTagSets(targets, desired, true);
+                    failed.addAll(result.failedPaths);
+                }
+                final Set<String> successful = new java.util.LinkedHashSet<String>(selected);
+                successful.removeAll(failed);
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        batchCommitInProgress = false;
+                        if (successful.isEmpty()) {
+                            Toast.makeText(MainActivity.this, "Tag write failed", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        batchUndoTags = previous;
+                        batchUndoStatuses = previousStatus;
+                        batchUndoEngineState = before;
+                        batchUndoAvailable = true;
+                        for (String path : successful) {
+                            batchGameEngine.markApplied(path);
+                            fileStatus.setDone(path);
+                        }
+                        batchLastTaggedPaths.addAll(successful);
+                        if (batchRoundAdapter != null) batchRoundAdapter.markApplied(successful);
+                        updateBatchTitle();
+                        saveGameSession();
+                        if (batchGameEngine.isRoundComplete()
+                                && getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                                .getBoolean("batch_auto_advance", true)) {
+                            buildNextBatch();
+                        }
+                    }
+                });
+            }
+        });
     }
 
-    private void submitBatchGameRound() {
-        if (gameSubmitRunnable != null) gameSubmitRunnable.run();
-        else Toast.makeText(this, "Select files in the current Game round", Toast.LENGTH_SHORT).show();
+    private boolean batchCommitInProgress;
+
+    public void skipBatchSelection() {
+        if (batchRoundAdapter == null || gameRound == null) return;
+        final Set<String> selected = batchRoundAdapter.getSelectedPaths();
+        if (selected.isEmpty()) {
+            Toast.makeText(this, "Select images first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        for (String path : selected) {
+            if (batchGameEngine.markSkipped(path)) fileStatus.setSkipped(path);
+        }
+        batchRoundAdapter.markSkipped(selected);
+        updateBatchTitle();
+        saveGameSession();
+        if (batchGameEngine.isRoundComplete()
+                && getSharedPreferences("settings_prefs", MODE_PRIVATE)
+                .getBoolean("batch_auto_advance", true)) buildNextBatch();
     }
 
-    private void noneBatchGameRound() {
-        if (gameNoneRunnable != null) gameNoneRunnable.run();
-        else Toast.makeText(this, "Use None of these in the Game panel", Toast.LENGTH_SHORT).show();
+    public void nextBatch() {
+        if (batchGameEngine == null || gameRound == null) return;
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                context.userCheckpoint();
+                final Set<String> pending = new java.util.LinkedHashSet<String>();
+                BatchGameEngine.Round current = batchGameEngine.getCurrentRound();
+                final Set<String> appliedInPrevious = current == null
+                        ? new java.util.LinkedHashSet<String>() : current.getAppliedPaths();
+                if (current != null) {
+                    for (MediaFile file : current.files) {
+                        if (file != null && !current.isDone(file.getPath())) pending.add(file.getPath());
+                    }
+                }
+                final BatchGameEngine.Round next = batchGameEngine.nextBatch();
+                preloadBatchQueue(context);
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        for (String path : pending) fileStatus.setSkipped(path);
+                        gameRound = next;
+                        batchLastTaggedPaths = new java.util.LinkedHashSet<String>(appliedInPrevious);
+                        if (next == null) showBatchSummary();
+                        else {
+                            saveGameSession();
+                            showBatchRound(next);
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    private void buildNextBatch() {
+        if (batchGameEngine == null) return;
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                context.userCheckpoint();
+                BatchGameEngine.Round current = batchGameEngine.getCurrentRound();
+                if (current != null && !batchGameEngine.isRoundComplete()) return;
+                final Set<String> appliedInPrevious = current == null
+                        ? new java.util.LinkedHashSet<String>() : current.getAppliedPaths();
+                final BatchGameEngine.Round next = batchGameEngine.buildNextRound();
+                preloadBatchQueue(context);
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        gameRound = next;
+                        batchLastTaggedPaths = new java.util.LinkedHashSet<String>(appliedInPrevious);
+                        if (next == null) showBatchSummary();
+                        else {
+                            saveGameSession();
+                            showBatchRound(next);
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    private void showBatchSummary() {
+        if (batchGameEngine == null) return;
+        BatchGameEngine.Summary summary = batchGameEngine.getSummary();
+        String message = "Tagged: " + summary.tagged + "\nSkipped: " + summary.skipped
+                + "\nRemaining: " + summary.remaining;
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        TextView summaryText = new TextView(this);
+        summaryText.setTextColor(0xFFFFFFFF);
+        summaryText.setText(message);
+        content.addView(summaryText);
+        Button review = makeSmallButton("Review skipped");
+        Button change = makeSmallButton("Change scope");
+        Button finish = makeSmallButton("Finish");
+        content.addView(review);
+        content.addView(change);
+        content.addView(finish);
+        if (!batchLastTaggedPaths.isEmpty()) {
+            Button order = makeSmallButton("Order this group");
+            content.addView(order);
+            order.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View view) {
+                    if (batchSummaryDialog != null) batchSummaryDialog.dismiss();
+                    orderLastBatchGroup();
+                }
+            });
+        }
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Batch tagger summary").setView(content).create();
+        batchSummaryDialog = dialog;
+        review.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { dialog.dismiss(); reviewBatchSkipped(); }
+        });
+        change.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { dialog.dismiss(); changeBatchScope(); }
+        });
+        finish.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { dialog.dismiss(); exitBatchGame(false); }
+        });
+        dialog.setButton(DialogInterface.BUTTON_NEGATIVE, "Close",
+                (DialogInterface.OnClickListener) null);
+        dialog.show();
+    }
+
+    private void reviewBatchSkipped() {
+        Set<String> skipped = batchGameEngine.getSkippedPaths();
+        if (skipped.isEmpty()) {
+            Toast.makeText(this, "No skipped files", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        StringBuilder text = new StringBuilder();
+        for (String path : skipped) {
+            if (text.length() > 0) text.append('\n');
+            text.append(fileName(path));
+        }
+        new AlertDialog.Builder(this).setTitle("Skipped files")
+                .setMessage(text.toString()).setPositiveButton("Close", null).show();
+    }
+
+    private void changeBatchScope() {
+        exitBatchGame(false);
+        showBatchScopeChooser("");
+    }
+
+    public void pauseBatchGame() {
+        saveGameSession();
+        leaveBatchMode(true);
+        Toast.makeText(this, "Batch tagger paused", Toast.LENGTH_SHORT).show();
     }
 
     private void undoBatchGameRound() {
-        if (!gameUndoAvailable || gameUndoTags == null || gameUndoTags.isEmpty()) {
-            undoLastAction();
+        if (!batchUndoAvailable || batchUndoTags == null || batchUndoTags.isEmpty()) {
+            Toast.makeText(this, "Nothing to undo", Toast.LENGTH_SHORT).show();
             return;
         }
-        final Map<String, List<String>> restoreTags = gameUndoTags;
-        final Map<String, FileStatus.Status> restoreStatuses = gameUndoStatuses;
-        gameUndoTags = null;
-        gameUndoStatuses = null;
-        gameUndoAvailable = false;
-        if (gameUndoEngineState != null) batchGameEngine.restoreState(gameUndoEngineState);
-        gameUndoEngineState = null;
-        gameLastScore = gameUndoScore;
-        gameStreak = gameUndoStreak;
-        gameTotalScore = gameUndoTotalScore;
-        gamePerfectRounds = gameUndoPerfectRounds;
-        gameLastTaggedGroup = gameUndoLastTaggedGroup;
-        gameUndoScore = null;
-        gameUndoLastTaggedGroup = null;
-        Map<String, MediaFile> files = new java.util.HashMap<String, MediaFile>();
-        for (MediaFile file : indexer.getFullIndex()) {
-            if (file != null && restoreTags.containsKey(file.getPath())) files.put(file.getPath(), file);
-        }
-        for (Map.Entry<String, List<String>> entry : restoreTags.entrySet()) {
-            MediaFile file = files.get(entry.getKey());
-            if (file == null) continue;
-            for (String tag : new ArrayList<String>(file.getTags())) {
-                if (!entry.getValue().contains(tag)) tagManager.removeTag(file, tag);
+        final Map<String, List<String>> restore = batchUndoTags;
+        final Map<String, FileStatus.Status> restoreStatuses = batchUndoStatuses;
+        final org.json.JSONObject restoreEngine = batchUndoEngineState;
+        batchUndoTags = null;
+        batchUndoStatuses = null;
+        batchUndoEngineState = null;
+        batchUndoAvailable = false;
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                context.userCheckpoint();
+                List<MediaFile> snapshot = indexer.getFullIndex();
+                List<MediaFile> targets = new ArrayList<MediaFile>();
+                for (MediaFile file : snapshot) if (file != null && restore.containsKey(file.getPath())) targets.add(file);
+                tagManager.replaceTagSets(targets, restore, true);
+                batchGameEngine.restoreFromJson(restoreEngine, snapshot);
+                final BatchGameEngine.Round restored = batchGameEngine.getCurrentRound();
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        for (Map.Entry<String, FileStatus.Status> entry : restoreStatuses.entrySet()) {
+                            if (entry.getValue() == FileStatus.Status.SKIPPED) fileStatus.setSkipped(entry.getKey());
+                            else if (entry.getValue() == FileStatus.Status.FLAGGED) fileStatus.setFlagged(entry.getKey());
+                            else if (entry.getValue() == FileStatus.Status.DONE) fileStatus.setDone(entry.getKey());
+                            else fileStatus.clearStatus(entry.getKey());
+                        }
+                        gameRound = restored;
+                        saveGameSession();
+                        showBatchRound(restored);
+                        Toast.makeText(MainActivity.this, "Batch tag undone", Toast.LENGTH_SHORT).show();
+                    }
+                });
             }
-            for (String tag : entry.getValue()) if (!file.hasTag(tag)) tagManager.applyTag(file, tag);
-            FileStatus.Status status = restoreStatuses.get(entry.getKey());
-            if (status == null || status == FileStatus.Status.NONE) fileStatus.clearStatus(entry.getKey());
-            else if (status == FileStatus.Status.SKIPPED) fileStatus.setSkipped(entry.getKey());
-            else if (status == FileStatus.Status.FLAGGED) fileStatus.setFlagged(entry.getKey());
-            else if (status == FileStatus.Status.DONE) fileStatus.setDone(entry.getKey());
-        }
-        gameRound = gameUndoRound;
-        gameUndoRound = null;
-        saveGameSession();
-        removeSortModePanel();
-        if (gameRound != null) showGameRound(gameRound);
-        scheduleRefresh();
-        Toast.makeText(this, "Game round undone", Toast.LENGTH_SHORT).show();
+        });
     }
 
-    private void exitBatchGame(boolean keepOrder) {
-        gameAfterTag = null;
-        if (gameTimerRunnable != null) mainHandler.removeCallbacks(gameTimerRunnable);
-        gameTimerRunnable = null;
-        gameTitleView = null;
-        gameRound = null;
-        compareFromGame = false;
-        gameLastTaggedGroup = null;
-        gameLastScore = null;
-        gameTotalScore = 0;
-        gamePerfectRounds = 0;
-        gameCompletedRounds = 0;
-        gameSubmitRunnable = null;
-        gameNoneRunnable = null;
-        gameUndoRound = null;
-        gameUndoEngineState = null;
-        gameUndoScore = null;
-        gameUndoLastTaggedGroup = null;
-        gameUndoTags = null;
-        gameUndoStatuses = null;
-        gameUndoAvailable = false;
-        gameStartedAt = 0L;
-        gameRoundStartedAt = 0L;
-        if (sortSessionStore != null) sortSessionStore.delete(SortSessionStore.GAME_FILE);
+    private void orderLastBatchGroup() {
+        if (batchLastTaggedPaths == null || batchLastTaggedPaths.size() < 2) return;
+        final Set<String> paths = new java.util.LinkedHashSet<String>(batchLastTaggedPaths);
+        sortCoordinator.post(new SortCoordinator.Task() {
+            @Override public void run(SortCoordinator.TaskContext context) {
+                context.userCheckpoint();
+                final List<MediaFile> group = batchGameEngine.filesForPaths(paths);
+                mainHandler.post(new Runnable() {
+                    @Override public void run() {
+                        if (group.size() < 2) return;
+                        compareFromGame = true;
+                        startCompareSort(group);
+                    }
+                });
+            }
+        });
+    }
+
+    private void leaveBatchMode(boolean preserveSession) {
         restoreBatchSizeMode();
         removeSortModePanel();
+        batchRoundGrid = null;
+        batchRoundAdapter = null;
+        batchInlineTagAdapter = null;
+        batchSummaryDialog = null;
+        batchTitleView = null;
+        batchDoneView = null;
+        gameRound = null;
+        batchCommitInProgress = false;
+        if (!preserveSession && sortSessionStore != null) sortSessionStore.delete(SortSessionStore.GAME_FILE);
         if (sortCoordinator != null) {
             sortCoordinator.setInteractivePause(false);
             sortCoordinator.setMode(SortCoordinator.Mode.OFF);
@@ -4954,6 +5334,8 @@ public class MainActivity extends Activity
         if (smartSortEngine != null && getSharedPreferences("settings_prefs", MODE_PRIVATE)
                 .getBoolean("smart_enabled", false)) smartSortEngine.setPaused(false);
     }
+
+    private void exitBatchGame(boolean preserveSession) { leaveBatchMode(preserveSession); }
 
     private void writeMetadataNow() {
         MediaFile file = currentFileReference();
@@ -5501,6 +5883,14 @@ public class MainActivity extends Activity
      * window, so the absolute index is translated to the current window copy
      * before the posted LinearLayoutManager call.
      */
+    private void scrollToPathWithoutChangingCurrent(String path) {
+        int absolute = findIndexByPath(fullList, path);
+        if (absolute < 0) return;
+        windowManager.centerOn(absolute);
+        updateWindow();
+        scrollFileListToCurrent(absolute);
+    }
+
     private void scrollFileListToCurrent(int absoluteIndex) {
         if (fileBrowser == null || absoluteIndex < 0 || absoluteIndex >= fullList.size()) return;
         final List<MediaFile> windowCopy = getCurrentFilesSnapshot();
@@ -7461,24 +7851,13 @@ private Spinner makeSpinner(String[] options) {
                 .setView(quickTagContent)
                 .setPositiveButton("Apply", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface dialog, int which) {
-                        boolean gameReplace = gameAfterTag != null
-                                && "replace".equals(getSharedPreferences("settings_prefs", MODE_PRIVATE)
-                                .getString("game_commit_mode", "add"));
-                        if (gameReplace) {
-                            Map<String, List<String>> desired = new java.util.HashMap<String, List<String>>();
-                            List<String> checked = new ArrayList<String>();
-                            for (QuickTagItem item : items) if (item.currentType == 1) checked.add(item.name);
-                            for (MediaFile f : targets) desired.put(f.getPath(), new ArrayList<String>(checked));
-                            tagManager.replaceTagSets(targets, desired);
-                        } else {
-                            for (QuickTagItem item : items) {
-                                if (item.currentType == item.initialType) continue; // untouched
-                                for (MediaFile f : targets) {
-                                    if (item.currentType == 1) {
-                                        tagManager.applyTag(f, item.name);
-                                    } else if (item.currentType == 0) {
-                                        tagManager.removeTag(f, item.name);
-                                    }
+                        for (QuickTagItem item : items) {
+                            if (item.currentType == item.initialType) continue; // untouched
+                            for (MediaFile f : targets) {
+                                if (item.currentType == 1) {
+                                    tagManager.applyTag(f, item.name);
+                                } else if (item.currentType == 0) {
+                                    tagManager.removeTag(f, item.name);
                                 }
                             }
                         }
@@ -7495,11 +7874,6 @@ private Spinner makeSpinner(String[] options) {
                                 targets.size() == 1 ? "Tags updated"
                                                     : "Tagged " + targets.size() + " files",
                                 Toast.LENGTH_SHORT).show();
-                        if (gameAfterTag != null) {
-                            Runnable nextRound = gameAfterTag;
-                            gameAfterTag = null;
-                            nextRound.run();
-                        }
                     }
                 })
                 .setNeutralButton("＋ New tag", new DialogInterface.OnClickListener() {

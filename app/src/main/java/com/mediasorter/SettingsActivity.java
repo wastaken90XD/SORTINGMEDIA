@@ -646,7 +646,7 @@ public class SettingsActivity extends Activity {
             @Override public void onClick(View view) {
                 new AlertDialog.Builder(SettingsActivity.this)
                         .setTitle("Reset sorting defaults?")
-                        .setMessage("Compare, Game, and Replace Tags settings will return to their defaults.")
+                        .setMessage("Compare, Batch tagger, and Replace Tags settings will return to their defaults.")
                         .setNegativeButton("Cancel", null)
                         .setPositiveButton("Reset", new DialogInterface.OnClickListener() {
                             @Override public void onClick(DialogInterface dialog, int which) {
@@ -769,14 +769,16 @@ public class SettingsActivity extends Activity {
                 new OnNumericChangeListener() {
                     @Override public void onChange(int value) { saveInt("compare_undo_depth", value); }
                 }));
-        root.addView(makeTitle("Batch Game"));
+        root.addView(makeTitle("Batch tagger"));
         root.addView(makeSpinnerRow("Batch size mode:",
-                new String[]{"panel", "expanded"},
-                "panel".equals(settingsPrefs.getString("batch_size_mode", "expanded")) ? 0 : 1,
+                new String[]{"panel", "expanded", "fullscreen"},
+                batchSizeModePosition(),
                 new OnSpinnerSelectedListener() {
-                    @Override public void onSelected(String value, int position) { saveString("batch_size_mode", value); }
+                    @Override public void onSelected(String value, int position) {
+                        saveString("batch_size_mode", value);
+                    }
                 }));
-        root.addView(makeCheckBoxRow("Auto advance batch tagger",
+        root.addView(makeCheckBoxRow("Auto advance Batch tagger",
                 settingsPrefs.getBoolean("batch_auto_advance", true), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("batch_auto_advance", value); }
                 }));
@@ -788,72 +790,22 @@ public class SettingsActivity extends Activity {
                 settingsPrefs.getBoolean("batch_include_tagged", false), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("batch_include_tagged", value); }
                 }));
-        root.addView(makeCheckBoxRow("Show inline batch tags",
+        root.addView(makeCheckBoxRow("Show inline Batch tagger tags",
                 settingsPrefs.getBoolean("batch_show_inline_tags", true), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("batch_show_inline_tags", value); }
                 }));
         root.addView(makeSpinnerRow("Batch commit mode:",
                 new String[]{"add", "replace"},
-                "replace".equals(settingsPrefs.getString("batch_commit_mode", "add")) ? 1 : 0,
-                new OnSpinnerSelectedListener() {
-                    @Override public void onSelected(String value, int position) { saveString("batch_commit_mode", value); }
-                }));
-        root.addView(makeCheckBoxRow("Adaptive Game batch size",
-                settingsPrefs.getBoolean("game_batch_adaptive", true), new OnCheckedChangeListener() {
-                    @Override public void onChecked(boolean value) { saveBoolean("game_batch_adaptive", value); }
-                }));
-        root.addView(makeSpinnerRow("Game commit mode:",
-                new String[]{"add", "replace"},
                 "replace".equals(settingsPrefs.getString("game_commit_mode", "add")) ? 1 : 0,
                 new OnSpinnerSelectedListener() {
-                    @Override public void onSelected(String value, int position) { saveString("game_commit_mode", value); }
+                    @Override public void onSelected(String value, int position) {
+                        saveString("game_commit_mode", value);
+                    }
                 }));
-        root.addView(makeTextInputRow("Game prompt text:",
-                settingsPrefs.getString("game_prompt_text", "Group these files and choose a tag"),
-                new OnTextChangeListener() {
-                    @Override public void onChange(String value) { saveString("game_prompt_text", value); }
-                }));
-        root.addView(makeNumericInputRow("Minimum files for Game order:",
-                settingsPrefs.getInt("game_order_min_group", 3), 1, 12,
-                new OnNumericChangeListener() {
-                    @Override public void onChange(int value) { saveInt("game_order_min_group", value); }
-                }));
-        root.addView(makeNumericInputRow("Game batch size (4-12):",
-                settingsPrefs.getInt("game_batch_size", 6), 4, 12,
+        root.addView(makeNumericInputRow("Batch tagger batch size (1-12):",
+                settingsPrefs.getInt("game_batch_size", 6), 1, 12,
                 new OnNumericChangeListener() {
                     @Override public void onChange(int value) { saveInt("game_batch_size", value); }
-                }));
-        root.addView(makeNumericInputRow("Game decoys (0-3):",
-                settingsPrefs.getInt("game_decoys", 1), 0, 3,
-                new OnNumericChangeListener() {
-                    @Override public void onChange(int value) { saveInt("game_decoys", value); }
-                }));
-        root.addView(makeNumericInputRow("Game probe every rounds (0-100):",
-                settingsPrefs.getInt("game_probe_every", 5), 0, 100,
-                new OnNumericChangeListener() {
-                    @Override public void onChange(int value) { saveInt("game_probe_every", value); }
-                }));
-        root.addView(makeNumericInputRow("Game none cooldown rounds:",
-                settingsPrefs.getInt("game_none_cooldown", 3), 0, 20,
-                new OnNumericChangeListener() {
-                    @Override public void onChange(int value) { saveInt("game_none_cooldown", value); }
-                }));
-        root.addView(makeNumericInputRow("Game none max returns:",
-                settingsPrefs.getInt("game_none_max_returns", 2), 1, 10,
-                new OnNumericChangeListener() {
-                    @Override public void onChange(int value) { saveInt("game_none_max_returns", value); }
-                }));
-        root.addView(makeNumericInputRow("Game timer seconds (0 = off):",
-                settingsPrefs.getInt("game_timer_seconds", 0), 0, 3600,
-                new OnNumericChangeListener() {
-                    @Override public void onChange(int value) { saveInt("game_timer_seconds", value); }
-                }));
-        root.addView(makeSpinnerRow("Game score mode:",
-                new String[]{"none", "progress", "streak"},
-                gameScorePosition(), new OnSpinnerSelectedListener() {
-                    @Override public void onSelected(String value, int position) {
-                        saveString("game_score_mode", value);
-                    }
                 }));
         root.addView(makeTitle("Replace Tags"));
         root.addView(makeSpinnerRow("Replace mode:",
@@ -1040,10 +992,10 @@ public class SettingsActivity extends Activity {
         return 0;
     }
 
-    private int gameScorePosition() {
-        String value = settingsPrefs.getString("game_score_mode", "progress");
-        if ("none".equals(value)) return 0;
-        if ("streak".equals(value)) return 2;
+    private int batchSizeModePosition() {
+        String value = settingsPrefs.getString("batch_size_mode", "expanded");
+        if ("panel".equals(value)) return 0;
+        if ("fullscreen".equals(value)) return 2;
         return 1;
     }
 

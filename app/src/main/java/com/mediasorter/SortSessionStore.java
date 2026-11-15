@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Atomic, non-exported session persistence for Compare and Batch Game. */
+/** Atomic, non-exported session persistence for Compare and the Batch tagger. */
 public final class SortSessionStore {
     public static final String COMPARE_FILE = "compare_session.json";
     public static final String GAME_FILE = "game_session.json";

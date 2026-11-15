@@ -19,15 +19,12 @@ public final class SortProfileManager {
             "compare_layout", "compare_question", "compare_randomize_sides", "compare_auto_apply",
             "compare_size_mode", "compare_show_order_strip", "compare_button_height_dp",
             "batch_size_mode", "batch_auto_advance", "batch_skip_to_back", "batch_include_tagged",
-            "batch_show_inline_tags", "batch_commit_mode", "game_commit_mode",
+            "batch_show_inline_tags", "game_commit_mode", "batch_last_scope",
             "compare_show_order_strip", "compare_size_mode", "compare_button_height_dp",
             "compare_recheck_every", "compare_sync_zoom", "compare_show_caption",
             "compare_caption_fields", "compare_volume_pick", "compare_video_muted",
             "compare_warn_questions", "compare_undo_depth", "compare_prefetch",
-            "compare_hires_on_zoom", "game_batch_size", "game_batch_adaptive", "game_commit_mode",
-            "game_decoys", "game_probe_every", "game_none_cooldown",
-            "game_none_max_returns", "game_order_min_group", "game_score_mode",
-            "game_timer_seconds", "game_prompt_text", "sort_dupes_mode",
+            "compare_hires_on_zoom", "game_batch_size", "sort_dupes_mode", 
             "replace_mode", "replace_keep_max", "replace_confirm_min_files", "replace_protect_piles",
             "replace_sequence_rule", "replace_sequence_patterns", "replace_protect_patterns",
             "replace_confirm_sequence_overwrite", "replace_show_group_report",
@@ -35,9 +32,8 @@ public final class SortProfileManager {
     private static final Set<String> INTEGER_PROFILE_KEYS = new HashSet<String>(Arrays.asList(
             "smart_chunk_ms", "smart_pass_budget_ms", "smart_k_neighbors", "smart_random_fraction",
             "smart_max_pool", "rerank_idle_ms", "compare_recheck_every", "compare_warn_questions",
-            "compare_undo_depth", "compare_button_height_dp", "game_batch_size", "game_decoys", "game_probe_every",
-            "game_none_cooldown", "game_none_max_returns", "game_order_min_group",
-            "game_timer_seconds", "replace_keep_max", "replace_confirm_min_files"));
+            "compare_undo_depth", "compare_button_height_dp", "game_batch_size",
+            "replace_keep_max", "replace_confirm_min_files"));
     private final SharedPreferences prefs;
 
     public SortProfileManager(Context context) {
@@ -50,7 +46,17 @@ public final class SortProfileManager {
     }
 
     static void migrateSpecDefaults(SharedPreferences prefs) {
-        if (prefs.getInt("prefs_migration_version", 0) >= 1) return;
+        if (prefs.getInt("prefs_migration_version", 0) >= 2) {
+            if (prefs.contains("batch_commit_mode")) {
+                SharedPreferences.Editor legacyEditor = prefs.edit();
+                if (!prefs.contains("game_commit_mode")) {
+                    legacyEditor.putString("game_commit_mode",
+                            prefs.getString("batch_commit_mode", "add"));
+                }
+                legacyEditor.remove("batch_commit_mode").commit();
+            }
+            return;
+        }
         SharedPreferences.Editor editor = prefs.edit();
         if (!prefs.contains("compare_recheck_every")) editor.putInt("compare_recheck_every", 25);
         if (!prefs.contains("compare_warn_questions")) editor.putInt("compare_warn_questions", 300);
@@ -62,13 +68,28 @@ public final class SortProfileManager {
         if (volume == null || (volume instanceof String && "off".equals(volume))) {
             editor.remove("compare_volume_pick").putBoolean("compare_volume_pick", true);
         }
-        if (!prefs.contains("game_batch_adaptive")) editor.putBoolean("game_batch_adaptive", true);
-        if (!prefs.contains("game_order_min_group")) editor.putInt("game_order_min_group", 3);
+        if (!prefs.contains("batch_size_mode")) editor.putString("batch_size_mode", "expanded");
+        if (!prefs.contains("batch_auto_advance")) editor.putBoolean("batch_auto_advance", true);
+        if (!prefs.contains("batch_skip_to_back")) editor.putBoolean("batch_skip_to_back", true);
+        if (!prefs.contains("batch_include_tagged")) editor.putBoolean("batch_include_tagged", false);
+        if (!prefs.contains("batch_show_inline_tags")) editor.putBoolean("batch_show_inline_tags", true);
+        if (!prefs.contains("game_batch_size")) editor.putInt("game_batch_size", 6);
+        if (!prefs.contains("game_commit_mode")) {
+            String legacy = prefs.getString("batch_commit_mode", "add");
+            editor.putString("game_commit_mode", legacy);
+        }
+        // The old key is read only for this migration and is never part of a
+        // profile or the live settings surface again.
+        editor.remove("batch_commit_mode");
+        editor.remove("game_batch_adaptive").remove("game_decoys").remove("game_probe_every")
+                .remove("game_order_min_group").remove("game_prompt_text")
+                .remove("game_none_cooldown").remove("game_none_max_returns")
+                .remove("game_score_mode").remove("game_timer_seconds");
         if (!prefs.contains("replace_mode")) editor.putString("replace_mode", "replace_with");
         if (!prefs.contains("replace_keep_max")) editor.putInt("replace_keep_max", 2);
         if (!prefs.contains("replace_confirm_min_files")) editor.putInt("replace_confirm_min_files", 2);
         if (!prefs.contains("replace_protect_piles")) editor.putBoolean("replace_protect_piles", false);
-        editor.putInt("prefs_migration_version", 1).commit();
+        editor.putInt("prefs_migration_version", 2).commit();
     }
 
     /** Cycles through built-ins and validated custom JSON profiles. */
@@ -126,34 +147,35 @@ public final class SortProfileManager {
             editor.putInt("smart_chunk_ms", 10).putInt("smart_pass_budget_ms", 800)
                     .putInt("smart_k_neighbors", 3).putInt("smart_random_fraction", 20)
                     .putBoolean("compare_prefetch", false).putBoolean("compare_hires_on_zoom", false)
-                    .putInt("game_batch_size", 6).putBoolean("game_batch_adaptive", false)
-                    .putInt("game_probe_every", 0);
+                    .putInt("game_batch_size", 6);
         } else if (index == 2) {
             editor.putInt("smart_chunk_ms", 30).putInt("smart_pass_budget_ms", 3000)
                     .putInt("smart_k_neighbors", 8).putInt("smart_random_fraction", 5)
                     .putInt("compare_recheck_every", 5).putInt("compare_undo_depth", 100)
-                    .putBoolean("compare_prefetch", true).putBoolean("compare_hires_on_zoom", true)
-                    .putBoolean("game_batch_adaptive", true).putInt("game_probe_every", 3);
+                    .putBoolean("compare_prefetch", true).putBoolean("compare_hires_on_zoom", true);
         } else if (index == 3) {
             editor.putInt("smart_chunk_ms", 8).putInt("smart_pass_budget_ms", 700)
                     .putInt("smart_k_neighbors", 2).putInt("smart_max_pool", 1500)
                     .putBoolean("smart_use_video_frames", false)
                     .putBoolean("compare_prefetch", false).putBoolean("compare_hires_on_zoom", false)
-                    .putInt("game_batch_size", 4).putBoolean("game_batch_adaptive", false)
-                    .putInt("game_probe_every", 0);
+                    .putInt("game_batch_size", 4);
         } else {
             editor.putInt("smart_chunk_ms", 20).putInt("smart_pass_budget_ms", 1500)
                     .putInt("smart_k_neighbors", 5).putInt("smart_random_fraction", 15)
                     .putInt("compare_recheck_every", 0).putInt("compare_undo_depth", 50)
                     .putBoolean("compare_prefetch", true).putBoolean("compare_hires_on_zoom", true)
-                    .putInt("game_batch_size", 6).putBoolean("game_batch_adaptive", false)
-                    .putInt("game_probe_every", 5);
+                    .putInt("game_batch_size", 6);
         }
         editor.commit();
     }
 
     public void resetInteractiveDefaults() {
         SharedPreferences.Editor editor = prefs.edit();
+        editor.remove("batch_commit_mode").remove("game_batch_adaptive")
+                .remove("game_decoys").remove("game_probe_every")
+                .remove("game_none_cooldown").remove("game_none_max_returns")
+                .remove("game_order_min_group").remove("game_score_mode")
+                .remove("game_timer_seconds").remove("game_prompt_text");
         editor.putString(KEY, "[]")
                 .putInt(INDEX, -1)
                 .putBoolean("smart_accept_replaces", false)
@@ -167,7 +189,7 @@ public final class SortProfileManager {
                 .putBoolean("batch_skip_to_back", true)
                 .putBoolean("batch_include_tagged", false)
                 .putBoolean("batch_show_inline_tags", true)
-                .putString("batch_commit_mode", "add")
+                .putString("batch_last_scope", "UNTAGGED")
                 .putBoolean("compare_show_order_strip", true)
                 .putString("compare_size_mode", "expanded")
                 .putInt("compare_button_height_dp", 56)
@@ -184,16 +206,7 @@ public final class SortProfileManager {
                 .putBoolean("compare_hires_on_zoom", true)
                 .putInt("compare_undo_depth", 50)
                 .putInt("game_batch_size", 6)
-                .putBoolean("game_batch_adaptive", true)
                 .putString("game_commit_mode", "add")
-                .putInt("game_order_min_group", 3)
-                .putString("game_prompt_text", "Group these files and choose a tag")
-                .putInt("game_decoys", 1)
-                .putInt("game_probe_every", 5)
-                .putInt("game_none_cooldown", 3)
-                .putInt("game_none_max_returns", 2)
-                .putString("game_score_mode", "progress")
-                .putInt("game_timer_seconds", 0)
                 .putString("sort_dupes_mode", "ignore")
                 .putString("replace_mode", "replace_with")
                 .putInt("replace_keep_max", 2)

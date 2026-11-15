@@ -50,7 +50,7 @@ public final class FeatureStore {
     /**
      * Builds metadata arrays without decoding images. SmartSortEngine remains
      * the owner of dHash extraction; this store shares its disk cache and
-     * provides cheap structural features to Compare/Game workers.
+     * provides cheap structural features to Compare/Batch tagger workers.
      */
     public Snapshot snapshot(List<MediaFile> source) {
         List<MediaFile> safe = source == null ? new ArrayList<MediaFile>() : source;

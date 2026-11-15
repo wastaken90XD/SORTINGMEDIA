@@ -61,6 +61,7 @@ public class GestureSettings {
         GAME_SUBMIT,
         GAME_NONE,
         GAME_UNDO_ROUND,
+        GAME_PAUSE,
         GAME_EXIT,
         GAME_RESUME,
         REPLACE_TAGS,
@@ -154,12 +155,16 @@ public class GestureSettings {
 
     /** Runs legacy/default migrations off the Activity lifecycle thread. */
     public void migrateIfNeeded() {
-        if (settingsPrefs.getInt("prefs_migration_version", 0) >= 1) return;
-        ensureVolumeDefaults();
-        migrateLegacyControlKeys();
-        migrateMacroGesturesToCombos();
+        int version = settingsPrefs.getInt("prefs_migration_version", 0);
+        if (version < 1) {
+            ensureVolumeDefaults();
+            migrateLegacyControlKeys();
+            migrateMacroGesturesToCombos();
+        }
+        // Includes the one-time batch_commit_mode -> game_commit_mode
+        // migration. This method is invoked by the coordinator worker.
         SortProfileManager.migrateSpecDefaults(settingsPrefs);
-        settingsPrefs.edit().putInt("prefs_migration_version", 1).commit();
+        if (version < 2) settingsPrefs.edit().putInt("prefs_migration_version", 2).commit();
     }
 
     public int getMaxGestureSteps() {

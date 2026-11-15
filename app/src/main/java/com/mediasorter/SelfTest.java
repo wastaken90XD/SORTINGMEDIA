@@ -34,11 +34,11 @@ public final class SelfTest {
 
         void pass(String name, String detail) {
             passed++;
-            lines.add("PASS  " + name + (detail == null ? "" : " — " + detail));
+            lines.add("SELF-TEST PASSED  " + name + (detail == null ? "" : " — " + detail));
         }
         void fail(String name, String detail) {
             failed++;
-            lines.add("FAIL  " + name + " — " + detail);
+            lines.add("NOT VERIFIED  " + name + " — " + detail);
         }
         void notVerified(String name, String detail) {
             notVerified++;
@@ -69,7 +69,9 @@ public final class SelfTest {
         runSequence(result);
         runStride(context, result);
         runQueries(result);
+        runBatchTagger(result);
         runCompare(result);
+        runCompareGrouping(context, result);
         runReplacePreview(result);
         runFeatureCache(context, result);
         runPreferences(context, result);
@@ -137,6 +139,82 @@ public final class SelfTest {
         }
     }
 
+    private static void runBatchTagger(Result result) {
+        try {
+            List<MediaFile> pool = syntheticFiles(30);
+            BatchGameEngine engine = new BatchGameEngine();
+            engine.start(pool, BatchGameEngine.Scope.UNTAGGED, 6, true);
+            Set<String> skippedOnce = new HashSet<String>();
+            int rounds = 0;
+            BatchGameEngine.Round round = engine.buildNextRound();
+            while (round != null && rounds < 100) {
+                if (!round.files.isEmpty()) engine.markApplied(round.files.get(0).getPath());
+                for (int i = 1; i < round.files.size(); i++) {
+                    String path = round.files.get(i).getPath();
+                    if (engine.markSkipped(path)) skippedOnce.add(path);
+                }
+                round = engine.nextBatch();
+                rounds++;
+            }
+            BatchGameEngine.Summary summary = engine.getSummary();
+            if (round != null || !summary.complete || summary.tagged != 30
+                    || skippedOnce.isEmpty() || rounds <= 1) {
+                result.fail("Batch tagger handlers", "pool did not drain with returned skips");
+                return;
+            }
+            List<MediaFile> pileOnly = syntheticFiles(6);
+            for (MediaFile file : pileOnly) file.addTag("pile_alpha");
+            List<MediaFile> eligible = BatchGameEngine.selectScope(pileOnly,
+                    BatchGameEngine.Scope.ACTIVE_PILE, null, null, "pile_alpha",
+                    "pile_*", "link_*,*_seq_*", false);
+            BatchGameEngine pileEngine = new BatchGameEngine();
+            pileEngine.start(eligible, BatchGameEngine.Scope.ACTIVE_PILE, 6, true);
+            if (pileEngine.buildNextRound() == null) {
+                result.fail("Batch tagger pile eligibility", "pile-only files did not build a round");
+                return;
+            }
+            result.pass("Batch tagger handlers", "30 files, N=6, apply/skip/next and pile-only round");
+        } catch (Throwable error) {
+            result.fail("Batch tagger handlers", error.toString());
+        }
+    }
+
+    private static void runCompareGrouping(Context context, Result result) {
+        try {
+            List<MediaFile> files = syntheticFiles(8);
+            for (int i = 0; i < files.size(); i++) files.get(i).setManualOrder(i);
+            SortManager manager = new SortManager(context);
+            List<SortManager.SortCriterion> hostile = new ArrayList<SortManager.SortCriterion>();
+            hostile.add(new SortManager.SortCriterion(SortManager.MANUAL_ORDER, "ASC"));
+            hostile.add(new SortManager.SortCriterion(SortManager.NAME, "DESC"));
+            manager.saveSortSequence(hostile);
+            Group first = new Group("first", Group.GroupBy.TAG);
+            Group second = new Group("second", Group.GroupBy.TAG);
+            first.addFile(files.get(3));
+            first.addFile(files.get(1));
+            second.addFile(files.get(7));
+            second.addFile(files.get(2));
+            List<Group> groups = new ArrayList<Group>();
+            groups.add(first);
+            groups.add(second);
+            for (Group group : groups) {
+                List<MediaFile> orderedMembers = new ArrayList<MediaFile>(group.getFiles());
+                manager.sort(orderedMembers);
+                group.clear();
+                for (MediaFile file : orderedMembers) group.addFile(file);
+            }
+            if (!"/selftest/p1.jpg".equals(first.getFiles().get(0).getPath())
+                    || !"/selftest/p2.jpg".equals(second.getFiles().get(0).getPath())) {
+                result.fail("Compare answerInProgress grouped order", "hostile sort hid manual order");
+                return;
+            }
+            result.pass("Compare answerInProgress grouped order",
+                    "group members follow active manual sequence under hostile secondary sort");
+        } catch (Throwable error) {
+            result.fail("Compare answerInProgress grouped order", error.toString());
+        }
+    }
+
     private static void runCompare(Result result) {
         try {
             for (int size : new int[]{20, 170}) {
@@ -157,7 +235,7 @@ public final class SelfTest {
                     }
                     int left = oracle.get(question.candidatePath);
                     int right = oracle.get(question.comparedPath);
-                    engine.answer(left < right ? CompareSortEngine.Answer.LEFT
+                    engine.answerCompare(left < right ? CompareSortEngine.Answer.LEFT
                             : left > right ? CompareSortEngine.Answer.RIGHT
                             : CompareSortEngine.Answer.SAME);
                     questions++;
@@ -248,10 +326,10 @@ public final class SelfTest {
                 "compare_randomize_sides", "compare_recheck_every", "compare_sync_zoom",
                 "compare_show_caption", "compare_caption_fields", "compare_volume_pick",
                 "compare_video_muted", "compare_warn_questions", "compare_undo_depth",
-                "compare_prefetch", "compare_hires_on_zoom", "game_batch_size",
-                "game_batch_adaptive", "game_commit_mode", "game_decoys", "game_probe_every",
-                "game_none_cooldown", "game_none_max_returns", "game_order_min_group",
-                "game_score_mode", "game_timer_seconds", "game_prompt_text", "replace_mode",
+                "compare_prefetch", "compare_hires_on_zoom", "batch_size_mode",
+                "batch_last_scope", "batch_auto_advance", "batch_skip_to_back",
+                "batch_include_tagged", "batch_show_inline_tags", "game_batch_size",
+                "game_commit_mode", "replace_mode",
                 "replace_keep_max", "replace_confirm_min_files", "replace_protect_piles",
                 "replace_sequence_rule", "replace_sequence_patterns", "replace_protect_patterns",
                 "replace_confirm_sequence_overwrite", "replace_show_group_report",
@@ -263,7 +341,16 @@ public final class SelfTest {
                 return;
             }
         }
-        result.pass("SettingsExporter allow-list", String.valueOf(keys.length) + " keys");
+        String[] legacy = {"batch_commit_mode", "game_score_mode", "game_timer_seconds",
+                "game_none_cooldown", "game_none_max_returns"};
+        for (String key : legacy) {
+            if (!SettingsExporter.isKnownKey("settings_prefs", key)) {
+                result.fail("Legacy settings export allow-list", key + " missing");
+                return;
+            }
+        }
+        result.pass("SettingsExporter allow-list", String.valueOf(keys.length)
+                + " current keys plus legacy Batch tagger keys");
     }
 
     private static void runProfile(Context context, Result result) {
@@ -297,8 +384,8 @@ public final class SelfTest {
         try {
             FileOutputStream out = new FileOutputStream(file);
             StringBuilder text = new StringBuilder();
-            text.append("PASS: ").append(result.passed).append("\n");
-            text.append("FAIL: ").append(result.failed).append("\n");
+            text.append("SELF-TEST PASSED: ").append(result.passed).append("\n");
+            text.append("NOT VERIFIED FAILURES: ").append(result.failed).append("\n");
             text.append("NOT VERIFIED: ").append(result.notVerified).append("\n\n");
             for (String line : result.lines) text.append(line).append('\n');
             out.write(text.toString().getBytes("UTF-8"));

@@ -71,6 +71,7 @@ public final class GestureConstants {
     public static final String ACTION_GAME_SUBMIT = "GAME_SUBMIT";
     public static final String ACTION_GAME_NONE = "GAME_NONE";
     public static final String ACTION_GAME_UNDO_ROUND = "GAME_UNDO_ROUND";
+    public static final String ACTION_GAME_PAUSE = "GAME_PAUSE";
     public static final String ACTION_GAME_EXIT = "GAME_EXIT";
     public static final String ACTION_GAME_RESUME = "GAME_RESUME";
     public static final String ACTION_REPLACE_TAGS = "REPLACE_TAGS";
@@ -246,12 +247,13 @@ public final class GestureConstants {
         add(ACTION_COMPARE_EXIT, "Exit Compare Sort", Category.VIEWING);
         add(ACTION_COMPARE_RESUME, "Resume Compare Sort", Category.VIEWING);
         add(ACTION_COMPARE_TOGGLE_SIZE, "Toggle Compare size", Category.VIEWING);
-        add(ACTION_GAME_START, "Start Batch Game", Category.VIEWING);
-        add(ACTION_GAME_SUBMIT, "Submit Batch Game round", Category.TAGGING);
-        add(ACTION_GAME_NONE, "Batch Game none of these", Category.TAGGING);
-        add(ACTION_GAME_UNDO_ROUND, "Undo Batch Game round", Category.ORGANIZATION);
-        add(ACTION_GAME_EXIT, "Exit Batch Game", Category.VIEWING);
-        add(ACTION_GAME_RESUME, "Resume Batch Game", Category.VIEWING);
+        add(ACTION_GAME_START, "Start Batch tagger", Category.VIEWING);
+        add(ACTION_GAME_SUBMIT, "Apply Batch tagger tag", Category.TAGGING);
+        add(ACTION_GAME_NONE, "Skip Batch tagger cells", Category.TAGGING);
+        add(ACTION_GAME_UNDO_ROUND, "Undo Batch tagger apply", Category.ORGANIZATION);
+        add(ACTION_GAME_PAUSE, "Pause Batch tagger", Category.VIEWING);
+        add(ACTION_GAME_EXIT, "Finish Batch tagger", Category.VIEWING);
+        add(ACTION_GAME_RESUME, "Resume Batch tagger", Category.VIEWING);
         add(ACTION_REPLACE_TAGS, "Replace tags", Category.TAGGING);
         add(ACTION_REPLACE_TAGS_WITH, "Replace tags with selected", Category.TAGGING);
         add(ACTION_REPLACE_KEEP_LAST_USED, "Keep last used tag", Category.TAGGING);

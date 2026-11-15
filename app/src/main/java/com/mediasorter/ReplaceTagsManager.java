@@ -136,8 +136,10 @@ public final class ReplaceTagsManager {
             for (String tag : previous) if (!desired.contains(tag)) report.removedInstances++;
             finalTags.put(file.getPath(), desired);
         }
-        boolean immediate = tagManager.metadataWriteImmediate();
-        TagManager.BulkTagResult bulk = tagManager.replaceTagSets(targetFiles, finalTags, immediate);
+        // Batch commits are a worker transaction: exactly one complete tag-set
+        // write per target file, including its XMP update, followed by the
+        // single coalesced TagManager event.
+        TagManager.BulkTagResult bulk = tagManager.replaceTagSets(targetFiles, finalTags, true);
         report.changedPaths.addAll(bulk.changedPaths);
         report.failedPaths.addAll(bulk.failedPaths);
         if (purgeGroupTags) {
