@@ -6,6 +6,7 @@ import android.os.Looper;
 import com.mediasorter.features.RandomGenerator;
 import com.mediasorter.features.SmartFeatureCache;
 import com.mediasorter.features.SurpriseEngine;
+import com.mediasorter.models.Group;
 import com.mediasorter.models.MediaFile;
 import java.io.File;
 import java.io.FileOutputStream;

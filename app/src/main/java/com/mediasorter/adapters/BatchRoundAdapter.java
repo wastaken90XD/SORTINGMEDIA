@@ -152,7 +152,7 @@ public final class BatchRoundAdapter extends RecyclerView.Adapter<BatchRoundAdap
                 if (isDone(path)) return;
                 if (selected.contains(path)) selected.remove(path);
                 else selected.add(path);
-                int adapterPosition = getBindingAdapterPosition();
+                int adapterPosition = getAdapterPosition();
                 if (adapterPosition >= 0) notifyItemChanged(adapterPosition);
                 if (listener != null) listener.onCellClicked(path);
             }
