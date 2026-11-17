@@ -73,6 +73,7 @@ public final class SelfTest {
         runBatchTagger(result);
         runCompare(result);
         runCompareGrouping(context, result);
+        runModeScreenHandlers(result);
         runReplacePreview(result);
         runFeatureCache(context, result);
         runPreferences(context, result);
@@ -81,6 +82,8 @@ public final class SelfTest {
                 "full dHash timing/memory test requires a device media decoder");
         result.notVerified("onPathsChanged/onPathsAdded live hook",
                 "requires a live Activity/index and real filesystem callbacks");
+        result.notVerified("ModeHost attached-view instrumentation",
+                "synthetic handler test ran; Activity view attach/detach needs an emulator");
         writeReport(context, result);
         return result;
     }
@@ -218,6 +221,7 @@ public final class SelfTest {
 
     private static void runCompare(Result result) {
         try {
+            long maxPickMillis = 0L;
             for (int size : new int[]{20, 170}) {
                 List<MediaFile> files = syntheticFiles(size);
                 java.util.Collections.shuffle(files, new java.util.Random(size * 17L));
@@ -236,9 +240,12 @@ public final class SelfTest {
                     }
                     int left = oracle.get(question.candidatePath);
                     int right = oracle.get(question.comparedPath);
+                    long pickStart = System.nanoTime();
                     engine.answerCompare(left < right ? CompareSortEngine.Answer.LEFT
                             : left > right ? CompareSortEngine.Answer.RIGHT
                             : CompareSortEngine.Answer.SAME);
+                    maxPickMillis = Math.max(maxPickMillis,
+                            (System.nanoTime() - pickStart) / 1000000L);
                     questions++;
                     if (questions > 100000) throw new IllegalStateException("question limit");
                 }
@@ -258,9 +265,77 @@ public final class SelfTest {
                     return;
                 }
             }
-            result.pass("Compare oracle", "N=20 and N=170, order/pair/bound checks");
+            result.pass("Compare oracle", "N=20 and N=170, max synthetic pick-to-next "
+                    + maxPickMillis + " ms");
         } catch (Throwable error) {
             result.fail("Compare oracle", error.toString());
+        }
+    }
+
+    private static void runModeScreenHandlers(Result result) {
+        ModeProbe probe = new ModeProbe();
+        try {
+            for (int cycle = 0; cycle < 5; cycle++) {
+                probe.start();
+                List<MediaFile> comparePool = syntheticFiles(20);
+                CompareSortEngine compare = new CompareSortEngine();
+                compare.start(comparePool, 0, false, 50);
+                CompareSortEngine.Question question;
+                while ((question = compare.nextQuestion()) != null) {
+                    probe.answer();
+                    compare.answerCompare(CompareSortEngine.Answer.LEFT);
+                }
+                probe.exit();
+                probe.start();
+                BatchGameEngine batch = new BatchGameEngine();
+                batch.start(syntheticFiles(30), BatchGameEngine.Scope.UNTAGGED, 6, true);
+                BatchGameEngine.Round round = batch.buildNextRound();
+                while (round != null) {
+                    probe.roundSwap();
+                    for (MediaFile file : round.files) batch.markApplied(file.getPath());
+                    round = batch.buildNextRound();
+                }
+                probe.exit();
+            }
+            if (probe.adds != 10 || probe.removes != 10 || probe.itemUpdates == 0
+                    || probe.roundSwaps == 0 || probe.active) {
+                result.fail("ModeHost lifecycle handlers", "synthetic host counts diverged");
+                return;
+            }
+            result.pass("ModeHost lifecycle handlers",
+                    "5 Compare and 5 Batch start/exit cycles; no synthetic rebuilds");
+        } catch (Throwable error) {
+            result.fail("ModeHost lifecycle handlers", error.toString());
+        }
+    }
+
+    private static final class ModeProbe {
+        int adds;
+        int removes;
+        int itemUpdates;
+        int roundSwaps;
+        boolean active;
+
+        void start() {
+            if (active) throw new IllegalStateException("host already active");
+            active = true;
+            adds++;
+        }
+
+        void answer() {
+            if (!active) throw new IllegalStateException("answer without host");
+            itemUpdates++;
+        }
+
+        void roundSwap() {
+            if (!active) throw new IllegalStateException("round without host");
+            roundSwaps++;
+        }
+
+        void exit() {
+            if (!active) throw new IllegalStateException("exit without host");
+            active = false;
+            removes++;
         }
     }
 
@@ -327,9 +402,10 @@ public final class SelfTest {
                 "compare_randomize_sides", "compare_recheck_every", "compare_sync_zoom",
                 "compare_show_caption", "compare_caption_fields", "compare_volume_pick",
                 "compare_video_muted", "compare_warn_questions", "compare_undo_depth",
-                "compare_prefetch", "compare_hires_on_zoom", "batch_size_mode",
+                "compare_prefetch", "compare_hires_on_zoom", "compare_tap_to_pick",
                 "batch_last_scope", "batch_auto_advance", "batch_skip_to_back",
-                "batch_include_tagged", "batch_show_inline_tags", "game_batch_size",
+                "batch_include_tagged", "batch_show_inline_tags", "batch_apply_all_if_none",
+                "mode_timing", "game_batch_size",
                 "game_commit_mode", "replace_mode",
                 "replace_keep_max", "replace_confirm_min_files", "replace_protect_piles",
                 "replace_sequence_rule", "replace_sequence_patterns", "replace_protect_patterns",

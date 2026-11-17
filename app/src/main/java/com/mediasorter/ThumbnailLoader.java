@@ -145,6 +145,7 @@ public class ThumbnailLoader {
                         if (path.equals(target.getTag())) {
                             if (finalBmp != null && !finalBmp.isRecycled()) {
                                 target.setImageBitmap(finalBmp);
+                                target.setAlpha(1f);
                                 target.setBackgroundColor(0x00000000);
                             } else {
                                 target.setImageResource(
@@ -174,6 +175,14 @@ public class ThumbnailLoader {
         final String path = file.getPath();
         final String token = "compare-view:" + path + ":" + System.nanoTime();
         target.setTag(token);
+        synchronized (memCache) {
+            Bitmap cached = memCache.get(path);
+            if (cached != null && !cached.isRecycled()) {
+                target.setImageBitmap(cached);
+                target.setAlpha(1f);
+                return;
+            }
+        }
         target.setImageBitmap(null);
         final int width = Math.max(1, requestedWidth);
         final int height = Math.max(1, requestedHeight);
@@ -188,11 +197,13 @@ public class ThumbnailLoader {
                     final Bitmap result = bitmap;
                     mainHandler.post(new Runnable() {
                         @Override public void run() {
-                            if (!token.equals(target.getTag())) return;
+                            if (!token.equals(target.getTag()) || target.getWindowToken() == null) return;
                             if (result != null && !result.isRecycled()) {
                                 target.setImageBitmap(result);
+                                target.setAlpha(1f);
                                 target.setBackgroundColor(0x00000000);
                             } else {
+                                target.setAlpha(1f);
                                 target.setImageResource(android.R.drawable.ic_menu_report_image);
                             }
                         }

@@ -691,18 +691,21 @@ public class SettingsActivity extends Activity {
                     @Override public void onChecked(boolean value) { saveBoolean("compare_auto_apply", value); }
                 }));
         root.addView(makeCheckBoxRow("Show Compare order strip",
-                settingsPrefs.getBoolean("compare_show_order_strip", true), new OnCheckedChangeListener() {
+                settingsPrefs.getBoolean("compare_show_order_strip", false), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("compare_show_order_strip", value); }
                 }));
-        root.addView(makeSpinnerRow("Compare size mode:",
-                new String[]{"panel", "expanded", "fullscreen"},
-                compareSizePosition(), new OnSpinnerSelectedListener() {
-                    @Override public void onSelected(String value, int position) { saveString("compare_size_mode", value); }
-                }));
-        root.addView(makeNumericInputRow("Compare button height (40-96dp):",
-                settingsPrefs.getInt("compare_button_height_dp", 56), 40, 96,
+        root.addView(makeNumericInputRow("Compare button height (48-120dp):",
+                settingsPrefs.getInt("compare_button_height_dp", 64), 48, 120,
                 new OnNumericChangeListener() {
                     @Override public void onChange(int value) { saveInt("compare_button_height_dp", value); }
+                }));
+        root.addView(makeCheckBoxRow("Tap Compare image to pick",
+                settingsPrefs.getBoolean("compare_tap_to_pick", true), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("compare_tap_to_pick", value); }
+                }));
+        root.addView(makeCheckBoxRow("Show mode timing",
+                settingsPrefs.getBoolean("mode_timing", false), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("mode_timing", value); }
                 }));
         root.addView(makeSpinnerRow("Compare layout:",
                 new String[]{"side_by_side", "stacked", "auto"},
@@ -727,7 +730,7 @@ public class SettingsActivity extends Activity {
                     @Override public void onChecked(boolean value) { saveBoolean("compare_sync_zoom", value); }
                 }));
         root.addView(makeCheckBoxRow("Show Compare captions",
-                settingsPrefs.getBoolean("compare_show_caption", true), new OnCheckedChangeListener() {
+                settingsPrefs.getBoolean("compare_show_caption", false), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("compare_show_caption", value); }
                 }));
         root.addView(makeTextInputRow("Compare caption fields:",
@@ -770,14 +773,6 @@ public class SettingsActivity extends Activity {
                     @Override public void onChange(int value) { saveInt("compare_undo_depth", value); }
                 }));
         root.addView(makeTitle("Batch tagger"));
-        root.addView(makeSpinnerRow("Batch size mode:",
-                new String[]{"panel", "expanded", "fullscreen"},
-                batchSizeModePosition(),
-                new OnSpinnerSelectedListener() {
-                    @Override public void onSelected(String value, int position) {
-                        saveString("batch_size_mode", value);
-                    }
-                }));
         root.addView(makeCheckBoxRow("Auto advance Batch tagger",
                 settingsPrefs.getBoolean("batch_auto_advance", true), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("batch_auto_advance", value); }
@@ -793,6 +788,10 @@ public class SettingsActivity extends Activity {
         root.addView(makeCheckBoxRow("Show inline Batch tagger tags",
                 settingsPrefs.getBoolean("batch_show_inline_tags", true), new OnCheckedChangeListener() {
                     @Override public void onChecked(boolean value) { saveBoolean("batch_show_inline_tags", value); }
+                }));
+        root.addView(makeCheckBoxRow("Apply Batch tag when no cell is selected",
+                settingsPrefs.getBoolean("batch_apply_all_if_none", false), new OnCheckedChangeListener() {
+                    @Override public void onChecked(boolean value) { saveBoolean("batch_apply_all_if_none", value); }
                 }));
         root.addView(makeSpinnerRow("Batch commit mode:",
                 new String[]{"add", "replace"},
@@ -961,13 +960,6 @@ public class SettingsActivity extends Activity {
         return 1;
     }
 
-    private int compareSizePosition() {
-        String value = settingsPrefs.getString("compare_size_mode", "expanded");
-        if ("panel".equals(value)) return 0;
-        if ("fullscreen".equals(value)) return 2;
-        return 1;
-    }
-
     private int compareLayoutPosition() {
         String value = settingsPrefs.getString("compare_layout", "auto");
         if ("side_by_side".equals(value)) return 0;
@@ -990,13 +982,6 @@ public class SettingsActivity extends Activity {
         if ("up_left_down_right".equals(value)) return 1;
         if ("up_right_down_left".equals(value)) return 2;
         return 0;
-    }
-
-    private int batchSizeModePosition() {
-        String value = settingsPrefs.getString("batch_size_mode", "expanded");
-        if ("panel".equals(value)) return 0;
-        if ("fullscreen".equals(value)) return 2;
-        return 1;
     }
 
     private void addSurpriseSettingsSection(LinearLayout root) {

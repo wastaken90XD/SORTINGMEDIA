@@ -56,7 +56,6 @@ public class GestureSettings {
         COMPARE_UNDO,
         COMPARE_EXIT,
         COMPARE_RESUME,
-        COMPARE_TOGGLE_SIZE,
         GAME_START,
         GAME_SUBMIT,
         GAME_NONE,

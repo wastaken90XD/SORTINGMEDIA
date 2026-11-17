@@ -322,6 +322,13 @@ public final class BatchGameEngine {
         }
     }
 
+    public boolean hasSessionWork() {
+        synchronized (lock) {
+            return current != null || !queue.isEmpty()
+                    || !taggedPaths.isEmpty() || !skippedPaths.isEmpty();
+        }
+    }
+
     public Set<String> getTaggedPaths() {
         synchronized (lock) { return new LinkedHashSet<String>(taggedPaths); }
     }

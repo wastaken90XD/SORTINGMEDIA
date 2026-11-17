@@ -66,7 +66,6 @@ public final class GestureConstants {
     public static final String ACTION_COMPARE_UNDO = "COMPARE_UNDO";
     public static final String ACTION_COMPARE_EXIT = "COMPARE_EXIT";
     public static final String ACTION_COMPARE_RESUME = "COMPARE_RESUME";
-    public static final String ACTION_COMPARE_TOGGLE_SIZE = "COMPARE_TOGGLE_SIZE";
     public static final String ACTION_GAME_START = "GAME_START";
     public static final String ACTION_GAME_SUBMIT = "GAME_SUBMIT";
     public static final String ACTION_GAME_NONE = "GAME_NONE";
@@ -246,7 +245,6 @@ public final class GestureConstants {
         add(ACTION_COMPARE_UNDO, "Compare undo", Category.VIEWING);
         add(ACTION_COMPARE_EXIT, "Exit Compare Sort", Category.VIEWING);
         add(ACTION_COMPARE_RESUME, "Resume Compare Sort", Category.VIEWING);
-        add(ACTION_COMPARE_TOGGLE_SIZE, "Toggle Compare size", Category.VIEWING);
         add(ACTION_GAME_START, "Start Batch tagger", Category.VIEWING);
         add(ACTION_GAME_SUBMIT, "Apply Batch tagger tag", Category.TAGGING);
         add(ACTION_GAME_NONE, "Skip Batch tagger cells", Category.TAGGING);

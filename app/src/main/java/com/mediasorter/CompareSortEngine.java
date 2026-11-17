@@ -164,10 +164,20 @@ public final class CompareSortEngine {
     }
 
     /** Paths most likely to be displayed by the next few questions. */
-    public List<String> getPrefetchPaths(int maximum) {
+    public synchronized List<String> getPrefetchPaths(int maximum) {
         ArrayList<String> result = new ArrayList<String>();
-        int limit = Math.max(0, Math.min(3, maximum));
+        int limit = Math.max(0, Math.min(5, maximum));
         if (limit == 0) return result;
+        if (current != null && !sorted.isEmpty()) {
+            int middle = comparisonIndex();
+            int[] candidates = new int[]{low, middle, high - 1};
+            for (int index : candidates) {
+                if (result.size() >= limit) break;
+                int safe = Math.max(0, Math.min(sorted.size() - 1, index));
+                String path = sorted.get(safe);
+                if (!result.contains(path)) result.add(path);
+            }
+        }
         for (String path : pool) {
             if (result.size() >= limit) break;
             if (!result.contains(path)) result.add(path);
@@ -175,7 +185,7 @@ public final class CompareSortEngine {
         return result;
     }
 
-    public Question nextQuestion() {
+    public synchronized Question nextQuestion() {
         if (!initialized || isFinished()) return null;
         if (!rechecking && pendingRecheck != null) {
             rechecking = true;
@@ -204,7 +214,7 @@ public final class CompareSortEngine {
         return answer(answer);
     }
 
-    public boolean answer(Answer answer) {
+    public synchronized boolean answer(Answer answer) {
         if (answer == null) return false;
         if (rechecking && pendingRecheck != null) {
             Answer mapped = mapAnswer(answer);

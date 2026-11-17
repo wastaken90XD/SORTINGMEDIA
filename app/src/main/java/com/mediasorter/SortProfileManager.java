@@ -17,14 +17,14 @@ public final class SortProfileManager {
             "smart_chunk_ms", "smart_pass_budget_ms", "smart_k_neighbors", "smart_random_fraction",
             "smart_max_pool", "smart_use_video_frames", "smart_accept_replaces", "rerank_idle_ms",
             "compare_layout", "compare_question", "compare_randomize_sides", "compare_auto_apply",
-            "compare_size_mode", "compare_show_order_strip", "compare_button_height_dp",
-            "batch_size_mode", "batch_auto_advance", "batch_skip_to_back", "batch_include_tagged",
-            "batch_show_inline_tags", "game_commit_mode", "batch_last_scope",
-            "compare_show_order_strip", "compare_size_mode", "compare_button_height_dp",
+            "compare_show_order_strip", "compare_button_height_dp", "compare_tap_to_pick",
+            "batch_auto_advance", "batch_skip_to_back", "batch_include_tagged",
+            "batch_show_inline_tags", "batch_apply_all_if_none", "game_commit_mode", "batch_last_scope",
+            "compare_show_order_strip", "compare_button_height_dp", "compare_tap_to_pick",
             "compare_recheck_every", "compare_sync_zoom", "compare_show_caption",
             "compare_caption_fields", "compare_volume_pick", "compare_video_muted",
             "compare_warn_questions", "compare_undo_depth", "compare_prefetch",
-            "compare_hires_on_zoom", "game_batch_size", "sort_dupes_mode", 
+            "compare_hires_on_zoom", "mode_timing", "game_batch_size", "sort_dupes_mode", 
             "replace_mode", "replace_keep_max", "replace_confirm_min_files", "replace_protect_piles",
             "replace_sequence_rule", "replace_sequence_patterns", "replace_protect_patterns",
             "replace_confirm_sequence_overwrite", "replace_show_group_report",
@@ -68,7 +68,7 @@ public final class SortProfileManager {
         if (volume == null || (volume instanceof String && "off".equals(volume))) {
             editor.remove("compare_volume_pick").putBoolean("compare_volume_pick", true);
         }
-        if (!prefs.contains("batch_size_mode")) editor.putString("batch_size_mode", "expanded");
+        editor.remove("batch_size_mode").remove("compare_size_mode");
         if (!prefs.contains("batch_auto_advance")) editor.putBoolean("batch_auto_advance", true);
         if (!prefs.contains("batch_skip_to_back")) editor.putBoolean("batch_skip_to_back", true);
         if (!prefs.contains("batch_include_tagged")) editor.putBoolean("batch_include_tagged", false);
@@ -180,24 +180,24 @@ public final class SortProfileManager {
                 .putInt(INDEX, -1)
                 .putBoolean("smart_accept_replaces", false)
                 .putString("compare_layout", "auto")
-                .putString("compare_size_mode", "expanded")
-                .putInt("compare_button_height_dp", 56)
-                .putBoolean("compare_show_order_strip", true)
+                .putInt("compare_button_height_dp", 64)
+                .putBoolean("compare_tap_to_pick", true)
+                .putBoolean("mode_timing", false)
+                .putBoolean("compare_show_order_strip", false)
                 .putBoolean("compare_auto_apply", true)
-                .putString("batch_size_mode", "expanded")
                 .putBoolean("batch_auto_advance", true)
                 .putBoolean("batch_skip_to_back", true)
                 .putBoolean("batch_include_tagged", false)
                 .putBoolean("batch_show_inline_tags", true)
+                .putBoolean("batch_apply_all_if_none", false)
                 .putString("batch_last_scope", "UNTAGGED")
-                .putBoolean("compare_show_order_strip", true)
-                .putString("compare_size_mode", "expanded")
-                .putInt("compare_button_height_dp", 56)
+                .putBoolean("compare_show_order_strip", false)
+                .putBoolean("compare_tap_to_pick", true)
                 .putBoolean("compare_randomize_sides", true)
                 .putInt("compare_recheck_every", 25)
                 .putInt("compare_warn_questions", 300)
                 .putBoolean("compare_sync_zoom", true)
-                .putBoolean("compare_show_caption", true)
+                .putBoolean("compare_show_caption", false)
                 .putString("compare_question", "Which goes first?")
                 .putString("compare_caption_fields", "name,size,dims,date")
                 .putBoolean("compare_volume_pick", true)

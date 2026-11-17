@@ -17,8 +17,10 @@ import com.mediasorter.BatchGameEngine;
 import com.mediasorter.ThumbnailLoader;
 import com.mediasorter.models.MediaFile;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** RecyclerView cell renderer for one Batch tagger round. */
@@ -28,6 +30,7 @@ public final class BatchRoundAdapter extends RecyclerView.Adapter<BatchRoundAdap
     private final ThumbnailLoader thumbnailLoader;
     private final Listener listener;
     private final List<MediaFile> files = new ArrayList<MediaFile>();
+    private final Map<String, Integer> positions = new HashMap<String, Integer>();
     private final Set<String> selected = new HashSet<String>();
     private final Set<String> applied = new HashSet<String>();
     private final Set<String> skipped = new HashSet<String>();
@@ -39,13 +42,27 @@ public final class BatchRoundAdapter extends RecyclerView.Adapter<BatchRoundAdap
         listener = value;
     }
 
+    public void setCellSize(int width, int height) {
+        int nextWidth = Math.max(1, width);
+        int nextHeight = Math.max(1, height);
+        if (cellWidth == nextWidth && cellHeight == nextHeight) return;
+        cellWidth = nextWidth;
+        cellHeight = nextHeight;
+        if (!files.isEmpty()) notifyDataSetChanged();
+    }
+
     public void setRound(BatchGameEngine.Round round, int width, int height) {
         files.clear();
+        positions.clear();
         selected.clear();
         applied.clear();
         skipped.clear();
         if (round != null) {
             files.addAll(round.files);
+            for (int i = 0; i < files.size(); i++) {
+                MediaFile file = files.get(i);
+                if (file != null && file.getPath() != null) positions.put(file.getPath(), i);
+            }
             applied.addAll(round.getAppliedPaths());
             skipped.addAll(round.getSkippedPaths());
         }
@@ -87,15 +104,24 @@ public final class BatchRoundAdapter extends RecyclerView.Adapter<BatchRoundAdap
     public void clearSelection() { selected.clear(); notifyDataSetChanged(); }
 
     public void markApplied(Set<String> paths) {
-        if (paths != null) applied.addAll(paths);
+        if (paths == null) return;
+        applied.addAll(paths);
         selected.removeAll(applied);
-        notifyDataSetChanged();
+        notifyChangedPaths(paths);
     }
 
     public void markSkipped(Set<String> paths) {
-        if (paths != null) skipped.addAll(paths);
+        if (paths == null) return;
+        skipped.addAll(paths);
         selected.removeAll(skipped);
-        notifyDataSetChanged();
+        notifyChangedPaths(paths);
+    }
+
+    private void notifyChangedPaths(Set<String> paths) {
+        for (String path : paths) {
+            Integer position = positions.get(path);
+            if (position != null) notifyItemChanged(position);
+        }
     }
 
     private boolean isDone(String path) { return applied.contains(path) || skipped.contains(path); }
@@ -134,6 +160,11 @@ public final class BatchRoundAdapter extends RecyclerView.Adapter<BatchRoundAdap
     @Override public void onBindViewHolder(@NonNull Holder holder, int position) {
         final MediaFile file = files.get(position);
         final String path = file == null ? "" : file.getPath();
+        ViewGroup.LayoutParams itemParams = holder.root.getLayoutParams();
+        if (itemParams != null && itemParams.height != cellHeight) {
+            itemParams.height = cellHeight;
+            holder.root.setLayoutParams(itemParams);
+        }
         boolean done = isDone(path);
         boolean isSelected = selected.contains(path);
         GradientDrawable background = new GradientDrawable();

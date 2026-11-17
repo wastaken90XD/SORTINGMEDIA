@@ -69,6 +69,7 @@ public final class SettingsExporter {
             "smart_pile_autoretire", "smart_pile_split_naming", "smart_active_pile",
             "compare_layout", "compare_question", "compare_randomize_sides", "compare_auto_apply",
             "compare_size_mode", "compare_button_height_dp", "compare_show_order_strip", "batch_size_mode",
+            "compare_tap_to_pick", "batch_apply_all_if_none", "mode_timing",
             "batch_last_scope", "batch_auto_advance", "batch_skip_to_back", "batch_include_tagged", "batch_show_inline_tags", "batch_commit_mode", "game_commit_mode",
             "compare_show_order_strip", "compare_size_mode", "compare_button_height_dp",
             "compare_recheck_every", "compare_sync_zoom", "compare_show_caption",
