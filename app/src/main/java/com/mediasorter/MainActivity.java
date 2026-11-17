@@ -4493,8 +4493,9 @@ public class MainActivity extends Activity
         image.setTag(video);
         image.setOnLongClickListener(new View.OnLongClickListener() {
             @Override public boolean onLongClick(View view) {
-                MediaFile current = view == compareLeftImage ? leftFileForCompare(view)
-                        : rightFileForCompare(view);
+                MediaFile current = view == compareLeftImage
+                        ? leftFileForCompare((ImageView) view)
+                        : rightFileForCompare((ImageView) view);
                 return startCompareVideo(current == null ? file : current, image, video);
             }
         });
