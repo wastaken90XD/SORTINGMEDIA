@@ -69,6 +69,16 @@ public class BatchRenameManager {
 
     // Undo stack (thread‑safe)
     private final Map<String, String> undoMap = new ConcurrentHashMap<>();
+    private final Map<String, String> lastPathChanges = new ConcurrentHashMap<>();
+    private final Map<String, String> lastUndoPathChanges = new ConcurrentHashMap<>();
+
+    public synchronized Map<String, String> getLastPathChanges() {
+        return new LinkedHashMap<String, String>(lastPathChanges);
+    }
+
+    public synchronized Map<String, String> getLastUndoPathChanges() {
+        return new LinkedHashMap<String, String>(lastUndoPathChanges);
+    }
 
     // ── Settings (existing) ──────────────────────────────────────────────────
     public void setSeparator(Separator s) { this.separator = s; }
@@ -186,6 +196,7 @@ public class BatchRenameManager {
     public RenameResult apply(List<RenamePreview> previews) {
         RenameResult result = new RenameResult();
         undoMap.clear();
+        synchronized (this) { lastPathChanges.clear(); }
 
         for (RenamePreview p : previews) {
             if (p.hasConflict) {
@@ -204,6 +215,7 @@ public class BatchRenameManager {
             try {
                 if (original.renameTo(renamed)) {
                     undoMap.put(renamed.getAbsolutePath(), p.originalPath);
+                    synchronized (this) { lastPathChanges.put(p.originalPath, renamed.getAbsolutePath()); }
                     result.succeeded++;
                 } else {
                     result.failed++;
@@ -221,6 +233,7 @@ public class BatchRenameManager {
 
     public RenameResult undo() {
         RenameResult result = new RenameResult();
+        synchronized (this) { lastUndoPathChanges.clear(); }
         if (undoMap.isEmpty()) return result;
 
         for (Map.Entry<String, String> entry : undoMap.entrySet()) {
@@ -234,6 +247,7 @@ public class BatchRenameManager {
             }
             try {
                 if (current.renameTo(original)) {
+                    synchronized (this) { lastUndoPathChanges.put(entry.getKey(), entry.getValue()); }
                     result.succeeded++;
                 } else {
                     result.failed++;

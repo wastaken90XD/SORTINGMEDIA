@@ -43,7 +43,9 @@ public class MoveAction extends Action {
             }
         }
         if (src.renameTo(destFile)) {
+            String oldPath = file.getPath();
             file.setPath(destFile.getAbsolutePath());
+            PathChangeNotifier.renamed(context, oldPath, file.getPath());
             log.add("Moved: " + src.getName() + " -> " + destFile.getParent());
             return true;
         } else {

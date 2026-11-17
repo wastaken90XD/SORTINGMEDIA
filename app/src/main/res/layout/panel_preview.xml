@@ -182,6 +182,16 @@
             android:textSize="9sp"
             android:layout_marginTop="2dp"/>
 
+        <TextView
+            android:id="@+id/flagState"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#E94560"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:visibility="gone"
+            android:layout_marginTop="2dp"/>
+
     </LinearLayout>
 
     <!-- Action bar — below file details -->
@@ -210,16 +220,6 @@
             android:textSize="10sp"
             android:textColor="#FFFFFF"
             android:backgroundTint="#AA6600"/>
-
-        <Button
-            android:id="@+id/btnDone"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:text="DONE"
-            android:textSize="10sp"
-            android:textColor="#FFFFFF"
-            android:backgroundTint="#226622"/>
 
         <Button
             android:id="@+id/btnPrev"

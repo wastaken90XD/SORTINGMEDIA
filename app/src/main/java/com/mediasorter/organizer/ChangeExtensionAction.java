@@ -45,7 +45,9 @@ public class ChangeExtensionAction extends Action {
             return false;
         }
         if (original.renameTo(renamed)) {
+            String oldPath = file.getPath();
             file.setPath(renamed.getAbsolutePath());
+            PathChangeNotifier.renamed(context, oldPath, file.getPath());
             log.add("Changed extension: " + name + " -> " + newName);
             return true;
         } else {

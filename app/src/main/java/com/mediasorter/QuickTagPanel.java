@@ -69,8 +69,8 @@ public class QuickTagPanel {
     public void setCurrentFile(MediaFile file, List<Tag> topTags,
                                 List<Tag> recentTags) {
         this.currentFile = file;
-        buildRow(row1, topTags,    "▲ ");
-        buildRow(row2, recentTags, "⟳ ");
+        buildRow(row1, topTags,    "Top ");
+        buildRow(row2, recentTags, "Recent ");
     }
 
     private void buildRow(LinearLayout row, List<Tag> tags, String prefix) {
@@ -94,11 +94,13 @@ public class QuickTagPanel {
         row.addView(label);
 
         for (Tag tag : tags) {
+            String tagName = TagText.plain(tag.getName());
+            if (tagName.isEmpty()) continue;
             boolean applied = currentFile != null
-                && currentFile.hasTag(tag.getName());
+                && currentFile.hasTag(tagName);
 
             Button btn = new Button(context);
-            btn.setText(tag.getName());
+            btn.setText(tagName);
             btn.setTextSize(10f);
             btn.setSingleLine(true);
             btn.setPadding(12, 0, 12, 0);
@@ -111,18 +113,20 @@ public class QuickTagPanel {
             lp.setMargins(3, 2, 3, 2);
             btn.setLayoutParams(lp);
 
-            btn.setOnClickListener(v -> {
-                if (currentFile == null) return;
-                boolean nowApplied = currentFile.hasTag(tag.getName());
-                if (listener != null) {
-                    listener.onTagToggled(tag.getName(), !nowApplied);
+            btn.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (currentFile == null) return;
+                    boolean nowApplied = currentFile.hasTag(tagName);
+                    if (listener != null) {
+                        listener.onTagToggled(tagName, !nowApplied);
+                    }
+                    // Update local file state immediately — fixes stale reference
+                    if (!nowApplied) currentFile.addTag(tagName);
+                    else             currentFile.removeTag(tagName);
+                    // Toggle visual
+                    btn.setBackgroundColor(!nowApplied ? 0xFFE94560 : 0xFF2A2A3E);
+                    btn.setTextColor(!nowApplied ? 0xFF121212 : 0xFFFFFFFF);
                 }
-                // Update local file state immediately — fixes stale reference
-                if (!nowApplied) currentFile.addTag(tag.getName());
-                else             currentFile.removeTag(tag.getName());
-                // Toggle visual
-                btn.setBackgroundColor(!nowApplied ? 0xFFE94560 : 0xFF2A2A3E);
-                btn.setTextColor(!nowApplied ? 0xFF121212 : 0xFFFFFFFF);
             });
 
             row.addView(btn);

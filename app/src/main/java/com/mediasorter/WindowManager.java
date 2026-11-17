@@ -30,6 +30,10 @@ public class WindowManager {
         synchronized (lock) { return windowSize; }
     }
 
+    public int getWindowStart() {
+        synchronized (lock) { return windowStart; }
+    }
+
     public void setFullIndex(List<MediaFile> index) {
         synchronized (lock) {
             this.fullIndex   = index;
@@ -52,6 +56,23 @@ public class WindowManager {
             // Callers must not mutate the list; individual MediaFile objects
             // are still mutable (tags, path, etc.) which is what we want.
             return Collections.unmodifiableList(fullIndex.subList(start, end));
+        }
+    }
+
+    /** Safe copy for callers that may outlive a window update. */
+    public List<MediaFile> getWindowSnapshot() {
+        synchronized (lock) {
+            if (fullIndex.isEmpty()) return new ArrayList<>();
+            int start = Math.max(0, windowStart);
+            int end = Math.min(fullIndex.size(), start + windowSize);
+            return new ArrayList<>(fullIndex.subList(start, end));
+        }
+    }
+
+    /** Safe copy of the complete indexed list. */
+    public List<MediaFile> getFullIndexSnapshot() {
+        synchronized (lock) {
+            return new ArrayList<>(fullIndex);
         }
     }
 

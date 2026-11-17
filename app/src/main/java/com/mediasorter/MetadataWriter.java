@@ -53,10 +53,14 @@ public class MetadataWriter {
     private static byte[] buildXmp(List<String> tags) {
         StringBuilder xmp = new StringBuilder();
         xmp.append(XMP_HEADER);
-        for (String tag : tags) {
-            xmp.append("<rdf:li>")
-               .append(escapeXml(tag))
-               .append("</rdf:li>\n");
+        if (tags != null) {
+            for (String tag : tags) {
+                String plain = TagText.plain(tag);
+                if (plain.isEmpty()) continue;
+                xmp.append("<rdf:li>")
+                   .append(escapeXml(plain))
+                   .append("</rdf:li>\n");
+            }
         }
         xmp.append(XMP_FOOTER);
         return xmp.toString().getBytes(StandardCharsets.UTF_8);
@@ -83,11 +87,26 @@ public class MetadataWriter {
         // ".JPEG" on Turkish/Azeri devices ('I' -> dotless 'ı').
         String lower = filePath.toLowerCase(java.util.Locale.US);
         if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
-            return transform(file, (in, out, buf) -> writeJpegStream(in, out, buf, tags));
+            return transform(file, new StreamTransform() {
+                @Override public void run(InputStream in, OutputStream out, byte[] buf)
+                        throws IOException {
+                    writeJpegStream(in, out, buf, tags);
+                }
+            });
         } else if (lower.endsWith(".png")) {
-            return transform(file, (in, out, buf) -> writePngStream(in, out, buf, tags));
+            return transform(file, new StreamTransform() {
+                @Override public void run(InputStream in, OutputStream out, byte[] buf)
+                        throws IOException {
+                    writePngStream(in, out, buf, tags);
+                }
+            });
         } else if (lower.endsWith(".mp4") || lower.endsWith(".mov")) {
-            return transform(file, (in, out, buf) -> writeMp4Stream(in, out, buf, tags));
+            return transform(file, new StreamTransform() {
+                @Override public void run(InputStream in, OutputStream out, byte[] buf)
+                        throws IOException {
+                    writeMp4Stream(in, out, buf, tags);
+                }
+            });
         }
 
         Log.w(TAG, "Unsupported format: " + filePath);
@@ -125,17 +144,26 @@ public class MetadataWriter {
             return false;
         }
 
-        // Swap: original -> backup name, temp -> original. Keep it simple and
-        // safe on the same directory (renameTo is atomic within one mount).
-        if (!file.delete()) {
-            Log.e(TAG, "Could not delete original before swap: " + file.getAbsolutePath());
+        // Swap through a same-directory backup. The old file remains available
+        // until the complete temp file has been moved into its place.
+        File backup = new File(file.getParentFile(), file.getName() + ".tags.bak");
+        if (backup.exists() && !backup.delete()) {
+            tmp.delete();
+            return false;
+        }
+        if (!file.renameTo(backup)) {
+            Log.e(TAG, "Could not stage original before swap: " + file.getAbsolutePath());
             tmp.delete();
             return false;
         }
         if (!tmp.renameTo(file)) {
             Log.e(TAG, "Rename of temp file failed: " + tmp.getAbsolutePath());
+            backup.renameTo(file);
             tmp.delete();
             return false;
+        }
+        if (backup.exists() && !backup.delete()) {
+            Log.w(TAG, "Could not remove metadata backup: " + backup.getAbsolutePath());
         }
         return true;
     }

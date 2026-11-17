@@ -15,5 +15,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MediaSorter"
+rootProject.name = "Magnus"
 include ':app'

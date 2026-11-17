@@ -112,6 +112,14 @@ public class RuleSerializer {
                             for (int k = 0; k < remArr.length(); k++) remTags.add(remArr.getString(k));
                         }
                         r.action = new TagAction(addTags, remTags);
+                    } else if ("REPLACE_TAGS".equals(aType)) {
+                        JSONArray tagsArr = aObj.optJSONArray("replacementTags");
+                        List<String> replacement = new ArrayList<String>();
+                        if (tagsArr != null) for (int k = 0; k < tagsArr.length(); k++) {
+                            replacement.add(tagsArr.getString(k));
+                        }
+                        r.action = new ReplaceTagsAction(replacement,
+                                aObj.optString("sequenceRule", "whole_group"));
                     } else if ("STATUS".equals(aType)) {
                         String statusStr = aObj.optString("status", "NONE");
                         com.mediasorter.FileStatus.Status status = com.mediasorter.FileStatus.Status.NONE;
@@ -237,6 +245,13 @@ public class RuleSerializer {
                     }
                     aObj.put("tagsToAdd", addArr);
                     aObj.put("tagsToRemove", remArr);
+                } else if (r.action instanceof ReplaceTagsAction) {
+                    ReplaceTagsAction ra = (ReplaceTagsAction) r.action;
+                    aObj.put("actionType", "REPLACE_TAGS");
+                    JSONArray replacement = new JSONArray();
+                    for (String tag : ra.replacementTags) replacement.put(tag);
+                    aObj.put("replacementTags", replacement);
+                    aObj.put("sequenceRule", ra.sequenceRule);
                 } else if (r.action instanceof StatusAction) {
                     StatusAction sa = (StatusAction) r.action;
                     aObj.put("actionType", "STATUS");
@@ -305,6 +320,13 @@ public class RuleSerializer {
             }
             aObj.put("tagsToAdd", addArr);
             aObj.put("tagsToRemove", remArr);
+        } else if (action instanceof ReplaceTagsAction) {
+            ReplaceTagsAction ra = (ReplaceTagsAction) action;
+            aObj.put("actionType", "REPLACE_TAGS");
+            JSONArray replacement = new JSONArray();
+            for (String tag : ra.replacementTags) replacement.put(tag);
+            aObj.put("replacementTags", replacement);
+            aObj.put("sequenceRule", ra.sequenceRule);
         } else if (action instanceof StatusAction) {
             StatusAction sa = (StatusAction) action;
             aObj.put("actionType", "STATUS");
@@ -384,6 +406,14 @@ public class RuleSerializer {
                 for (int k = 0; k < remArr.length(); k++) remTags.add(remArr.getString(k));
             }
             return new TagAction(addTags, remTags);
+        } else if ("REPLACE_TAGS".equals(aType)) {
+            JSONArray tagsArr = aObj.optJSONArray("replacementTags");
+            List<String> replacement = new ArrayList<String>();
+            if (tagsArr != null) for (int k = 0; k < tagsArr.length(); k++) {
+                replacement.add(tagsArr.getString(k));
+            }
+            return new ReplaceTagsAction(replacement,
+                    aObj.optString("sequenceRule", "whole_group"));
         } else if ("STATUS".equals(aType)) {
             String statusStr = aObj.optString("status", "NONE");
             com.mediasorter.FileStatus.Status status = com.mediasorter.FileStatus.Status.NONE;
